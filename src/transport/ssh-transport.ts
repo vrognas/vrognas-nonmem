@@ -13,6 +13,8 @@
 // evaluated by the remote sshd, so callers must escape user input before
 // composing commands.
 import { spawn } from 'child_process';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import { promisify } from 'util';
 import { execFile as execFileCb } from 'child_process';
 import { TransportError, type CommandResult, type Transport } from './types';
@@ -159,6 +161,9 @@ export class SshTransport implements Transport {
         `no Host block matched alias "${this.alias}" in ~/.ssh/config — ssh -G echoed it as the hostname.`,
       );
     }
+    // scp won't create missing local parent dirs; mkdir before invoking it
+    // so callers don't have to. Mirrors LocalTransport.getFile semantics.
+    await fs.mkdir(path.dirname(localPath), { recursive: true });
     await runScp(buildScpGetArgs(this.alias, remotePath, localPath), resolved.hostname);
   }
 }

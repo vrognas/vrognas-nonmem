@@ -5,6 +5,14 @@ All notable changes documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `fix: SshTransport.getFile` now mkdir's the local parent dir before invoking scp.
+  scp doesn't auto-create destinations and would fail with `open local "...": No such
+  file or directory` whenever the workspace's `.positron-nonmem/runs/<runId>/` didn't
+  already exist. Mirrors LocalTransport.getFile semantics. Also documented scp's
+  banner-on-stderr quirk in `docs/empirical-notes.md`.
+
 ### Added
 
 - `feat: positronNonmem.runModel` command (M3 chunk 3A) — sftp `.mod` (and `$DATA`-referenced

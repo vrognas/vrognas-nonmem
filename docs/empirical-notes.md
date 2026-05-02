@@ -131,3 +131,49 @@ see this; only developers will. If we ever support session reattachment (M3+), w
 need a Transport implementation that persists a remote helper process across reloads
 and reconnects on activate().
 
+---
+
+## scp inherits the SSH banner *and* requires the local parent dir to exist
+
+**Expectation.** scp is a thin wrapper around ssh, so it uses the same auth path —
+but its local-write behaviour should be plain POSIX semantics (open(2) on the
+destination), and its stderr should be diagnostic-only.
+
+**Probe.** Live test 2026-05-03: `positronNonmem.runModel` against the canonical
+minimal probe (`$PROBLEM/$INPUT/$DATA d.csv IGNORE=@/$PRED/.../$ESTIMATION MAXEVAL=0`)
+on Windows-host Positron + Linux NONMEM host. Pipeline ran fine through `mkdir -p`,
+both putFile uploads, and the remote `nmfe76` invocation. The final `scp <alias>:m.lst
+<localDest>` failed with:
+
+```
+Host key fingerprint is SHA256:<hash>
++--[ED25519 256]--+
+| ... ASCII randomart ... |
++----[SHA256]-----+
+scp: open local "c:/.../.positron-nonmem/runs/pn-1777759878535/m.lst": No such file or directory
+```
+
+Two findings bundled here:
+
+1. **scp emits the same SSH banner that `ssh` does.** Same root cause as the
+   server-banner entry above (sshd `Banner` directive or `/etc/ssh/sshrc`
+   sourcing on every login chain). scp's stderr therefore contains both the
+   randomart noise *and* any real diagnostic. Our scrubber must keep applying.
+
+2. **scp does NOT auto-create the local destination's parent directory.** Unlike
+   `cp -r --parents` or rsync, plain scp calls `open(localPath, O_WRONLY|O_CREAT)`
+   and the open fails if the parent directory is missing. `LocalTransport.getFile`
+   already did `fs.mkdir(parent, { recursive: true })`; `SshTransport.getFile`
+   originally did not. Inconsistency caused this failure.
+
+**How to apply.**
+
+- `SshTransport.getFile` now mkdir's the local parent before invoking scp
+  (mirrors LocalTransport.getFile, gives both transports a uniform contract).
+- Banner on scp stderr is acceptable noise for now; the scrubber is in place.
+  When/if we add live-tail (M3+ in the design plan), tailmux already runs the
+  command in a non-login bash that won't source `sshrc`, sidestepping the banner
+  for streamed output.
+
+Verified 2026-05-03 against NONMEM 7.6.0 on Linux via the runModel command path.
+
