@@ -1,9 +1,9 @@
-// runModel — M3 chunks 3A + 3B: end-to-end NONMEM run orchestration.
+// runModel — M3 chunks 3A + 3B + 3C: end-to-end NONMEM run orchestration.
 //
 // Pipeline (matches the per-run subdir discipline from nonmem-ssh-probe and
 // the §4 M2 spec in the design plan):
 //
-//   1. Generate runId = `pn-<unix-ts>`.
+//   1. Generate runId = `pn-<unix-ts>`; record `started` timestamp.
 //   2. mkdir -p <remoteRoot>/<runId>.
 //   3. putFile <local m.mod> -> <remoteRoot>/<runId>/m.mod.
 //   4. If $DATA <token> present, putFile <local dataset> -> <remoteRoot>/<runId>/<basename>.
@@ -12,14 +12,17 @@
 //      remote process exit code (the transport fires-and-forgets a single
 //      shell line; we cannot get $? out of it any other way).
 //   6. Parse `EXIT=N` from stdout.
-//   7. getFile m.lst + m.ext back to <localRunsDir>/<runId>/.
+//   7. getFile m.lst (mandatory) + m.ext (best-effort) back to <localRunsDir>/<runId>/.
 //   8. Parse OFV from m.lst's `#OBJV:` banner line.
+//   9. Record `completed`; write manifest.json + append audit.jsonl
+//      (Improve-style provenance — datasetHash, modelHash, hostAlias, etc.).
 //
-// Out of scope: manifest.json, audit.jsonl, dataset-path rewrite when $DATA
-// points outside the .mod's directory, Variables-pane comm, retry/cancel,
-// line-ending normalisation. Those land in chunks 3C–3D and milestone M5+.
+// Out of scope: dataset-path rewrite when $DATA points outside the .mod's
+// directory, Variables-pane comm, retry/cancel, line-ending normalisation.
+// Those land in chunk 3D and milestone M5+.
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { appendAudit, sha256File, writeManifest, type RunManifest } from './manifest';
 import type { Transport } from '../transport';
 
 export interface RunModelOptions {
@@ -33,6 +36,12 @@ export interface RunModelOptions {
   localRunsDir: string;
   /** Path to nmfe76 on the remote host. */
   nmfeBinary: string;
+  /** ~/.ssh/config alias of the host this run targets — recorded in manifest. */
+  hostAlias: string;
+  /** NONMEM version string for manifest provenance. */
+  nonmemVersion: string;
+  /** Workspace-rooted append-only audit log, e.g. `<workspace>/.positron-nonmem/audit.jsonl`. */
+  auditLogPath: string;
 }
 
 export interface RunModelResult {
@@ -50,6 +59,8 @@ export interface RunModelResult {
   extPath: string | null;
   /** Objective Function Value parsed from m.lst's `#OBJV:` line, or null. */
   ofv: number | null;
+  /** Local path to the manifest.json written for this run. */
+  manifestPath: string;
 }
 
 /**
@@ -85,7 +96,16 @@ export function parseOfv(lstText: string): number | null {
 }
 
 export async function runModel(opts: RunModelOptions): Promise<RunModelResult> {
-  const { modelPath, transport, remoteRoot, localRunsDir, nmfeBinary } = opts;
+  const {
+    modelPath,
+    transport,
+    remoteRoot,
+    localRunsDir,
+    nmfeBinary,
+    hostAlias,
+    nonmemVersion,
+    auditLogPath,
+  } = opts;
 
   // Validate inputs BEFORE any remote side-effects.
   let modelText: string;
@@ -99,6 +119,7 @@ export async function runModel(opts: RunModelOptions): Promise<RunModelResult> {
   }
 
   const runId = `pn-${Date.now()}`;
+  const started = new Date().toISOString();
   const remoteRunDir = `${remoteRoot}/${runId}`;
   const localRunDir = path.join(localRunsDir, runId);
 
@@ -107,8 +128,9 @@ export async function runModel(opts: RunModelOptions): Promise<RunModelResult> {
   await transport.putFile(modelPath, `${remoteRunDir}/m.mod`);
 
   const dataToken = parseDataFilename(modelText);
+  let datasetLocal: string | null = null;
   if (dataToken) {
-    const datasetLocal = path.resolve(path.dirname(modelPath), dataToken);
+    datasetLocal = path.resolve(path.dirname(modelPath), dataToken);
     const remoteDatasetName = path.basename(dataToken);
     await transport.putFile(datasetLocal, `${remoteRunDir}/${remoteDatasetName}`);
   }
@@ -125,7 +147,7 @@ export async function runModel(opts: RunModelOptions): Promise<RunModelResult> {
   // m.ext is best-effort — NMTRAN-only failures never write it, in which
   // case scp exits non-zero. Tolerate that so the user still sees the
   // EXIT code + m.lst path in the toast (m.lst is where the error message
-  // lives). FMSG arrives in 3C+.
+  // lives). FMSG arrives later.
   const extPath = await tryGetFile(
     transport,
     `${remoteRunDir}/m.ext`,
@@ -133,7 +155,24 @@ export async function runModel(opts: RunModelOptions): Promise<RunModelResult> {
   );
 
   const ofv = await readAndParseOfv(lstPath);
-  return { runId, exitCode, lstPath, extPath, ofv };
+
+  // Provenance — write manifest.json next to outputs, append one audit line.
+  const manifest: RunManifest = {
+    runId,
+    started,
+    completed: new Date().toISOString(),
+    exitCode,
+    ofv,
+    modelHash: await sha256File(modelPath),
+    datasetHash: datasetLocal ? await sha256File(datasetLocal) : null,
+    nmfeBinary,
+    nonmemVersion,
+    hostAlias,
+  };
+  const manifestPath = await writeManifest(localRunDir, manifest);
+  await appendAudit(auditLogPath, manifest);
+
+  return { runId, exitCode, lstPath, extPath, ofv, manifestPath };
 }
 
 /** getFile, but return null instead of throwing if the remote file is absent. */

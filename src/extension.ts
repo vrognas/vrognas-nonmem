@@ -2,12 +2,14 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import {
   COMMAND,
+  LOCAL_AUDIT_FILE,
   LOCAL_RUNS_SUBDIR,
   NMFE_BINARY,
+  NONMEM_VERSION,
   OUTPUT_CHANNEL_NAME,
   REMOTE_RUN_ROOT,
 } from './constants';
-import { resolveHostProfile, HostProfileError } from './host-profiles';
+import { resolveHostProfile, HostProfileError, type HostProfile } from './host-profiles';
 import { getPositron, PositronApiUnavailableError } from './positron-api';
 import { NonmemRuntimeManager } from './runtime/runtime-manager';
 import { runModel } from './runtime/run-model';
@@ -72,9 +74,11 @@ async function runCurrentModel(): Promise<void> {
   if (!target) return;
   const { modelPath, workspaceFolder } = target;
 
+  let profile: HostProfile;
   let transport: Transport;
   try {
-    transport = await pickTransport(resolveHostProfile());
+    profile = resolveHostProfile();
+    transport = await pickTransport(profile);
   } catch (e) {
     if (e instanceof HostProfileError) {
       await vscode.window.showErrorMessage(`Positron NONMEM: ${e.message}`);
@@ -84,6 +88,7 @@ async function runCurrentModel(): Promise<void> {
   }
 
   const localRunsDir = path.join(workspaceFolder.uri.fsPath, LOCAL_RUNS_SUBDIR);
+  const auditLogPath = path.join(workspaceFolder.uri.fsPath, LOCAL_AUDIT_FILE);
   log(`runModel: launching for ${modelPath}`);
   try {
     const result = await runModel({
@@ -92,6 +97,9 @@ async function runCurrentModel(): Promise<void> {
       remoteRoot: REMOTE_RUN_ROOT,
       localRunsDir,
       nmfeBinary: NMFE_BINARY,
+      hostAlias: profile.alias,
+      nonmemVersion: NONMEM_VERSION,
+      auditLogPath,
     });
     const exit = result.exitCode ?? 'unknown';
     const ofv = result.ofv !== null ? `, OFV=${result.ofv}` : '';

@@ -7,6 +7,14 @@ All notable changes documented here. Format follows
 
 ### Added
 
+- `feat: per-run manifest.json + workspace audit.jsonl` (M3 chunk 3C).
+  Each run writes `<workspace>/.positron-nonmem/runs/<runId>/manifest.json`
+  with `{runId, started, completed, exitCode, ofv, modelHash, datasetHash,
+  nmfeBinary, nonmemVersion, hostAlias, parentRunId?}`, and appends one
+  JSON line per run to `<workspace>/.positron-nonmem/audit.jsonl`. Hashes
+  are sha256 of the uploaded files. Privacy: only the alias is recorded
+  — never the resolved hostname.
+
 - `feat: parse OFV from m.lst, pull m.ext` (M3 chunk 3B). `runModel` now
   also downloads `m.ext` (parameter trajectory; sets up future Variables-pane
   wiring) and parses the OFV from `m.lst`'s `#OBJV:` banner line. Toast now

@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { runModel, parseDataFilename, parseOfv } from '../../src/runtime/run-model';
+import {
+  runModel,
+  parseDataFilename,
+  parseOfv,
+  type RunModelOptions,
+} from '../../src/runtime/run-model';
 import type { CommandResult, Transport } from '../../src/transport/types';
 
 // ----- Test fixtures: tiny FakeTransport that records all calls and lets
@@ -128,6 +133,21 @@ describe('runModel — orchestrator (unit, with FakeTransport)', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
+  /** Build RunModelOptions with sensible test defaults, override what each test cares about. */
+  function makeOptions(
+    overrides: { modelPath: string; transport: Transport } & Partial<RunModelOptions>,
+  ): RunModelOptions {
+    return {
+      remoteRoot: '~/positron-nonmem',
+      localRunsDir: path.join(tmp, 'runs'),
+      nmfeBinary: '/opt/nm760/run/nmfe76',
+      hostAlias: 'test-alias',
+      nonmemVersion: '7.6.0',
+      auditLogPath: path.join(tmp, 'audit.jsonl'),
+      ...overrides,
+    };
+  }
+
   it('uploads model + dataset, runs nmfe76, pulls m.lst + m.ext, parses OFV', async () => {
     const modelPath = path.join(tmp, 'm.mod');
     const datasetPath = path.join(tmp, 'd');
@@ -146,13 +166,7 @@ describe('runModel — orchestrator (unit, with FakeTransport)', () => {
       ' #OBJS:************************        N/A         ************************\n';
     transport.remoteFileFn = (p) => (p.endsWith('/m.lst') ? lstSnippet : undefined);
 
-    const result = await runModel({
-      modelPath,
-      transport,
-      remoteRoot: '~/positron-nonmem',
-      localRunsDir,
-      nmfeBinary: '/opt/nm760/run/nmfe76',
-    });
+    const result = await runModel(makeOptions({ modelPath, transport, localRunsDir }));
 
     expect(transport.runs.length).toBe(2);
     expect(transport.runs[0]).toContain('mkdir -p');
@@ -184,6 +198,24 @@ describe('runModel — orchestrator (unit, with FakeTransport)', () => {
     expect(result.lstPath).toBe(path.join(localRunsDir, result.runId, 'm.lst'));
     expect(result.extPath).toBe(path.join(localRunsDir, result.runId, 'm.ext'));
     expect(result.ofv).toBeCloseTo(-20.5421, 4);
+
+    // 3C: manifest written + audit appended.
+    expect(result.manifestPath).toBe(path.join(localRunsDir, result.runId, 'manifest.json'));
+    const manifest = JSON.parse(fs.readFileSync(result.manifestPath, 'utf8'));
+    expect(manifest.runId).toBe(result.runId);
+    expect(manifest.exitCode).toBe(0);
+    expect(manifest.ofv).toBeCloseTo(-20.5421, 4);
+    expect(manifest.hostAlias).toBe('test-alias');
+    expect(manifest.nmfeBinary).toBe('/opt/nm760/run/nmfe76');
+    expect(manifest.nonmemVersion).toBe('7.6.0');
+    expect(manifest.modelHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(manifest.datasetHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(manifest.started).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(manifest.completed).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+
+    const auditLines = fs.readFileSync(path.join(tmp, 'audit.jsonl'), 'utf8').trimEnd().split('\n');
+    expect(auditLines).toHaveLength(1);
+    expect(JSON.parse(auditLines[0]).runId).toBe(result.runId);
   });
 
   it('parses non-zero EXIT from nmfe76 stdout', async () => {
@@ -198,13 +230,7 @@ describe('runModel — orchestrator (unit, with FakeTransport)', () => {
       stderr: '',
     });
 
-    const result = await runModel({
-      modelPath,
-      transport,
-      remoteRoot: '~/positron-nonmem',
-      localRunsDir: path.join(tmp, 'runs'),
-      nmfeBinary: '/opt/nm760/run/nmfe76',
-    });
+    const result = await runModel(makeOptions({ modelPath, transport }));
 
     expect(result.exitCode).toBe(42);
   });
@@ -223,13 +249,7 @@ describe('runModel — orchestrator (unit, with FakeTransport)', () => {
     transport.getErrorFn = (p) =>
       p.endsWith('/m.ext') ? new Error('scp exited 1: No such file or directory') : undefined;
 
-    const result = await runModel({
-      modelPath,
-      transport,
-      remoteRoot: '~/positron-nonmem',
-      localRunsDir: path.join(tmp, 'runs'),
-      nmfeBinary: '/opt/nm760/run/nmfe76',
-    });
+    const result = await runModel(makeOptions({ modelPath, transport }));
 
     expect(result.extPath).toBeNull();
     expect(result.lstPath).toContain('m.lst');
@@ -241,13 +261,7 @@ describe('runModel — orchestrator (unit, with FakeTransport)', () => {
   it('throws if .mod file does not exist', async () => {
     const transport = new FakeTransport();
     await expect(
-      runModel({
-        modelPath: path.join(tmp, 'does-not-exist.mod'),
-        transport,
-        remoteRoot: '~/positron-nonmem',
-        localRunsDir: path.join(tmp, 'runs'),
-        nmfeBinary: '/opt/nm760/run/nmfe76',
-      }),
+      runModel(makeOptions({ modelPath: path.join(tmp, 'does-not-exist.mod'), transport })),
     ).rejects.toThrow(/model file not found/i);
     // No remote calls should have been made.
     expect(transport.runs).toEqual([]);

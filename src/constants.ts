@@ -25,5 +25,11 @@ export const REMOTE_RUN_ROOT = '~/positron-nonmem';
 /** Workspace-relative dir for the local mirror of run outputs. */
 export const LOCAL_RUNS_SUBDIR = '.positron-nonmem/runs';
 
+/** Workspace-relative path of the append-only audit log (one line per run). */
+export const LOCAL_AUDIT_FILE = '.positron-nonmem/audit.jsonl';
+
 /** Path to nmfe76 on the host (NONMEM 7.6.0). Hard-coded for chunk 3A; settings-driven post-3D. */
 export const NMFE_BINARY = '/opt/nm760/run/nmfe76';
+
+/** NONMEM version string recorded in manifest.json; matches runtime-metadata. */
+export const NONMEM_VERSION = '7.6.0';
