@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { __testing } from '../src/ssh-transport';
+import { __testing } from '../../src/transport/ssh-transport';
 
 const { scrubHostname } = __testing;
 
@@ -24,7 +24,6 @@ describe('scrubHostname', () => {
   });
 
   it('does not redact substrings that happen to look like the host', () => {
-    // Exact substring match — no word-boundary check. Documented behaviour.
     expect(scrubHostname('ahosting service', 'host')).toBe('a<host>ing service');
   });
 });

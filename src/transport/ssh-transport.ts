@@ -11,27 +11,19 @@
 // Note for hooks: `spawn` is the safer alternative to `exec`; we never
 // pass user-controlled strings to a shell. The remote command IS shell-
 // evaluated by the remote sshd, so callers must escape user input before
-// composing commands. This module hard-codes its M1 probe ("uname -a").
+// composing commands.
 import { spawn } from 'child_process';
 import { promisify } from 'util';
 import { execFile as execFileCb } from 'child_process';
+import { TransportError, type CommandResult, type Transport } from './types';
 
 const execFile = promisify(execFileCb);
 
-export class SshTransportError extends Error {
-  constructor(
-    message: string,
-    public readonly cause?: unknown,
-  ) {
-    super(message);
+export class SshTransportError extends TransportError {
+  constructor(message: string, cause?: unknown) {
+    super(message, cause);
     this.name = 'SshTransportError';
   }
-}
-
-export interface CommandResult {
-  code: number | null;
-  stdout: string;
-  stderr: string;
 }
 
 /**
@@ -83,58 +75,61 @@ export function scrubHostname(message: string, secret: string): string {
   return message.split(secret).join('<host>');
 }
 
-export async function connectAndRun(alias: string, command: string): Promise<CommandResult> {
-  const resolved = await resolveAlias(alias);
-  if (resolved.unmatched) {
-    throw new SshTransportError(
-      `no Host block matched alias "${alias}" in ~/.ssh/config — ssh -G echoed it as the hostname. Add a Host entry or change positronNonmem.host.alias.`,
-    );
+export class SshTransport implements Transport {
+  readonly kind = 'ssh' as const;
+
+  constructor(private readonly alias: string) {}
+
+  async run(command: string): Promise<CommandResult> {
+    const resolved = await resolveAlias(this.alias);
+    if (resolved.unmatched) {
+      throw new SshTransportError(
+        `no Host block matched alias "${this.alias}" in ~/.ssh/config — ssh -G echoed it as the hostname. Add a Host entry or change positronNonmem.host.alias.`,
+      );
+    }
+
+    return new Promise<CommandResult>((resolve, reject) => {
+      // BatchMode=yes prevents ssh from prompting for passwords or
+      // unknown-host confirmation; either we have agent / key auth set up
+      // or we fail fast with a clean stderr message.
+      const child = spawn('ssh', ['-o', 'BatchMode=yes', this.alias, command], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (data: Buffer) => {
+        stdout += data.toString('utf8');
+      });
+      child.stderr.on('data', (data: Buffer) => {
+        stderr += data.toString('utf8');
+      });
+      child.once('error', (err) => {
+        reject(
+          new SshTransportError(
+            `failed to spawn ssh: ${err.message}. Is the OpenSSH client installed and on PATH?`,
+            err,
+          ),
+        );
+      });
+      child.once('close', (code) => {
+        if (code === 0) {
+          resolve({ code, stdout, stderr });
+          return;
+        }
+        const scrubbed = scrubHostname(
+          stderr.trim() || stdout.trim() || '(no output)',
+          resolved.hostname,
+        );
+        if (code === 255) {
+          reject(new SshTransportError(`ssh transport failed: ${scrubbed}`));
+          return;
+        }
+        resolve({ code, stdout, stderr: scrubHostname(stderr, resolved.hostname) });
+      });
+    });
   }
-
-  return new Promise<CommandResult>((resolve, reject) => {
-    // BatchMode=yes prevents ssh from prompting for passwords or
-    // unknown-host confirmation; either we have agent / key auth set up
-    // or we fail fast with a clean stderr message.
-    const child = spawn('ssh', ['-o', 'BatchMode=yes', alias, command], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      windowsHide: true,
-    });
-
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (data: Buffer) => {
-      stdout += data.toString('utf8');
-    });
-    child.stderr.on('data', (data: Buffer) => {
-      stderr += data.toString('utf8');
-    });
-    child.once('error', (err) => {
-      reject(
-        new SshTransportError(
-          `failed to spawn ssh: ${err.message}. Is the OpenSSH client installed and on PATH?`,
-          err,
-        ),
-      );
-    });
-    child.once('close', (code) => {
-      if (code === 0) {
-        resolve({ code, stdout, stderr });
-        return;
-      }
-      // ssh's own exit code 255 = transport failure; any other non-zero
-      // is the remote command's exit code. Surface stderr in both cases,
-      // scrubbed.
-      const scrubbed = scrubHostname(
-        stderr.trim() || stdout.trim() || '(no output)',
-        resolved.hostname,
-      );
-      if (code === 255) {
-        reject(new SshTransportError(`ssh transport failed: ${scrubbed}`));
-        return;
-      }
-      resolve({ code, stdout, stderr: scrubHostname(stderr, resolved.hostname) });
-    });
-  });
 }
 
 // Exported for unit tests; not part of the runtime API.

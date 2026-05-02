@@ -15,4 +15,5 @@ export const COMMAND = {
 
 export const HOST_DEFAULTS = {
   alias: 'primary',
+  transport: 'auto',
 } as const;

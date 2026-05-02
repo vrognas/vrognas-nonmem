@@ -35,6 +35,17 @@
           "type": "string",
           "default": "primary",
           "description": "Name of a Host entry in your ~/.ssh/config. The extension shells out to the system ssh client, so HostName, User, Port, IdentityFile, ProxyJump, ControlMaster, etc. are all resolved from your existing OpenSSH configuration. The alias also appears in the Output channel as the privacy-preserving prefix."
+        },
+        "positronNonmem.host.transport": {
+          "type": "string",
+          "enum": ["auto", "ssh", "local"],
+          "default": "auto",
+          "enumDescriptions": [
+            "Detect: compare os.hostname() with `ssh -G <alias>` HostName; use local if they match, ssh otherwise.",
+            "Always shell out to ssh, even when running on the host itself.",
+            "Always run commands locally (use when Positron is in Remote SSH mode against the NONMEM host)."
+          ],
+          "description": "How the extension reaches the NONMEM host. Default 'auto' picks 'local' if the extension host is already on the configured machine (typical when using Positron's Remote SSH), otherwise 'ssh'."
         }
       }
     }

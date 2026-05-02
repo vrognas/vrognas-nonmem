@@ -5,6 +5,12 @@
 // come from your ~/.ssh/config. The extension shells out to the system ssh
 // client, so whatever `ssh <alias>` does in your terminal, the extension
 // will do too.
+//
+// `transport` defaults to "auto", which compares your local hostname with
+// the HostName resolved by `ssh -G <alias>` and runs commands locally if
+// they match (typical when Positron is in Remote SSH mode against the
+// NONMEM host). Override to "ssh" or "local" if auto-detect picks wrong.
 {
-  "positronNonmem.host.alias": "primary"
+  "positronNonmem.host.alias": "primary",
+  "positronNonmem.host.transport": "auto"
 }

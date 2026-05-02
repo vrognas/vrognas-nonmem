@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { COMMAND, OUTPUT_CHANNEL_NAME } from './constants';
 import { resolveHostProfile, HostProfileError, type HostProfile } from './host-profiles';
-import { connectAndRun, SshTransportError } from './ssh-transport';
+import { pickTransport, TransportError } from './transport';
 import { Logger } from './logger';
 import { getPositron, PositronApiUnavailableError } from './positron-api';
 import { NonmemRuntimeManager } from './runtime/runtime-manager';
@@ -85,9 +85,10 @@ async function resolveProfileOrReport(
 }
 
 async function runUnameProbe(profile: HostProfile, log: Logger): Promise<void> {
-  log.info('connecting via ssh CLI...');
   try {
-    const result = await connectAndRun(profile.alias, 'uname -a');
+    const transport = await pickTransport(profile);
+    log.info(`connecting via ${transport.kind} transport...`);
+    const result = await transport.run('uname -a');
     log.info(`connected. uname: ${result.stdout.trim()}`);
     if (result.stderr.trim()) {
       log.info(`stderr: ${result.stderr.trim()}`);
@@ -97,7 +98,7 @@ async function runUnameProbe(profile: HostProfile, log: Logger): Promise<void> {
     }
     await log.successToast('connected.');
   } catch (e) {
-    if (e instanceof SshTransportError) {
+    if (e instanceof TransportError) {
       await log.errorToast(e.message);
       return;
     }
