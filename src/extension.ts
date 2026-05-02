@@ -69,9 +69,11 @@ async function testConnection(): Promise<void> {
   try {
     await positron.runtime.executeCode('nmtran', 'uname -a', true /* focus the Console */);
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    await vscode.window.showErrorMessage(
-      `Could not run NONMEM probe: ${message}. Start a NONMEM session from the runtime picker first.`,
-    );
+    // Anything that goes wrong during the run (transport errors, non-zero
+    // exit, no active session) is already shown in the Console pane via the
+    // session's emitError / emitStream — no toast on top of that. We log
+    // for diagnostic purposes only; Positron's own error string is opaque
+    // (sometimes a bare object) so we don't try to format it for users.
+    console.warn('[positron-nonmem] testConnection: executeCode rejected', e);
   }
 }
