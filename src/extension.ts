@@ -61,13 +61,15 @@ function registerRuntime(context: vscode.ExtensionContext, channel: vscode.Outpu
 }
 
 /**
- * "Run Current Model" command (M3 chunk 3A) — sftp the active editor's
- * `.mod` (and any `$DATA`-referenced dataset sibling), invoke nmfe76 in
- * a per-run remote subdir, pull `m.lst` back to the workspace's local
- * mirror, surface EXIT code in an info-message.
+ * "Run Current Model" command (M3 chunks 3A–3C) — uploads the active
+ * `.mod` (plus any `$DATA`-referenced dataset sibling) to a per-run
+ * remote subdir, runs nmfe76, pulls m.lst (mandatory) and m.ext
+ * (best-effort) back to `<workspace>/.positron-nonmem/runs/<runId>/`,
+ * writes a manifest.json with hashes/timestamps/hostAlias, and appends
+ * one audit-log line. Surface EXIT and OFV in an info-message.
  *
- * No Variables-pane wiring, no OFV parsing, no manifest, no audit log —
- * those land in chunks 3B–3D. This is the absolute end-to-end minimum.
+ * Variables-pane wiring (3D) and the live-tail status bar (M3 plan)
+ * still arrive later.
  */
 async function runCurrentModel(): Promise<void> {
   const target = resolveActiveModelTarget();
