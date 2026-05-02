@@ -1,4 +1,4 @@
-// runModel — chunk 3A: smallest viable end-to-end NONMEM run orchestration.
+// runModel — M3 chunks 3A + 3B: end-to-end NONMEM run orchestration.
 //
 // Pipeline (matches the per-run subdir discipline from nonmem-ssh-probe and
 // the §4 M2 spec in the design plan):
@@ -12,12 +12,12 @@
 //      remote process exit code (the transport fires-and-forgets a single
 //      shell line; we cannot get $? out of it any other way).
 //   6. Parse `EXIT=N` from stdout.
-//   7. getFile <remoteRoot>/<runId>/m.lst -> <localRunsDir>/<runId>/m.lst.
+//   7. getFile m.lst + m.ext back to <localRunsDir>/<runId>/.
+//   8. Parse OFV from m.lst's `#OBJV:` banner line.
 //
-// Out of scope for 3A: m.ext pull, OFV parsing, manifest.json, audit.jsonl,
-// dataset-path rewrite when $DATA points outside the .mod's directory,
-// Variables-pane comm, retry/cancel, line-ending normalisation. Those land
-// in chunks 3B–3D and milestone M3-status-bar / M5+.
+// Out of scope: manifest.json, audit.jsonl, dataset-path rewrite when $DATA
+// points outside the .mod's directory, Variables-pane comm, retry/cancel,
+// line-ending normalisation. Those land in chunks 3C–3D and milestone M5+.
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { Transport } from '../transport';
@@ -41,6 +41,10 @@ export interface RunModelResult {
   exitCode: number | null;
   /** Local path the remote `m.lst` was downloaded to. */
   lstPath: string;
+  /** Local path the remote `m.ext` was downloaded to (parameter trajectory). */
+  extPath: string;
+  /** Objective Function Value parsed from m.lst's `#OBJV:` line, or null. */
+  ofv: number | null;
 }
 
 /**
@@ -59,6 +63,22 @@ export function parseDataFilename(modelText: string): string | undefined {
     if (m) return m[1];
   }
   return undefined;
+}
+
+/**
+ * Parse OFV from m.lst's `#OBJV:` banner line. NONMEM 7+ writes one
+ * `#OBJV:` line per estimation step in machine-readable form; we take
+ * the LAST occurrence so multi-$EST runs report the final objective.
+ *
+ * Returns null when the line is absent (e.g. NMTRAN-only failure that
+ * never reached the estimation phase).
+ */
+export function parseOfv(lstText: string): number | null {
+  const re = /^\s*#OBJV:\s*\*+\s*(-?\d+(?:\.\d+)?(?:[eE][+\-]?\d+)?)\s*\*+/gm;
+  let last: RegExpExecArray | null = null;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(lstText)) !== null) last = match;
+  return last ? Number(last[1]) : null;
 }
 
 export async function runModel(opts: RunModelOptions): Promise<RunModelResult> {
@@ -94,13 +114,26 @@ export async function runModel(opts: RunModelOptions): Promise<RunModelResult> {
   const result = await transport.run(cmd);
   const exitCode = parseExitCode(result.stdout);
 
-  // Pull m.lst back even on non-zero exit — that's where NMTRAN error
-  // messages live, and the user will want to see them. (FMSG / m.ext
-  // arrive in 3B+.)
+  // Pull m.lst + m.ext back even on non-zero exit — m.lst holds NMTRAN
+  // error messages (the user wants those) and m.ext holds the parameter
+  // trajectory (sets up Variables-pane wiring in 3D). FMSG arrives later.
   const lstPath = path.join(localRunDir, 'm.lst');
+  const extPath = path.join(localRunDir, 'm.ext');
   await transport.getFile(`${remoteRunDir}/m.lst`, lstPath);
+  await transport.getFile(`${remoteRunDir}/m.ext`, extPath);
 
-  return { runId, exitCode, lstPath };
+  const ofv = await safeParseOfv(lstPath);
+  return { runId, exitCode, lstPath, extPath, ofv };
+}
+
+/** Read the .lst file and pull OFV from it. Missing file or unparseable content -> null. */
+async function safeParseOfv(lstPath: string): Promise<number | null> {
+  try {
+    const text = await fs.readFile(lstPath, 'utf8');
+    return parseOfv(text);
+  } catch {
+    return null;
+  }
 }
 
 function parseExitCode(stdout: string): number | null {

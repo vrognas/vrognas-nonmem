@@ -5,6 +5,14 @@ All notable changes documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- `feat: parse OFV from m.lst, pull m.ext` (M3 chunk 3B). `runModel` now
+  also downloads `m.ext` (parameter trajectory; sets up future Variables-pane
+  wiring) and parses the OFV from `m.lst`'s `#OBJV:` banner line. Toast now
+  reads `Run <runId>: EXIT=0, OFV=-20.5421` when the value is present.
+  `RunModelResult` gains `extPath` and `ofv` fields.
+
 ### Fixed
 
 - `fix: SshTransport.getFile` now mkdir's the local parent dir before invoking scp.

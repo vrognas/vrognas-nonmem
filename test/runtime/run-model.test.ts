@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { runModel, parseDataFilename } from '../../src/runtime/run-model';
+import { runModel, parseDataFilename, parseOfv } from '../../src/runtime/run-model';
 import type { CommandResult, Transport } from '../../src/transport/types';
 
 // ----- Test fixtures: tiny FakeTransport that records all calls and lets
@@ -26,6 +26,13 @@ class FakeTransport implements Transport {
   readonly gets: GetCall[] = [];
   /** Pop a canned result for each successive run() call. Defaults to EXIT=0. */
   readonly runResults: CommandResult[] = [];
+  /**
+   * Content provider for getFile. Receives the remote path; returns the
+   * bytes to write locally, or undefined to write an empty file. Lets a
+   * test stage canned content based on remote-path suffix without having
+   * to know the runId ahead of time.
+   */
+  remoteFileFn: (remotePath: string) => string | undefined = () => undefined;
 
   async run(command: string): Promise<CommandResult> {
     this.runs.push(command);
@@ -42,9 +49,8 @@ class FakeTransport implements Transport {
   }
   async getFile(remotePath: string, localPath: string): Promise<void> {
     this.gets.push({ remotePath, localPath });
-    // Touch the destination file so callers reading it back don't ENOENT.
     fs.mkdirSync(path.dirname(localPath), { recursive: true });
-    fs.writeFileSync(localPath, '');
+    fs.writeFileSync(localPath, this.remoteFileFn(remotePath) ?? '');
   }
 }
 
@@ -82,6 +88,28 @@ describe('parseDataFilename', () => {
   });
 });
 
+describe('parseOfv', () => {
+  it('extracts a scientific-notation value from a #OBJV banner line', () => {
+    const lst =
+      ' #OBJT:**             FINAL VALUE OF OBJECTIVE FUNCTION             *********\n' +
+      ' #OBJV:************************    -2.05421E+01    ************************\n';
+    expect(parseOfv(lst)).toBeCloseTo(-20.5421, 4);
+  });
+
+  it('extracts a plain decimal from a #OBJV banner line', () => {
+    expect(parseOfv(' #OBJV:****    50.10342932195    ****\n')).toBeCloseTo(50.10342932195, 6);
+  });
+
+  it('returns the LAST #OBJV when multiple estimation steps emit one each', () => {
+    const lst = ' #OBJV:****    100.0    ****\n some other lines\n #OBJV:****    42.5    ****\n';
+    expect(parseOfv(lst)).toBeCloseTo(42.5, 4);
+  });
+
+  it('returns null when no #OBJV line is present (e.g. NMTRAN-only failure)', () => {
+    expect(parseOfv('AN ERROR WAS FOUND IN THE CONTROL STATEMENTS.\n')).toBeNull();
+  });
+});
+
 describe('runModel — orchestrator (unit, with FakeTransport)', () => {
   let tmp: string;
 
@@ -93,7 +121,7 @@ describe('runModel — orchestrator (unit, with FakeTransport)', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
-  it('uploads model + dataset, runs nmfe76, pulls m.lst back', async () => {
+  it('uploads model + dataset, runs nmfe76, pulls m.lst + m.ext, parses OFV', async () => {
     const modelPath = path.join(tmp, 'm.mod');
     const datasetPath = path.join(tmp, 'd');
     fs.writeFileSync(
@@ -103,6 +131,13 @@ describe('runModel — orchestrator (unit, with FakeTransport)', () => {
     fs.writeFileSync(datasetPath, 'ID TIME DV\n1 0 1.0\n');
     const localRunsDir = path.join(tmp, 'runs');
     const transport = new FakeTransport();
+    // Stage a realistic m.lst snippet — the #OBJV line is the machine-readable
+    // OFV anchor (per supplements/nonmem-tips canonical probe output).
+    const lstSnippet =
+      ' #OBJT:**             FINAL VALUE OF OBJECTIVE FUNCTION             *********\n' +
+      ' #OBJV:************************    -2.05421E+01    ************************\n' +
+      ' #OBJS:************************        N/A         ************************\n';
+    transport.remoteFileFn = (p) => (p.endsWith('/m.lst') ? lstSnippet : undefined);
 
     const result = await runModel({
       modelPath,
@@ -112,7 +147,6 @@ describe('runModel — orchestrator (unit, with FakeTransport)', () => {
       nmfeBinary: '/opt/nm760/run/nmfe76',
     });
 
-    // 1 mkdir + 1 nmfe76 invocation.
     expect(transport.runs.length).toBe(2);
     expect(transport.runs[0]).toContain('mkdir -p');
     expect(transport.runs[0]).toContain(`~/positron-nonmem/${result.runId}`);
@@ -120,23 +154,29 @@ describe('runModel — orchestrator (unit, with FakeTransport)', () => {
     expect(transport.runs[1]).toContain('/opt/nm760/run/nmfe76 m.mod m.lst');
     expect(transport.runs[1]).toContain('echo EXIT=$?');
 
-    // m.mod uploaded to remote subdir as `m.mod`; dataset uploaded as `d`.
     expect(transport.puts).toEqual([
       { localPath: modelPath, remotePath: `~/positron-nonmem/${result.runId}/m.mod` },
       { localPath: datasetPath, remotePath: `~/positron-nonmem/${result.runId}/d` },
     ]);
 
-    // m.lst pulled back to <localRunsDir>/<runId>/m.lst.
+    // Both m.lst AND m.ext are pulled back; m.ext arrives even though we don't
+    // parse it yet (sets up 3D Variables-pane wiring).
     expect(transport.gets).toEqual([
       {
         remotePath: `~/positron-nonmem/${result.runId}/m.lst`,
         localPath: path.join(localRunsDir, result.runId, 'm.lst'),
+      },
+      {
+        remotePath: `~/positron-nonmem/${result.runId}/m.ext`,
+        localPath: path.join(localRunsDir, result.runId, 'm.ext'),
       },
     ]);
 
     expect(result.exitCode).toBe(0);
     expect(result.runId).toMatch(/^pn-\d+$/);
     expect(result.lstPath).toBe(path.join(localRunsDir, result.runId, 'm.lst'));
+    expect(result.extPath).toBe(path.join(localRunsDir, result.runId, 'm.ext'));
+    expect(result.ofv).toBeCloseTo(-20.5421, 4);
   });
 
   it('parses non-zero EXIT from nmfe76 stdout', async () => {

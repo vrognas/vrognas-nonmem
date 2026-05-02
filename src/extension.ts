@@ -94,8 +94,9 @@ async function runCurrentModel(): Promise<void> {
       nmfeBinary: NMFE_BINARY,
     });
     const exit = result.exitCode ?? 'unknown';
-    log(`runModel: ${result.runId} EXIT=${exit} -> ${result.lstPath}`);
-    await vscode.window.showInformationMessage(`Run ${result.runId}: EXIT=${exit}`);
+    const ofv = result.ofv !== null ? `, OFV=${result.ofv}` : '';
+    log(`runModel: ${result.runId} EXIT=${exit}${ofv} -> ${result.lstPath}`);
+    await vscode.window.showInformationMessage(`Run ${result.runId}: EXIT=${exit}${ofv}`);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     log(`runModel: failed — ${msg}`);
