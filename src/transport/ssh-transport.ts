@@ -94,12 +94,7 @@ export class SshTransport implements Transport {
   constructor(private readonly alias: string) {}
 
   async run(command: string): Promise<CommandResult> {
-    const resolved = await resolveAlias(this.alias);
-    if (resolved.unmatched) {
-      throw new SshTransportError(
-        `no Host block matched alias "${this.alias}" in ~/.ssh/config — ssh -G echoed it as the hostname. Add a Host entry or change positronNonmem.host.alias.`,
-      );
-    }
+    const resolved = await this.requireResolvedAlias();
 
     return new Promise<CommandResult>((resolve, reject) => {
       // BatchMode=yes prevents ssh from prompting for passwords or
@@ -145,26 +140,32 @@ export class SshTransport implements Transport {
   }
 
   async putFile(localPath: string, remotePath: string): Promise<void> {
-    const resolved = await resolveAlias(this.alias);
-    if (resolved.unmatched) {
-      throw new SshTransportError(
-        `no Host block matched alias "${this.alias}" in ~/.ssh/config — ssh -G echoed it as the hostname.`,
-      );
-    }
+    const resolved = await this.requireResolvedAlias();
     await runScp(buildScpPutArgs(this.alias, localPath, remotePath), resolved.hostname);
   }
 
   async getFile(remotePath: string, localPath: string): Promise<void> {
-    const resolved = await resolveAlias(this.alias);
-    if (resolved.unmatched) {
-      throw new SshTransportError(
-        `no Host block matched alias "${this.alias}" in ~/.ssh/config — ssh -G echoed it as the hostname.`,
-      );
-    }
+    const resolved = await this.requireResolvedAlias();
     // scp won't create missing local parent dirs; mkdir before invoking it
     // so callers don't have to. Mirrors LocalTransport.getFile semantics.
     await fs.mkdir(path.dirname(localPath), { recursive: true });
     await runScp(buildScpGetArgs(this.alias, remotePath, localPath), resolved.hostname);
+  }
+
+  /**
+   * Resolve the alias and reject with a helpful error if no Host block
+   * matched. All three transport entry points (run / putFile / getFile)
+   * share this precondition — the user can't fix any of them without an
+   * ~/.ssh/config change.
+   */
+  private async requireResolvedAlias(): Promise<ResolvedAlias> {
+    const resolved = await resolveAlias(this.alias);
+    if (resolved.unmatched) {
+      throw new SshTransportError(
+        `no Host block matched alias "${this.alias}" in ~/.ssh/config — ssh -G echoed it as the hostname. Add a Host entry or change positronNonmem.host.alias.`,
+      );
+    }
+    return resolved;
   }
 }
 

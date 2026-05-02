@@ -11,7 +11,7 @@ import { resolveHostProfile, HostProfileError } from './host-profiles';
 import { getPositron, PositronApiUnavailableError } from './positron-api';
 import { NonmemRuntimeManager } from './runtime/runtime-manager';
 import { runModel } from './runtime/run-model';
-import { pickTransport } from './transport';
+import { pickTransport, type Transport } from './transport';
 
 let outputChannel: vscode.OutputChannel | undefined;
 let runtimeManager: NonmemRuntimeManager | undefined;
@@ -59,13 +59,6 @@ function registerRuntime(context: vscode.ExtensionContext, channel: vscode.Outpu
 }
 
 /**
- * "Test Connection" command — routes a uname probe through the active
- * NONMEM runtime so output lands in the Console pane (not a separate
- * OutputChannel). Per the design rule "no notifications, use the session
- * pane", this is the entry point a new user clicks to verify their
- * SSH config is reachable.
- */
-/**
  * "Run Current Model" command (M3 chunk 3A) — sftp the active editor's
  * `.mod` (and any `$DATA`-referenced dataset sibling), invoke nmfe76 in
  * a per-run remote subdir, pull `m.lst` back to the workspace's local
@@ -75,22 +68,11 @@ function registerRuntime(context: vscode.ExtensionContext, channel: vscode.Outpu
  * those land in chunks 3B–3D. This is the absolute end-to-end minimum.
  */
 async function runCurrentModel(): Promise<void> {
-  const editor = vscode.window.activeTextEditor;
-  if (!editor || editor.document.languageId !== 'nmtran') {
-    await vscode.window.showErrorMessage(
-      'Positron NONMEM: open an NMTRAN .mod file in the active editor first.',
-    );
-    return;
-  }
-  const modelPath = editor.document.uri.fsPath;
-  const workspaceFolder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
-  if (!workspaceFolder) {
-    await vscode.window.showErrorMessage(
-      'Positron NONMEM: the .mod file must live inside an open workspace folder.',
-    );
-    return;
-  }
-  let transport;
+  const target = resolveActiveModelTarget();
+  if (!target) return;
+  const { modelPath, workspaceFolder } = target;
+
+  let transport: Transport;
   try {
     transport = await pickTransport(resolveHostProfile());
   } catch (e) {
@@ -100,8 +82,9 @@ async function runCurrentModel(): Promise<void> {
     }
     throw e;
   }
+
   const localRunsDir = path.join(workspaceFolder.uri.fsPath, LOCAL_RUNS_SUBDIR);
-  outputChannel?.appendLine(`[positron-nonmem] runModel: launching for ${modelPath}`);
+  log(`runModel: launching for ${modelPath}`);
   try {
     const result = await runModel({
       modelPath,
@@ -110,19 +93,51 @@ async function runCurrentModel(): Promise<void> {
       localRunsDir,
       nmfeBinary: NMFE_BINARY,
     });
-    outputChannel?.appendLine(
-      `[positron-nonmem] runModel: ${result.runId} EXIT=${result.exitCode ?? 'unknown'} -> ${result.lstPath}`,
-    );
-    await vscode.window.showInformationMessage(
-      `Run ${result.runId}: EXIT=${result.exitCode ?? 'unknown'}`,
-    );
+    const exit = result.exitCode ?? 'unknown';
+    log(`runModel: ${result.runId} EXIT=${exit} -> ${result.lstPath}`);
+    await vscode.window.showInformationMessage(`Run ${result.runId}: EXIT=${exit}`);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    outputChannel?.appendLine(`[positron-nonmem] runModel: failed — ${msg}`);
+    log(`runModel: failed — ${msg}`);
     await vscode.window.showErrorMessage(`Positron NONMEM: run failed — ${msg}`);
   }
 }
 
+interface ActiveModelTarget {
+  modelPath: string;
+  workspaceFolder: vscode.WorkspaceFolder;
+}
+
+/** Resolve the active editor's .mod file plus its workspace folder, or null with a user-facing error toast. */
+function resolveActiveModelTarget(): ActiveModelTarget | null {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.languageId !== 'nmtran') {
+    void vscode.window.showErrorMessage(
+      'Positron NONMEM: open an NMTRAN .mod file in the active editor first.',
+    );
+    return null;
+  }
+  const workspaceFolder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
+  if (!workspaceFolder) {
+    void vscode.window.showErrorMessage(
+      'Positron NONMEM: the .mod file must live inside an open workspace folder.',
+    );
+    return null;
+  }
+  return { modelPath: editor.document.uri.fsPath, workspaceFolder };
+}
+
+function log(message: string): void {
+  outputChannel?.appendLine(`[positron-nonmem] ${message}`);
+}
+
+/**
+ * "Test Connection" command — routes a uname probe through the active
+ * NONMEM runtime so output lands in the Console pane (not a separate
+ * OutputChannel). Per the design rule "no notifications, use the session
+ * pane", this is the entry point a new user clicks to verify their
+ * SSH config is reachable.
+ */
 async function testConnection(): Promise<void> {
   let positron;
   try {
