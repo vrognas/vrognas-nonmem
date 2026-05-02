@@ -41,8 +41,13 @@ export interface RunModelResult {
   exitCode: number | null;
   /** Local path the remote `m.lst` was downloaded to. */
   lstPath: string;
-  /** Local path the remote `m.ext` was downloaded to (parameter trajectory). */
-  extPath: string;
+  /**
+   * Local path the remote `m.ext` was downloaded to (parameter trajectory),
+   * or null if the file didn't exist on the remote — happens when NMTRAN
+   * fails before estimation can start, in which case nmfe76 only writes
+   * m.lst and FMSG.
+   */
+  extPath: string | null;
   /** Objective Function Value parsed from m.lst's `#OBJV:` line, or null. */
   ofv: number | null;
 }
@@ -75,9 +80,7 @@ export function parseDataFilename(modelText: string): string | undefined {
  */
 export function parseOfv(lstText: string): number | null {
   const re = /^\s*#OBJV:\s*\*+\s*(-?\d+(?:\.\d+)?(?:[eE][+\-]?\d+)?)\s*\*+/gm;
-  let last: RegExpExecArray | null = null;
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(lstText)) !== null) last = match;
+  const last = [...lstText.matchAll(re)].at(-1);
   return last ? Number(last[1]) : null;
 }
 
@@ -114,23 +117,43 @@ export async function runModel(opts: RunModelOptions): Promise<RunModelResult> {
   const result = await transport.run(cmd);
   const exitCode = parseExitCode(result.stdout);
 
-  // Pull m.lst + m.ext back even on non-zero exit — m.lst holds NMTRAN
-  // error messages (the user wants those) and m.ext holds the parameter
-  // trajectory (sets up Variables-pane wiring in 3D). FMSG arrives later.
+  // m.lst is mandatory — it holds NMTRAN errors AND the OFV banner. If it
+  // failed to download, surface that as a hard error (caller toast).
   const lstPath = path.join(localRunDir, 'm.lst');
-  const extPath = path.join(localRunDir, 'm.ext');
   await transport.getFile(`${remoteRunDir}/m.lst`, lstPath);
-  await transport.getFile(`${remoteRunDir}/m.ext`, extPath);
 
-  const ofv = await safeParseOfv(lstPath);
+  // m.ext is best-effort — NMTRAN-only failures never write it, in which
+  // case scp exits non-zero. Tolerate that so the user still sees the
+  // EXIT code + m.lst path in the toast (m.lst is where the error message
+  // lives). FMSG arrives in 3C+.
+  const extPath = await tryGetFile(
+    transport,
+    `${remoteRunDir}/m.ext`,
+    path.join(localRunDir, 'm.ext'),
+  );
+
+  const ofv = await readAndParseOfv(lstPath);
   return { runId, exitCode, lstPath, extPath, ofv };
 }
 
-/** Read the .lst file and pull OFV from it. Missing file or unparseable content -> null. */
-async function safeParseOfv(lstPath: string): Promise<number | null> {
+/** getFile, but return null instead of throwing if the remote file is absent. */
+async function tryGetFile(
+  transport: Transport,
+  remotePath: string,
+  localPath: string,
+): Promise<string | null> {
   try {
-    const text = await fs.readFile(lstPath, 'utf8');
-    return parseOfv(text);
+    await transport.getFile(remotePath, localPath);
+    return localPath;
+  } catch {
+    return null;
+  }
+}
+
+/** Read m.lst and pull OFV from it; missing file or no #OBJV line -> null. */
+async function readAndParseOfv(lstPath: string): Promise<number | null> {
+  try {
+    return parseOfv(await fs.readFile(lstPath, 'utf8'));
   } catch {
     return null;
   }

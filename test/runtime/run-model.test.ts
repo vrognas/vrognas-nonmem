@@ -33,6 +33,11 @@ class FakeTransport implements Transport {
    * to know the runId ahead of time.
    */
   remoteFileFn: (remotePath: string) => string | undefined = () => undefined;
+  /**
+   * Optional error injector for getFile. If it returns an Error, getFile
+   * rejects with it (simulates "file not found on remote", scp non-zero).
+   */
+  getErrorFn: (remotePath: string) => Error | undefined = () => undefined;
 
   async run(command: string): Promise<CommandResult> {
     this.runs.push(command);
@@ -49,6 +54,8 @@ class FakeTransport implements Transport {
   }
   async getFile(remotePath: string, localPath: string): Promise<void> {
     this.gets.push({ remotePath, localPath });
+    const err = this.getErrorFn(remotePath);
+    if (err) throw err;
     fs.mkdirSync(path.dirname(localPath), { recursive: true });
     fs.writeFileSync(localPath, this.remoteFileFn(remotePath) ?? '');
   }
@@ -159,8 +166,8 @@ describe('runModel — orchestrator (unit, with FakeTransport)', () => {
       { localPath: datasetPath, remotePath: `~/positron-nonmem/${result.runId}/d` },
     ]);
 
-    // Both m.lst AND m.ext are pulled back; m.ext arrives even though we don't
-    // parse it yet (sets up 3D Variables-pane wiring).
+    // Both m.lst AND m.ext are pulled back. m.lst feeds parseOfv; m.ext is
+    // staged for 3D's Variables-pane wiring (we don't parse it yet).
     expect(transport.gets).toEqual([
       {
         remotePath: `~/positron-nonmem/${result.runId}/m.lst`,
@@ -200,6 +207,35 @@ describe('runModel — orchestrator (unit, with FakeTransport)', () => {
     });
 
     expect(result.exitCode).toBe(42);
+  });
+
+  it('tolerates missing m.ext (NMTRAN-only failure) — extPath null, m.lst still parsed', async () => {
+    const modelPath = path.join(tmp, 'm.mod');
+    fs.writeFileSync(modelPath, '$PROBLEM x\n$DATA d\n');
+    fs.writeFileSync(path.join(tmp, 'd'), 'a\n');
+    const transport = new FakeTransport();
+    // Stage an m.lst that has a #OBJV line so we can prove parseOfv still runs.
+    transport.remoteFileFn = (p) =>
+      p.endsWith('/m.lst') ? ' #OBJV:****    7.5    ****\n' : undefined;
+    // Make m.ext download fail the way scp would when the remote file
+    // doesn't exist (NMTRAN-only failure: nmfe76 wrote m.lst but never
+    // produced m.ext because estimation didn't start).
+    transport.getErrorFn = (p) =>
+      p.endsWith('/m.ext') ? new Error('scp exited 1: No such file or directory') : undefined;
+
+    const result = await runModel({
+      modelPath,
+      transport,
+      remoteRoot: '~/positron-nonmem',
+      localRunsDir: path.join(tmp, 'runs'),
+      nmfeBinary: '/opt/nm760/run/nmfe76',
+    });
+
+    expect(result.extPath).toBeNull();
+    expect(result.lstPath).toContain('m.lst');
+    expect(result.ofv).toBeCloseTo(7.5, 4);
+    // Both gets were attempted; only the m.ext one failed.
+    expect(transport.gets.map((g) => g.remotePath.split('/').pop())).toEqual(['m.lst', 'm.ext']);
   });
 
   it('throws if .mod file does not exist', async () => {
