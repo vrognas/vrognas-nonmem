@@ -3,8 +3,11 @@ import { COMMAND, OUTPUT_CHANNEL_NAME } from './constants';
 import { resolveHostProfile, HostProfileError, type HostProfile } from './host-profiles';
 import { connectAndRun, SshTransportError } from './ssh-transport';
 import { Logger } from './logger';
+import { getPositron, PositronApiUnavailableError } from './positron-api';
+import { NonmemRuntimeManager } from './runtime/runtime-manager';
 
 let outputChannel: vscode.OutputChannel | undefined;
+let runtimeManager: NonmemRuntimeManager | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
   outputChannel = vscode.window.createOutputChannel(OUTPUT_CHANNEL_NAME);
@@ -14,12 +17,37 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(COMMAND.testConnection, testConnection),
   );
 
+  registerRuntime(context, outputChannel);
+
   outputChannel.appendLine('[positron-nonmem] extension activated.');
 }
 
 export function deactivate(): void {
+  runtimeManager?.dispose();
+  runtimeManager = undefined;
   outputChannel?.dispose();
   outputChannel = undefined;
+}
+
+function registerRuntime(context: vscode.ExtensionContext, channel: vscode.OutputChannel): void {
+  let positron;
+  try {
+    positron = getPositron();
+  } catch (e) {
+    if (e instanceof PositronApiUnavailableError) {
+      // engines.positron in package.json should make this unreachable in
+      // practice; if it ever fires it means we're in plain VSCode and the
+      // user installed us anyway. Surface clearly and skip runtime setup.
+      channel.appendLine(`[warn] ${e.message}`);
+      return;
+    }
+    throw e;
+  }
+  runtimeManager = new NonmemRuntimeManager(context, { positron });
+  context.subscriptions.push(
+    positron.runtime.registerLanguageRuntimeManager('nmtran', runtimeManager),
+  );
+  channel.appendLine('[positron-nonmem] registered NMTRAN language runtime.');
 }
 
 async function testConnection(): Promise<void> {

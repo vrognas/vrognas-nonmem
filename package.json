@@ -15,7 +15,13 @@
   "keywords": ["nonmem", "nmtran", "pharmacometrics", "positron", "ssh"],
   "activationEvents": ["onStartupFinished"],
   "main": "./out/extension.js",
+  "extensionDependencies": ["vrognas.nmtran"],
   "contributes": {
+    "languageRuntimes": [
+      {
+        "languageId": "nmtran"
+      }
+    ],
     "commands": [
       {
         "command": "positronNonmem.testConnection",
@@ -50,6 +56,7 @@
   },
   "dependencies": {},
   "devDependencies": {
+    "@posit-dev/positron": "^0.2.4",
     "@types/node": "^22.0.0",
     "@types/vscode": "^1.108.0",
     "@typescript-eslint/eslint-plugin": "^8.18.0",
