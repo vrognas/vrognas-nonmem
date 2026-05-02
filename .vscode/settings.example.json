@@ -1,0 +1,16 @@
+// Copy this file to .vscode/settings.json and adjust to taste.
+// settings.json is gitignored so secrets and hostnames stay local.
+//
+// Recommended: keep the actual hostname in an env var (POSITRON_NONMEM_HOST)
+// rather than typing it here. The extension expands ${env:VAR} when reading
+// settings, so you can safely commit the example file with placeholders.
+{
+  "positronNonmem.host.alias": "primary",
+  "positronNonmem.host.user": "${env:USERNAME}",
+  "positronNonmem.host.host": "${env:POSITRON_NONMEM_HOST}",
+  "positronNonmem.host.port": 22,
+  "positronNonmem.host.auth": "ssh-agent",
+  "positronNonmem.host.remoteWorkspace": "~/positron-nonmem",
+  "positronNonmem.host.nmfeBinary": "/opt/nm760/run/nmfe76",
+  "positronNonmem.host.nonmemVersion": "7.6.0"
+}

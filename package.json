@@ -1,0 +1,108 @@
+{
+  "name": "positron-nonmem",
+  "displayName": "Positron NONMEM",
+  "description": "NONMEM as a first-class Positron language runtime: SSH-based execution, live iteration streaming, run history, and pharmacometric workbench features. Companion to the vscode-nmtran language extension.",
+  "version": "0.0.1",
+  "publisher": "vrognas",
+  "license": "MIT",
+  "private": true,
+  "engines": {
+    "vscode": "^1.108.0",
+    "positron": "^2025.11.0",
+    "node": ">=20.0.0"
+  },
+  "categories": ["Programming Languages", "Other"],
+  "keywords": ["nonmem", "nmtran", "pharmacometrics", "positron", "ssh"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "positronNonmem.testConnection",
+        "title": "Positron NONMEM: Test Connection"
+      }
+    ],
+    "configuration": {
+      "title": "Positron NONMEM",
+      "properties": {
+        "positronNonmem.host.alias": {
+          "type": "string",
+          "default": "primary",
+          "description": "Display alias for the configured NONMEM host. Shown in the runtime picker and Output channel; the actual hostname is never logged."
+        },
+        "positronNonmem.host.user": {
+          "type": "string",
+          "default": "${env:USERNAME}",
+          "description": "SSH username. Supports ${env:VAR} indirection (extension expands at read time)."
+        },
+        "positronNonmem.host.host": {
+          "type": "string",
+          "default": "${env:POSITRON_NONMEM_HOST}",
+          "description": "SSH hostname or IP. Recommended: keep value in env var POSITRON_NONMEM_HOST so it never lands in committed workspace settings."
+        },
+        "positronNonmem.host.port": {
+          "type": "number",
+          "default": 22,
+          "description": "SSH port."
+        },
+        "positronNonmem.host.auth": {
+          "type": "string",
+          "enum": ["ssh-agent", "ssh-key"],
+          "default": "ssh-agent",
+          "description": "Authentication method."
+        },
+        "positronNonmem.host.privateKeyPath": {
+          "type": "string",
+          "description": "Path to private key file. Required when auth = ssh-key. Supports ${env:VAR} indirection."
+        },
+        "positronNonmem.host.remoteWorkspace": {
+          "type": "string",
+          "default": "~/positron-nonmem",
+          "description": "Host-side root directory for per-run subdirectories."
+        },
+        "positronNonmem.host.nmfeBinary": {
+          "type": "string",
+          "default": "/opt/nm760/run/nmfe76",
+          "description": "Path to nmfe driver on the host."
+        },
+        "positronNonmem.host.nonmemVersion": {
+          "type": "string",
+          "default": "7.6.0",
+          "description": "Display version label for the host (cosmetic; not used to gate behaviour)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.cjs --production",
+    "compile": "tsc -noEmit",
+    "dev": "node esbuild.cjs --watch",
+    "lint": "eslint src test",
+    "lint:fix": "eslint src test --fix",
+    "package": "vsce package --no-yarn",
+    "style-check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
+    "style-fix": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "validate": "npm-run-all --parallel compile lint style-check test",
+    "vscode:prepublish": "npm run build"
+  },
+  "dependencies": {
+    "ssh2": "^1.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ssh2": "^1.15.0",
+    "@types/vscode": "^1.108.0",
+    "@typescript-eslint/eslint-plugin": "^8.18.0",
+    "@typescript-eslint/parser": "^8.18.0",
+    "@vscode/vsce": "^3.2.0",
+    "esbuild": "^0.24.0",
+    "eslint": "^9.17.0",
+    "npm-run-all2": "^7.0.0",
+    "prettier": "^3.4.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}

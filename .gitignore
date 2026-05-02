@@ -1,0 +1,19 @@
+node_modules/
+out/
+.vscode-test/
+*.vsix
+coverage/
+.DS_Store
+.env
+.env.local
+
+# user-supplied workspace settings (may contain hostnames or env-var-resolved values)
+.vscode/settings.json
+!.vscode/settings.example.json
+
+# extension run mirror (per-workspace, never committed)
+.positron-nonmem/
+
+# editor cruft
+*.log
+.tsbuildinfo
