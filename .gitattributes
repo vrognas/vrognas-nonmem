@@ -1,0 +1,33 @@
+# Default: cross-platform text with LF line endings in the repo.
+* text=auto eol=lf
+
+# Source code: always LF (matches .prettierrc endOfLine: lf).
+*.ts text eol=lf
+*.tsx text eol=lf
+*.js text eol=lf
+*.cjs text eol=lf
+*.mjs text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.sh text eol=lf
+*.toml text eol=lf
+
+# Windows-only scripts must keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Lock files: treat as binary so merges don't churn line endings.
+package-lock.json -diff
+yarn.lock -diff
+
+# Binary assets.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.vsix binary
+*.zip binary
