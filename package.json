@@ -2,7 +2,7 @@
   "name": "positron-nonmem",
   "displayName": "Positron NONMEM",
   "description": "NONMEM as a first-class Positron language runtime: SSH-based execution, live iteration streaming, run history, and pharmacometric workbench features. Companion to the vscode-nmtran language extension.",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "vrognas",
   "license": "MIT",
   "private": true,
@@ -26,6 +26,10 @@
       {
         "command": "positronNonmem.testConnection",
         "title": "Positron NONMEM: Test Connection"
+      },
+      {
+        "command": "positronNonmem.runModel",
+        "title": "Positron NONMEM: Run Current Model"
       }
     ],
     "configuration": {

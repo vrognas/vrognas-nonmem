@@ -15,7 +15,17 @@
 // Windows machine is a degenerate case that probably means the user
 // misconfigured `positronNonmem.host.transport`.
 import { spawn } from 'child_process';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { TransportError, type CommandResult, type Transport } from './types';
+
+/** Expand a leading `~` or `~/` against os.homedir(). Bare `~user` is not handled. */
+function expandHome(p: string): string {
+  if (p === '~') return os.homedir();
+  if (p.startsWith('~/') || p.startsWith('~\\')) return path.join(os.homedir(), p.slice(2));
+  return p;
+}
 
 export class LocalTransportError extends TransportError {
   constructor(message: string, cause?: unknown) {
@@ -57,5 +67,17 @@ export class LocalTransport implements Transport {
         resolve({ code, stdout, stderr });
       });
     });
+  }
+
+  async putFile(localPath: string, remotePath: string): Promise<void> {
+    const dst = expandHome(remotePath);
+    await fs.mkdir(path.dirname(dst), { recursive: true });
+    await fs.copyFile(localPath, dst);
+  }
+
+  async getFile(remotePath: string, localPath: string): Promise<void> {
+    const src = expandHome(remotePath);
+    await fs.mkdir(path.dirname(localPath), { recursive: true });
+    await fs.copyFile(src, localPath);
   }
 }

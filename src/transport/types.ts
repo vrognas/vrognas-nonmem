@@ -33,6 +33,18 @@ export interface Transport {
   /** Short label for logging surfaces; never includes the resolved hostname. */
   readonly kind: 'ssh' | 'local';
 
-  /** Run a single command. M3+ adds putFile / getFile / tail / kill. */
+  /** Run a single command. */
   run(command: string): Promise<CommandResult>;
+
+  /**
+   * Upload a local file to a remote path. For LocalTransport this is a
+   * plain `fs.copyFile`. Remote paths starting with `~/` are expanded
+   * against the user's home directory on the side that owns the file
+   * system being written to (i.e. for SSH, the remote shell's HOME; for
+   * LOCAL, os.homedir()).
+   */
+  putFile(localPath: string, remotePath: string): Promise<void>;
+
+  /** Download a remote file to a local path. Mirror of putFile. */
+  getFile(remotePath: string, localPath: string): Promise<void>;
 }

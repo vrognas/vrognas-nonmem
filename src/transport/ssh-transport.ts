@@ -75,6 +75,17 @@ export function scrubHostname(message: string, secret: string): string {
   return message.split(secret).join('<host>');
 }
 
+// scp argv builders kept pure for unit testing; the spawn happens in
+// putFile / getFile below. Both use BatchMode=yes for the same reason as
+// `run()` — fail fast instead of prompting interactively.
+export function buildScpPutArgs(alias: string, localPath: string, remotePath: string): string[] {
+  return ['-o', 'BatchMode=yes', localPath, `${alias}:${remotePath}`];
+}
+
+export function buildScpGetArgs(alias: string, remotePath: string, localPath: string): string[] {
+  return ['-o', 'BatchMode=yes', `${alias}:${remotePath}`, localPath];
+}
+
 export class SshTransport implements Transport {
   readonly kind = 'ssh' as const;
 
@@ -130,7 +141,56 @@ export class SshTransport implements Transport {
       });
     });
   }
+
+  async putFile(localPath: string, remotePath: string): Promise<void> {
+    const resolved = await resolveAlias(this.alias);
+    if (resolved.unmatched) {
+      throw new SshTransportError(
+        `no Host block matched alias "${this.alias}" in ~/.ssh/config — ssh -G echoed it as the hostname.`,
+      );
+    }
+    await runScp(buildScpPutArgs(this.alias, localPath, remotePath), resolved.hostname);
+  }
+
+  async getFile(remotePath: string, localPath: string): Promise<void> {
+    const resolved = await resolveAlias(this.alias);
+    if (resolved.unmatched) {
+      throw new SshTransportError(
+        `no Host block matched alias "${this.alias}" in ~/.ssh/config — ssh -G echoed it as the hostname.`,
+      );
+    }
+    await runScp(buildScpGetArgs(this.alias, remotePath, localPath), resolved.hostname);
+  }
+}
+
+function runScp(args: string[], hostnameForScrub: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const child = spawn('scp', args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    let stderr = '';
+    child.stderr.on('data', (data: Buffer) => {
+      stderr += data.toString('utf8');
+    });
+    child.once('error', (err) => {
+      reject(
+        new SshTransportError(
+          `failed to spawn scp: ${err.message}. Is the OpenSSH client installed and on PATH?`,
+          err,
+        ),
+      );
+    });
+    child.once('close', (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      const scrubbed = scrubHostname(stderr.trim() || '(no output)', hostnameForScrub);
+      reject(new SshTransportError(`scp exited ${code}: ${scrubbed}`));
+    });
+  });
 }
 
 // Exported for unit tests; not part of the runtime API.
-export const __testing = { scrubHostname };
+export const __testing = { scrubHostname, buildScpPutArgs, buildScpGetArgs };

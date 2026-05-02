@@ -5,6 +5,15 @@ All notable changes documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- `feat: positronNonmem.runModel` command (M3 chunk 3A) — sftp `.mod` (and `$DATA`-referenced
+  dataset sibling) to `~/positron-nonmem/<runId>/`, run `nmfe76`, pull `m.lst` back to
+  `<workspace>/.positron-nonmem/runs/<runId>/`, surface EXIT code in an info-message. No
+  Variables-pane / OFV / manifest / audit yet — those land in chunks 3B–3D.
+- `Transport.putFile` / `Transport.getFile` for both `LocalTransport` (`fs.copyFile` + `~`
+  expansion to `os.homedir()`) and `SshTransport` (spawn `scp` with `BatchMode=yes`).
+
 ### Changed
 
 - **SSH transport now shells out to the system `ssh` CLI**, defering entirely to
