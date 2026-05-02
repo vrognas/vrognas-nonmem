@@ -89,7 +89,11 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
   ): void {
     void mode; // mode tracking lands when we have history / silent execution semantics
 
+    // Session-level state: this session is busy until execute returns.
     this.transitionState(this.positron.RuntimeState.Busy);
+    // Per-execution state message: tells the Console "execution `id` started"
+    // so the input box shows the busy spinner / green bar.
+    this.emitOnlineState(id, this.positron.RuntimeOnlineState.Busy);
 
     // Echo input so the Console pane shows what was sent.
     this.emitInput(id, code);
@@ -99,8 +103,11 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
       `[${this.runtimeMetadata.runtimeShortName}] (placeholder — SSH execute lands in M2C)\n`,
     );
 
-    // Drop straight back to Idle. Real implementation will wait for the
-    // remote ssh process to close before emitting Idle.
+    // Per-execution state Idle with matching parent_id signals "execution
+    // `id` finished" — without this, the Console keeps the line marked busy
+    // and the prompt does not redraw, even if the session-level state goes
+    // back to Idle.
+    this.emitOnlineState(id, this.positron.RuntimeOnlineState.Idle);
     this.transitionState(this.positron.RuntimeState.Idle);
   }
 
@@ -256,6 +263,24 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
       type: this.positron.LanguageRuntimeMessageType.Input,
       code,
       execution_count: 0,
+    };
+    this._onDidReceiveRuntimeMessage.fire(message);
+  }
+
+  /**
+   * Per-execution online-state message. The `parent_id` MUST match the
+   * id passed to execute() — Positron uses that pairing to know which
+   * execution started/finished and redraws the Console prompt accordingly.
+   * Without this, the Console keeps the line marked busy (green bar in
+   * the gutter) and never re-shows the prompt.
+   */
+  private emitOnlineState(parentId: string, state: positron.RuntimeOnlineState): void {
+    const message: positron.LanguageRuntimeState = {
+      id: randomUUID(),
+      parent_id: parentId,
+      when: new Date().toISOString(),
+      type: this.positron.LanguageRuntimeMessageType.State,
+      state,
     };
     this._onDidReceiveRuntimeMessage.fire(message);
   }
