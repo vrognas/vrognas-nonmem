@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type * as positron from 'positron';
 import { resolveHostProfile, HostProfileError } from '../host-profiles';
+import { pickTransport } from '../transport';
 import { buildRuntimeMetadata } from './runtime-metadata';
 import { NonmemSession } from './runtime-session';
 import type { PositronApi } from '../positron-api';
@@ -37,7 +38,12 @@ export class NonmemRuntimeManager implements positron.LanguageRuntimeManager {
     runtimeMetadata: positron.LanguageRuntimeMetadata,
     sessionMetadata: positron.RuntimeSessionMetadata,
   ): Promise<positron.LanguageRuntimeSession> {
-    return new NonmemSession(runtimeMetadata, sessionMetadata, { positron: this.positron });
+    const profile = resolveHostProfile();
+    const transport = await pickTransport(profile);
+    return new NonmemSession(runtimeMetadata, sessionMetadata, {
+      positron: this.positron,
+      transport,
+    });
   }
 
   async validateMetadata(

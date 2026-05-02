@@ -1,8 +1,5 @@
 import * as vscode from 'vscode';
 import { COMMAND, OUTPUT_CHANNEL_NAME } from './constants';
-import { resolveHostProfile, HostProfileError, type HostProfile } from './host-profiles';
-import { pickTransport, TransportError } from './transport';
-import { Logger } from './logger';
 import { getPositron, PositronApiUnavailableError } from './positron-api';
 import { NonmemRuntimeManager } from './runtime/runtime-manager';
 
@@ -50,58 +47,31 @@ function registerRuntime(context: vscode.ExtensionContext, channel: vscode.Outpu
   channel.appendLine('[positron-nonmem] registered NMTRAN language runtime.');
 }
 
+/**
+ * "Test Connection" command — routes a uname probe through the active
+ * NONMEM runtime so output lands in the Console pane (not a separate
+ * OutputChannel). Per the design rule "no notifications, use the session
+ * pane", this is the entry point a new user clicks to verify their
+ * SSH config is reachable.
+ */
 async function testConnection(): Promise<void> {
-  const channel = ensureChannel();
-  channel.show(true);
-
-  const profile = await resolveProfileOrReport(channel);
-  if (!profile) return;
-
-  const log = new Logger(channel, profile.alias);
-  await runUnameProbe(profile, log);
-}
-
-function ensureChannel(): vscode.OutputChannel {
-  if (!outputChannel) {
-    outputChannel = vscode.window.createOutputChannel(OUTPUT_CHANNEL_NAME);
-    outputChannel.appendLine('[warn] outputChannel was undefined at command time; recreated.');
-  }
-  return outputChannel;
-}
-
-async function resolveProfileOrReport(
-  channel: vscode.OutputChannel,
-): Promise<HostProfile | undefined> {
+  let positron;
   try {
-    return resolveHostProfile();
+    positron = getPositron();
   } catch (e) {
-    if (e instanceof HostProfileError) {
-      channel.appendLine(`[error] ${e.message}`);
+    if (e instanceof PositronApiUnavailableError) {
       await vscode.window.showErrorMessage(e.message);
-      return undefined;
-    }
-    throw e;
-  }
-}
-
-async function runUnameProbe(profile: HostProfile, log: Logger): Promise<void> {
-  try {
-    const transport = await pickTransport(profile);
-    log.info(`connecting via ${transport.kind} transport...`);
-    const result = await transport.run('uname -a');
-    log.info(`connected. uname: ${result.stdout.trim()}`);
-    if (result.stderr.trim()) {
-      log.info(`stderr: ${result.stderr.trim()}`);
-    }
-    if (result.code !== 0) {
-      log.info(`remote exit code: ${result.code}`);
-    }
-    await log.successToast('connected.');
-  } catch (e) {
-    if (e instanceof TransportError) {
-      await log.errorToast(e.message);
       return;
     }
     throw e;
+  }
+
+  try {
+    await positron.runtime.executeCode('nmtran', 'uname -a', true /* focus the Console */);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    await vscode.window.showErrorMessage(
+      `Could not run NONMEM probe: ${message}. Start a NONMEM session from the runtime picker first.`,
+    );
   }
 }

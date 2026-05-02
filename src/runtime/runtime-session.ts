@@ -2,26 +2,33 @@ import * as vscode from 'vscode';
 import { randomUUID } from 'crypto';
 import type * as positron from 'positron';
 import type { PositronApi } from '../positron-api';
+import type { Transport } from '../transport';
 
-// Minimal LanguageRuntimeSession implementation — Chunk 2B.
+// LanguageRuntimeSession implementation for NONMEM.
 //
-// Goals at this stage:
-//   • Implement every member of the LanguageRuntimeSession interface so
-//     TypeScript is happy and Positron can drive the lifecycle.
-//   • Support the basic state machine: Uninitialized → Starting → Ready →
-//     Idle → (Busy on execute) → Idle → Exited.
-//   • execute() emits a placeholder Stream message acknowledging the input
-//     so the Console pane shows something. Real SSH wiring lands in
-//     Chunk 2C.
-//   • Throw / no-op the things we genuinely don't support yet (debug,
-//     comm clients, fragment completeness checks beyond a default).
+// Drives the basic state machine — Uninitialized → Starting → Ready →
+// Idle → (Busy on execute) → Idle → Exited — and dispatches each execute()
+// to the configured Transport (ssh-out or local). Output streams back as
+// Stream / Error messages tied to the execute id so Positron's Console
+// pane redraws prompts and tracks per-execution status correctly.
+//
+// Capabilities deliberately not implemented yet (M3+): debug() throws,
+// the runtime-client comms (Variables / Plot / DataExplorer / Connection /
+// UI / Help) are silent no-ops so Positron's session machinery doesn't
+// treat the session as broken when it tries to wire them up at start.
 //
 // Privacy: this class never sees the resolved hostname, only the alias
-// (carried in runtimeMetadata.extraRuntimeData.hostAlias). All log lines
-// emitted as Stream messages use the alias only.
+// (carried in runtimeMetadata.extraRuntimeData.hostAlias). The ssh
+// transport scrubs hostnames from any propagated stderr; the local
+// transport is on the host so there's nothing to scrub.
 
 export interface NonmemSessionDeps {
   positron: PositronApi;
+  /**
+   * Transport used to run code from execute(). Resolved at Manager
+   * creation time so all sync paths in Session can use it directly.
+   */
+  transport: Transport;
 }
 
 export class NonmemSession implements positron.LanguageRuntimeSession {
@@ -50,6 +57,7 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
   private workingDirectory: string | undefined;
   private sessionName: string;
   private readonly positron: PositronApi;
+  private readonly transport: Transport;
 
   constructor(
     runtimeMetadata: positron.LanguageRuntimeMetadata,
@@ -59,6 +67,7 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
     this.runtimeMetadata = runtimeMetadata;
     this.metadata = sessionMetadata;
     this.positron = deps.positron;
+    this.transport = deps.transport;
     this.state = this.positron.RuntimeState.Uninitialized;
     this.workingDirectory = sessionMetadata.workingDirectory;
     this.sessionName = runtimeMetadata.runtimeName;
@@ -87,28 +96,53 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
     _codeLocation?: positron.Utf8Location,
     _executionMetadata?: Record<string, unknown>,
   ): void {
-    void mode; // mode tracking lands when we have history / silent execution semantics
+    void mode; // mode tracking lands with history / silent execution semantics
 
-    // Session-level state: this session is busy until execute returns.
+    // Session-level state: busy until the async dispatch completes.
     this.transitionState(this.positron.RuntimeState.Busy);
-    // Per-execution state message: tells the Console "execution `id` started"
-    // so the input box shows the busy spinner / green bar.
+    // Per-execution state — tied to `id` so Positron knows which line is
+    // running and shows the busy gutter for it specifically.
     this.emitOnlineState(id, this.positron.RuntimeOnlineState.Busy);
-
-    // Echo input so the Console pane shows what was sent.
+    // Echo input verbatim so the Console pane shows what was sent.
     this.emitInput(id, code);
-    this.emitStream(
-      id,
-      this.positron.LanguageRuntimeStreamName.Stdout,
-      `[${this.runtimeMetadata.runtimeShortName}] (placeholder — SSH execute lands in M2C)\n`,
-    );
 
-    // Per-execution state Idle with matching parent_id signals "execution
-    // `id` finished" — without this, the Console keeps the line marked busy
-    // and the prompt does not redraw, even if the session-level state goes
-    // back to Idle.
-    this.emitOnlineState(id, this.positron.RuntimeOnlineState.Idle);
-    this.transitionState(this.positron.RuntimeState.Idle);
+    // Fire-and-forget the async transport call. We can't await here because
+    // the LanguageRuntimeSession.execute interface is synchronous.
+    void this.dispatchToTransport(code, id);
+  }
+
+  private async dispatchToTransport(code: string, id: string): Promise<void> {
+    try {
+      const result = await this.transport.run(code);
+      if (result.stdout) {
+        this.emitStream(id, this.positron.LanguageRuntimeStreamName.Stdout, result.stdout);
+      }
+      if (result.stderr) {
+        this.emitStream(id, this.positron.LanguageRuntimeStreamName.Stderr, result.stderr);
+      }
+      // Surface a non-zero exit code to the user. Don't repeat it for code 0
+      // and don't conflate it with the SSH transport's own 255 (which is
+      // already reported via TransportError catch below).
+      if (result.code !== null && result.code !== 0) {
+        this.emitStream(
+          id,
+          this.positron.LanguageRuntimeStreamName.Stderr,
+          `[exit code: ${result.code}]\n`,
+        );
+      }
+    } catch (e) {
+      // Anything that bubbles out of transport.run — TransportError or a
+      // programmer bug — surfaces as a structured Error in the Console
+      // rather than getting swallowed.
+      const name = e instanceof Error ? e.name : 'Error';
+      const message = e instanceof Error ? e.message : String(e);
+      this.emitError(id, name, message);
+    } finally {
+      // Per-execution Idle MUST fire (or the prompt won't redraw); paired
+      // with the session-level Idle.
+      this.emitOnlineState(id, this.positron.RuntimeOnlineState.Idle);
+      this.transitionState(this.positron.RuntimeState.Idle);
+    }
   }
 
   async shutdown(_exitReason: positron.RuntimeExitReason): Promise<void> {
@@ -144,7 +178,10 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
   }
 
   async interrupt(): Promise<void> {
-    // No remote process to abort yet. Lands in 2C.
+    // We can't currently abort the in-flight transport.run(). Killing the
+    // ssh / shell child needs a handle the Transport doesn't expose yet
+    // (M3+ adds that when long NONMEM runs make it actually matter).
+    // For now, we just flip session state back to Idle so the UI unfreezes.
     this.transitionState(this.positron.RuntimeState.Idle);
   }
 
@@ -283,5 +320,18 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
       state,
     };
     this._onDidReceiveRuntimeMessage.fire(message);
+  }
+
+  private emitError(parentId: string, name: string, message: string): void {
+    const msg: positron.LanguageRuntimeError = {
+      id: randomUUID(),
+      parent_id: parentId,
+      when: new Date().toISOString(),
+      type: this.positron.LanguageRuntimeMessageType.Error,
+      name,
+      message,
+      traceback: [],
+    };
+    this._onDidReceiveRuntimeMessage.fire(msg);
   }
 }
