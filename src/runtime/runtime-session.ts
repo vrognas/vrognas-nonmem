@@ -129,8 +129,9 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
     };
     this.runtimeInfo = info;
 
+    // Positron prints info.banner itself in the Console pane; we don't
+    // emit it as a Stream (doing so duplicated the line at startup).
     this.transitionState(this.positron.RuntimeState.Ready);
-    this.emitStream(randomUUID(), this.positron.LanguageRuntimeStreamName.Stdout, info.banner);
     this.transitionState(this.positron.RuntimeState.Idle);
     return info;
   }
@@ -187,8 +188,12 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
     _params: Record<string, unknown>,
     _metadata?: Record<string, unknown>,
   ): Promise<void> {
-    // Variables / Plot / DataExplorer / Connection comms come in M3+.
-    throw new Error('Client comms not yet implemented (M3+).');
+    // Variables / Plot / DataExplorer / Connection / UI / Help comms all come
+    // in M3+. We silently accept the creation request so Positron's session
+    // machinery doesn't treat the session as broken; the corresponding panes
+    // stay empty (we never emit comm messages on these client IDs) until the
+    // wire-format implementation lands. Throwing here put Positron in a
+    // half-attached state that froze the Console prompt after execute().
   }
 
   async listClients(_type?: positron.RuntimeClientType): Promise<Record<string, string>> {
