@@ -93,11 +93,41 @@ moment — ours isn't yet.
 **before** `onStartupFinished` fires for third-party extensions. Bundled extensions
 (R, Python) avoid this because they're loaded eagerly with Positron itself.
 
-**Fix.** Add `"*"` to `activationEvents` so positron-nonmem activates at extension-host
-startup, the same time as bundled extensions do. The cost is the extension always loads
-(rather than lazily on first .mod open), but our `activate()` is tiny — registers a
-command, an OutputChannel, and a runtime manager — so the cost is negligible.
+**Partial fix.** Add `"*"` to `activationEvents` so positron-nonmem activates at
+extension-host startup. This **stops the runaway accumulation of ghost sessions** in the
+SESSIONS picker (verified) but **doesn't eliminate the "(2 managers registered)" error
+itself** — `restoreWorkspaceSessions` runs in the sub-second window between the
+extension host launching and our `activate()` completing. Bundled R / Python avoid this
+because they're loaded *eagerly* by Positron itself, before workbench restoration scans.
+There's no `activationEvent` earlier than `*` that a third-party extension can use.
 
-(Listed alongside `onStartupFinished` and `onLanguage:nmtran` for completeness; `*`
-should always win, those are belt-and-braces.)
+**Working theory.** This is structural: third-party `LanguageRuntimeManager` registrants
+will always lose the race against the first restoration scan after an extension-host
+restart. The error log line is harmless — Positron just discards the un-restorable
+session entry and the user starts a fresh one. If Positron ever adds an
+`onLanguageRuntime:<id>` activation event or supports manager pre-registration, we'd
+adopt it.
+
+(Listed alongside `onStartupFinished` and `onLanguage:nmtran` as belt-and-braces.)
+
+---
+
+## "Error: Session is no longer available" after F5 reload of dev host
+
+**Expectation.** Reloading the Extension Development Host should leave previously-active
+sessions either functional or visibly closed.
+
+**Probe.** Start a NONMEM (or R) session, send a command. F5 the dev host. The session
+in the SESSIONS picker still appears, but typing in its Console immediately yields
+`Error: Session is no longer available`.
+
+**Outcome.** Expected. F5 kills the extension host process. Our `NonmemSession` object
+(and its underlying SSH transport) is disposed. R's kernel process likewise dies. The
+SESSIONS picker entry survives the reload as a UI artefact, but the underlying process
+is gone. Behaviour is identical for R 4.5.3 and Python — not specific to us.
+
+**How to apply.** Just start a fresh session after each F5. End users who never F5 won't
+see this; only developers will. If we ever support session reattachment (M3+), we'd
+need a Transport implementation that persists a remote helper process across reloads
+and reconnects on activate().
 
