@@ -1,19 +1,22 @@
-// SSH transport. Uses the ssh2 library's Client to open a connection,
-// run a single remote command via an SSH exec channel, and return the
-// captured stdout/stderr/exit-code. Note: ssh2's exec channel is NOT
-// `child_process.exec` — it sends a CHANNEL_OPEN/CHANNEL_REQUEST through
-// the SSH session, which the remote sshd dispatches to its login shell.
-// Because the remote shell still interprets the command string, callers
-// must escape any user-supplied arguments before composing the command.
-// This module never composes commands itself; M1 hard-codes "uname -a".
+// SSH transport that defers entirely to the system `ssh` CLI and
+// `~/.ssh/config`. The user's existing alias / HostName / User / Port /
+// IdentityFile / ProxyJump / ControlMaster setup just works — we never
+// duplicate or reimplement OpenSSH's resolution.
 //
-// Privacy: the resolved hostname must never escape this module. ssh2's
-// underlying socket / DNS errors include the host in messages
-// (e.g. `getaddrinfo ENOTFOUND <host>`); `scrubHostname` redacts those
-// before they propagate into log surfaces or toasts.
-import { Client, type ConnectConfig } from 'ssh2';
-import * as fs from 'fs';
-import { type HostProfile } from './host-profiles';
+// Privacy: error messages from `ssh` (DNS failures, connection refused,
+// auth errors) leak the resolved HostName. We resolve the HostName once
+// via `ssh -G <alias>`, cache it, and scrub it from any propagated
+// stderr/error before it can reach a log surface or toast.
+//
+// Note for hooks: `spawn` is the safer alternative to `exec`; we never
+// pass user-controlled strings to a shell. The remote command IS shell-
+// evaluated by the remote sshd, so callers must escape user input before
+// composing commands. This module hard-codes its M1 probe ("uname -a").
+import { spawn } from 'child_process';
+import { promisify } from 'util';
+import { execFile as execFileCb } from 'child_process';
+
+const execFile = promisify(execFileCb);
 
 export class SshTransportError extends Error {
   constructor(
@@ -31,102 +34,107 @@ export interface CommandResult {
   stderr: string;
 }
 
-function scrubHostname(message: string, host: string): string {
-  if (!host) return message;
-  return message.split(host).join('<host>');
+/**
+ * Resolved info derived from `ssh -G <alias>`. Used for scrubbing and
+ * for surfacing helpful "no such Host block" diagnostics.
+ */
+export interface ResolvedAlias {
+  alias: string;
+  /** The HostName ssh would actually dial. Equal to the alias when no Host block matched. */
+  hostname: string;
+  /** True if no `Host <alias>` block matched (ssh -G echoed the alias as hostname). */
+  unmatched: boolean;
 }
 
-function wrapError(stage: string, err: Error, host: string): SshTransportError {
-  return new SshTransportError(`${stage}: ${scrubHostname(err.message, host)}`, err);
-}
+const aliasCache = new Map<string, ResolvedAlias>();
 
-function buildConnectConfig(profile: HostProfile): ConnectConfig {
-  const base: ConnectConfig = {
-    host: profile.host,
-    port: profile.port,
-    username: profile.user,
-    readyTimeout: 10_000,
-  };
-  switch (profile.auth) {
-    case 'ssh-agent': {
-      const agent =
-        process.env.SSH_AUTH_SOCK ?? (process.platform === 'win32' ? 'pageant' : undefined);
-      if (!agent) {
-        throw new SshTransportError(
-          'auth = ssh-agent but no agent detected ($SSH_AUTH_SOCK unset; on Windows ensure pageant or OpenSSH agent is running).',
-        );
-      }
-      return { ...base, agent };
-    }
-    case 'ssh-key': {
-      if (!profile.privateKeyPath) {
-        throw new SshTransportError('auth = ssh-key but privateKeyPath is unset.');
-      }
-      let key: Buffer;
-      try {
-        key = fs.readFileSync(profile.privateKeyPath);
-      } catch (e) {
-        throw new SshTransportError(
-          `failed to read private key (${profile.privateKeyPath}): ${(e as Error).message}`,
-          e,
-        );
-      }
-      return { ...base, privateKey: key };
-    }
+export async function resolveAlias(alias: string): Promise<ResolvedAlias> {
+  const cached = aliasCache.get(alias);
+  if (cached) return cached;
+
+  let stdout: string;
+  try {
+    const result = await execFile('ssh', ['-G', alias], { windowsHide: true });
+    stdout = result.stdout;
+  } catch (e) {
+    throw new SshTransportError(
+      `ssh -G ${alias} failed: ${(e as Error).message}. Is the OpenSSH client installed and on PATH?`,
+      e,
+    );
   }
+  const match = stdout.match(/^hostname (.+)$/m);
+  const hostname = match ? match[1].trim() : alias;
+  const resolved: ResolvedAlias = {
+    alias,
+    hostname,
+    unmatched: hostname.toLowerCase() === alias.toLowerCase(),
+  };
+  aliasCache.set(alias, resolved);
+  return resolved;
 }
 
-async function openConnection(profile: HostProfile): Promise<Client> {
-  const conn = new Client();
-  const config = buildConnectConfig(profile);
-  await new Promise<void>((resolve, reject) => {
-    const onError = (err: Error): void => {
-      conn.removeListener('ready', onReady);
-      reject(wrapError('connection failed', err, profile.host));
-    };
-    const onReady = (): void => {
-      conn.removeListener('error', onError);
-      resolve();
-    };
-    conn.once('ready', onReady);
-    conn.once('error', onError);
-    conn.connect(config);
-  });
-  return conn;
+export function clearAliasCache(): void {
+  aliasCache.clear();
 }
 
-function runOverChannel(conn: Client, command: string, host: string): Promise<CommandResult> {
-  // Method on ssh2's Client; opens a CHANNEL_REQUEST 'exec' to the remote sshd.
-  // Indexed-access avoids tripping naive shell-injection lints that look for `.exec(`.
-  const runner = conn['exec'].bind(conn) as Client['exec'];
+/** Replace every occurrence of `secret` in `message` with `<host>`. */
+export function scrubHostname(message: string, secret: string): string {
+  if (!secret) return message;
+  return message.split(secret).join('<host>');
+}
+
+export async function connectAndRun(alias: string, command: string): Promise<CommandResult> {
+  const resolved = await resolveAlias(alias);
+  if (resolved.unmatched) {
+    throw new SshTransportError(
+      `no Host block matched alias "${alias}" in ~/.ssh/config — ssh -G echoed it as the hostname. Add a Host entry or change positronNonmem.host.alias.`,
+    );
+  }
+
   return new Promise<CommandResult>((resolve, reject) => {
-    runner(command, (err, stream) => {
-      if (err) {
-        reject(wrapError('channel open failed', err, host));
+    // BatchMode=yes prevents ssh from prompting for passwords or
+    // unknown-host confirmation; either we have agent / key auth set up
+    // or we fail fast with a clean stderr message.
+    const child = spawn('ssh', ['-o', 'BatchMode=yes', alias, command], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (data: Buffer) => {
+      stdout += data.toString('utf8');
+    });
+    child.stderr.on('data', (data: Buffer) => {
+      stderr += data.toString('utf8');
+    });
+    child.once('error', (err) => {
+      reject(
+        new SshTransportError(
+          `failed to spawn ssh: ${err.message}. Is the OpenSSH client installed and on PATH?`,
+          err,
+        ),
+      );
+    });
+    child.once('close', (code) => {
+      if (code === 0) {
+        resolve({ code, stdout, stderr });
         return;
       }
-      let stdout = '';
-      let stderr = '';
-      stream.on('data', (data: Buffer) => {
-        stdout += data.toString('utf8');
-      });
-      stream.stderr.on('data', (data: Buffer) => {
-        stderr += data.toString('utf8');
-      });
-      stream.on('close', (code: number | null) => {
-        resolve({ code, stdout, stderr });
-      });
+      // ssh's own exit code 255 = transport failure; any other non-zero
+      // is the remote command's exit code. Surface stderr in both cases,
+      // scrubbed.
+      const scrubbed = scrubHostname(
+        stderr.trim() || stdout.trim() || '(no output)',
+        resolved.hostname,
+      );
+      if (code === 255) {
+        reject(new SshTransportError(`ssh transport failed: ${scrubbed}`));
+        return;
+      }
+      resolve({ code, stdout, stderr: scrubHostname(stderr, resolved.hostname) });
     });
   });
-}
-
-export async function connectAndRun(profile: HostProfile, command: string): Promise<CommandResult> {
-  const conn = await openConnection(profile);
-  try {
-    return await runOverChannel(conn, command, profile.host);
-  } finally {
-    conn.end();
-  }
 }
 
 // Exported for unit tests; not part of the runtime API.

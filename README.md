@@ -27,13 +27,19 @@ The full design lives in
 
 ## Configure
 
-1. Copy `.vscode/settings.example.json` to `.vscode/settings.json`. The latter is
-   gitignored.
-2. Set `$env:POSITRON_NONMEM_HOST` in your shell (recommended; keeps the hostname out of
-   committed configs). On Windows: `setx POSITRON_NONMEM_HOST "yourhost.example.com"`
-   then restart Positron.
-3. Confirm SSH key auth works locally:
-   `ssh -o BatchMode=yes $env:POSITRON_NONMEM_HOST uname -a`.
+The extension shells out to your system `ssh` client, so **everything connection-related
+lives in `~/.ssh/config`** — `HostName`, `User`, `Port`, `IdentityFile`, `ProxyJump`,
+`ControlMaster`, etc. Whatever `ssh <alias>` does in your terminal, the extension does too.
+
+1. Confirm your SSH config works at the terminal:
+   `ssh -o BatchMode=yes <alias> uname -a` should print `Linux …` without prompting.
+2. Copy `.vscode/settings.example.json` to `.vscode/settings.json` (latter is gitignored).
+3. Set the alias to whatever Host entry you want to dial:
+   ```jsonc
+   { "positronNonmem.host.alias": "primary" }
+   ```
+
+That's it — no env vars, no hostname in workspace settings, no per-extension auth flow.
 
 ## Develop
 
@@ -55,8 +61,12 @@ In Positron:
 
 ## Privacy hygiene
 
-- The hostname is read from `${env:POSITRON_NONMEM_HOST}` and **never** logged.
+- All connection details (hostname, user, port, identity file, proxy hops) live in
+  `~/.ssh/config`, never in workspace settings or committed code.
 - The Output channel only ever displays the configured `alias` (default: `primary`).
+- `ssh -G <alias>` is run once at command time to learn the resolved `HostName`; that
+  value is cached in-process and used to scrub any subsequent `ssh` stderr (DNS or
+  connection-refused messages) before it lands in the channel or a toast.
 - `.vscode/settings.json` is gitignored; only `settings.example.json` is committed.
 - Run output mirrors live in `<workspace>/.positron-nonmem/` which is also gitignored.
 

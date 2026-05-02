@@ -35,8 +35,6 @@ async function testConnection(): Promise<void> {
 
 function ensureChannel(): vscode.OutputChannel {
   if (!outputChannel) {
-    // Defensive: activate() should have created this. If we hit here, the extension
-    // host is in an unexpected state — recreating is harmless but log it loudly.
     outputChannel = vscode.window.createOutputChannel(OUTPUT_CHANNEL_NAME);
     outputChannel.appendLine('[warn] outputChannel was undefined at command time; recreated.');
   }
@@ -50,7 +48,6 @@ async function resolveProfileOrReport(
     return resolveHostProfile();
   } catch (e) {
     if (e instanceof HostProfileError) {
-      // No alias yet — log without the alias prefix.
       channel.appendLine(`[error] ${e.message}`);
       await vscode.window.showErrorMessage(e.message);
       return undefined;
@@ -60,15 +57,15 @@ async function resolveProfileOrReport(
 }
 
 async function runUnameProbe(profile: HostProfile, log: Logger): Promise<void> {
-  log.info('connecting...');
+  log.info('connecting via ssh CLI...');
   try {
-    const result = await connectAndRun(profile, 'uname -a');
+    const result = await connectAndRun(profile.alias, 'uname -a');
     log.info(`connected. uname: ${result.stdout.trim()}`);
     if (result.stderr.trim()) {
       log.info(`stderr: ${result.stderr.trim()}`);
     }
     if (result.code !== 0) {
-      log.info(`exit code: ${result.code}`);
+      log.info(`remote exit code: ${result.code}`);
     }
     await log.successToast('connected.');
   } catch (e) {

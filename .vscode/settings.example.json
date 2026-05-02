@@ -1,16 +1,10 @@
 // Copy this file to .vscode/settings.json and adjust to taste.
-// settings.json is gitignored so secrets and hostnames stay local.
+// settings.json is gitignored so per-developer config stays local.
 //
-// Recommended: keep the actual hostname in an env var (POSITRON_NONMEM_HOST)
-// rather than typing it here. The extension expands ${env:VAR} when reading
-// settings, so you can safely commit the example file with placeholders.
+// All connection details (HostName, User, Port, IdentityFile, ProxyJump, ...)
+// come from your ~/.ssh/config. The extension shells out to the system ssh
+// client, so whatever `ssh <alias>` does in your terminal, the extension
+// will do too.
 {
-  "positronNonmem.host.alias": "primary",
-  "positronNonmem.host.user": "${env:USERNAME}",
-  "positronNonmem.host.host": "${env:POSITRON_NONMEM_HOST}",
-  "positronNonmem.host.port": 22,
-  "positronNonmem.host.auth": "ssh-agent",
-  "positronNonmem.host.remoteWorkspace": "~/positron-nonmem",
-  "positronNonmem.host.nmfeBinary": "/opt/nm760/run/nmfe76",
-  "positronNonmem.host.nonmemVersion": "7.6.0"
+  "positronNonmem.host.alias": "primary"
 }

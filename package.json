@@ -28,47 +28,7 @@
         "positronNonmem.host.alias": {
           "type": "string",
           "default": "primary",
-          "description": "Display alias for the configured NONMEM host. Shown in the runtime picker and Output channel; the actual hostname is never logged."
-        },
-        "positronNonmem.host.user": {
-          "type": "string",
-          "default": "${env:USERNAME}",
-          "description": "SSH username. Supports ${env:VAR} indirection (extension expands at read time)."
-        },
-        "positronNonmem.host.host": {
-          "type": "string",
-          "default": "${env:POSITRON_NONMEM_HOST}",
-          "description": "SSH hostname or IP. Recommended: keep value in env var POSITRON_NONMEM_HOST so it never lands in committed workspace settings."
-        },
-        "positronNonmem.host.port": {
-          "type": "number",
-          "default": 22,
-          "description": "SSH port."
-        },
-        "positronNonmem.host.auth": {
-          "type": "string",
-          "enum": ["ssh-agent", "ssh-key"],
-          "default": "ssh-agent",
-          "description": "Authentication method."
-        },
-        "positronNonmem.host.privateKeyPath": {
-          "type": "string",
-          "description": "Path to private key file. Required when auth = ssh-key. Supports ${env:VAR} indirection."
-        },
-        "positronNonmem.host.remoteWorkspace": {
-          "type": "string",
-          "default": "~/positron-nonmem",
-          "description": "Host-side root directory for per-run subdirectories."
-        },
-        "positronNonmem.host.nmfeBinary": {
-          "type": "string",
-          "default": "/opt/nm760/run/nmfe76",
-          "description": "Path to nmfe driver on the host."
-        },
-        "positronNonmem.host.nonmemVersion": {
-          "type": "string",
-          "default": "7.6.0",
-          "description": "Display version label for the host (cosmetic; not used to gate behaviour)."
+          "description": "Name of a Host entry in your ~/.ssh/config. The extension shells out to the system ssh client, so HostName, User, Port, IdentityFile, ProxyJump, ControlMaster, etc. are all resolved from your existing OpenSSH configuration. The alias also appears in the Output channel as the privacy-preserving prefix."
         }
       }
     }
@@ -88,12 +48,9 @@
     "validate": "npm-run-all --parallel compile lint style-check test",
     "vscode:prepublish": "npm run build"
   },
-  "dependencies": {
-    "ssh2": "^1.16.0"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "@types/ssh2": "^1.15.0",
     "@types/vscode": "^1.108.0",
     "@typescript-eslint/eslint-plugin": "^8.18.0",
     "@typescript-eslint/parser": "^8.18.0",
