@@ -13,7 +13,7 @@
   },
   "categories": ["Programming Languages", "Other"],
   "keywords": ["nonmem", "nmtran", "pharmacometrics", "positron", "ssh"],
-  "activationEvents": ["onStartupFinished"],
+  "activationEvents": ["*", "onStartupFinished", "onLanguage:nmtran"],
   "main": "./out/extension.js",
   "extensionDependencies": ["vrognas.nmtran"],
   "contributes": {

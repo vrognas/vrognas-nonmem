@@ -49,3 +49,55 @@ every command. We accept it for now as a cosmetic issue. If it becomes annoying:
    warrants today.
 
 Verified 2026-05-02 against NONMEM 7.6.0 on Linux via `ssh primary uname -a`.
+
+---
+
+## SESSIONS pane accumulates entries across F5 reloads (dev-mode only)
+
+**Expectation.** Reloading the Extension Development Host (F5 / Cmd-R) starts a fresh
+extension instance, so previous-reload sessions should disappear from the SESSIONS pane.
+
+**Probe.** F5 the dev host repeatedly while a NONMEM session is active. Observe the
+SESSIONS pane lists every prior session as a separate dimmed entry. The same happens for
+R 4.5.3 and Python sessions — i.e., it's not specific to positron-nonmem.
+
+**Outcome.** Positron persists session-history entries across extension-host reloads (the
+underlying Workspace-location semantics: "restored within the same Positron session").
+The dimmed entries are exited sessions that Positron keeps in the picker for restart /
+diagnostics purposes. End users won't hit this — only F5'ing-developers will.
+
+**Mitigation:**
+- Set `engines.positron` and let Positron clean up across full Positron restarts.
+- For dev iteration, occasionally close/reopen Positron itself (not just F5) to clear
+  the list.
+- Future M-something: add `positronNonmem.clearSessionHistory` command if the noise
+  becomes an actual problem (we don't think it will).
+
+## "No session manager found" error during workspace open
+
+**Expectation.** Our LanguageRuntimeManager registers on `onStartupFinished`, so by the
+time Positron calls `validateRuntimeSession` on saved sessions our manager is available.
+
+**Probe.** Reload the dev host with a saved session for a `positron-nonmem-*` runtime ID.
+Errors appear:
+
+```
+ERR Error getting manager for runtime positron-nonmem-qphcmp03 (...): No session
+    manager found for runtime positron-nonmem-qphcmp03 (...) (2 managers registered).
+```
+
+The "(2 managers registered)" reveals only R + Python managers are present at that
+moment — ours isn't yet.
+
+**Outcome.** Positron's `restoreWorkspaceSessions` runs during workbench startup,
+**before** `onStartupFinished` fires for third-party extensions. Bundled extensions
+(R, Python) avoid this because they're loaded eagerly with Positron itself.
+
+**Fix.** Add `"*"` to `activationEvents` so positron-nonmem activates at extension-host
+startup, the same time as bundled extensions do. The cost is the extension always loads
+(rather than lazily on first .mod open), but our `activate()` is tiny — registers a
+command, an OutputChannel, and a runtime manager — so the cost is negligible.
+
+(Listed alongside `onStartupFinished` and `onLanguage:nmtran` for completeness; `*`
+should always win, those are belt-and-braces.)
+
