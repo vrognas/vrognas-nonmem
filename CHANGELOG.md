@@ -7,6 +7,13 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- `chore: round Variables-pane display values to 3 decimal places`. THETA inits,
+  OMEGA/SIGMA values, equation results — all formatted via the same helper:
+  max 3 decimals, trailing zeros dropped (so `0.5` not `0.500`, integers stay
+  integers), scientific notation for extremes (`>= 1e7` or non-zero `< 1e-3`)
+  so we don't silently lose tiny values to "0.000". Underlying numbers in the
+  model file are unchanged; only the display string rounds.
+
 - `chore: equation display_type now shows owning control record`. Previously the
   Variables-pane right column read `equation = THETA(1) + ETA(1) + EPS(1)` for
   every equation row — duplicating the rhs already encoded in `display_value`

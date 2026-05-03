@@ -49,6 +49,20 @@ describe('mapParsedModelToVariables', () => {
     expect(k.display_type).toBe('$PK'); // owning block, not the equation text
   });
 
+  it('rounds noisy values to 3 decimal places in display_value', () => {
+    const vars = mapParsedModelToVariables(
+      model({
+        thetas: [{ index: 1, init: 0.0676983, fix: false }],
+        omegas: [{ index: 1, value: 4.2961234, fix: false }],
+        equations: [{ name: 'Y', rhs: 'whatever', block: '$PRED', line: 1, value: 0.123456 }],
+      }),
+    );
+
+    expect(vars[0].display_value).toBe('0.068');
+    expect(vars[1].display_value).toBe('4.296');
+    expect(vars[2].display_value).toBe('0.123');
+  });
+
   it('marks FIX/lower/upper hints in display_value of THETA bounds', () => {
     const vars = mapParsedModelToVariables(
       model({

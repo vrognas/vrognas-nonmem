@@ -71,7 +71,7 @@ export function mapParsedModelToVariables(model: NmtranParsedModel): Variable[] 
     out.push(
       leaf({
         name: `OMEGA(${o.index},${o.index})`,
-        displayValue: o.fix ? `${o.value} (FIX)` : `${o.value}`,
+        displayValue: o.fix ? `${formatNumber(o.value)} (FIX)` : formatNumber(o.value),
         kind: 'class',
         nmtranType: 'omega',
       }),
@@ -81,7 +81,7 @@ export function mapParsedModelToVariables(model: NmtranParsedModel): Variable[] 
     out.push(
       leaf({
         name: `SIGMA(${s.index},${s.index})`,
-        displayValue: s.fix ? `${s.value} (FIX)` : `${s.value}`,
+        displayValue: s.fix ? `${formatNumber(s.value)} (FIX)` : formatNumber(s.value),
         kind: 'class',
         nmtranType: 'sigma',
       }),
@@ -100,24 +100,41 @@ function thetaDisplay(
   upper: number | undefined,
   fix: boolean,
 ): string {
-  if (fix) return `${init} (FIX)`;
-  if (lower !== undefined && upper !== undefined) return `${init} (${lower}..${upper})`;
-  if (lower !== undefined) return `${init} (>=${lower})`;
-  if (upper !== undefined) return `${init} (<=${upper})`;
-  return `${init}`;
+  const initStr = formatNumber(init);
+  if (fix) return `${initStr} (FIX)`;
+  if (lower !== undefined && upper !== undefined) {
+    return `${initStr} (${formatNumber(lower)}..${formatNumber(upper)})`;
+  }
+  if (lower !== undefined) return `${initStr} (>=${formatNumber(lower)})`;
+  if (upper !== undefined) return `${initStr} (<=${formatNumber(upper)})`;
+  return initStr;
 }
 
 function equationRow(eq: NmtranEquation): Variable {
   const evaluable = eq.value !== undefined;
   return leaf({
     name: eq.name,
-    displayValue: evaluable ? `${eq.value}` : eq.rhs,
+    displayValue: evaluable ? formatNumber(eq.value!) : eq.rhs,
     kind: evaluable ? 'number' : 'string',
     // Show the owning control record ($PRED / $PK / $ERROR / …) rather
     // than the rhs text. The full expression is already encoded in the
     // displayValue when the value can't be evaluated.
     nmtranType: eq.block,
   });
+}
+
+/**
+ * Format a number for the Variables-pane display: max 3 decimal places,
+ * trailing zeros dropped (so 0.5 not 0.500, integers stay integers),
+ * scientific notation for extremes (>= 1e7 or non-zero < 1e-3) so we
+ * don't lose all signal on very small / very large values.
+ */
+function formatNumber(n: number): string {
+  if (!Number.isFinite(n)) return String(n);
+  if (n === 0) return '0';
+  const abs = Math.abs(n);
+  if (abs >= 1e7 || abs < 1e-3) return n.toExponential(3);
+  return parseFloat(n.toFixed(3)).toString();
 }
 
 function leaf(args: {
