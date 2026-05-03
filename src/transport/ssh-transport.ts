@@ -152,6 +152,49 @@ export class SshTransport implements Transport {
     await runScp(buildScpGetArgs(this.alias, remotePath, localPath), resolved.hostname);
   }
 
+  async writeFile(remotePath: string, content: string): Promise<void> {
+    const resolved = await this.requireResolvedAlias();
+    // Single-quote the path so an exotic name (spaces, $) doesn't get
+    // expanded by the remote shell. The content arrives via stdin and
+    // is written by `cat` verbatim; no escaping needed for the payload.
+    const escaped = `'${remotePath.replace(/'/g, `'\\''`)}'`;
+    return new Promise<void>((resolve, reject) => {
+      const child = spawn('ssh', ['-o', 'BatchMode=yes', this.alias, `cat > ${escaped}`], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+      let stderr = '';
+      child.stderr.on('data', (data: Buffer) => {
+        stderr += data.toString('utf8');
+      });
+      child.once('error', (err) => {
+        reject(
+          new SshTransportError(`failed to spawn ssh: ${err.message}`, err),
+        );
+      });
+      child.once('close', (code) => {
+        if (code === 0) return resolve();
+        const scrubbed = scrubHostname(stderr.trim() || '(no output)', resolved.hostname);
+        reject(new SshTransportError(`ssh writeFile exited ${code}: ${scrubbed}`));
+      });
+      child.stdin.end(content, 'utf8');
+    });
+  }
+
+  async readFile(remotePath: string): Promise<string> {
+    // Use the same `cat` channel as run(), but expose only stdout. Caller
+    // gets a hard error on missing file (cat exits non-zero, run() resolves
+    // with code != 0 and we throw).
+    const escaped = `'${remotePath.replace(/'/g, `'\\''`)}'`;
+    const result = await this.run(`cat ${escaped}`);
+    if (result.code !== 0) {
+      throw new SshTransportError(
+        `ssh readFile exited ${result.code}: ${result.stderr.trim() || '(no output)'}`,
+      );
+    }
+    return result.stdout;
+  }
+
   /**
    * Resolve the alias and reject with a helpful error if no Host block
    * matched. All three transport entry points (run / putFile / getFile)

@@ -1,28 +1,26 @@
-// runModel — M3 chunks 3A + 3B + 3C: end-to-end NONMEM run orchestration.
+// runModel — remote-first NONMEM run orchestration.
 //
-// Pipeline (matches the per-run subdir discipline from nonmem-ssh-probe and
-// the §4 M2 spec in the design plan):
+// Pipeline (subdir-per-run discipline from nonmem-ssh-probe / design plan §4):
 //
 //   1. Generate runId = `pn-<unix-ts>`; record `started` timestamp.
 //   2. mkdir -p <remoteRoot>/<runId>.
-//   3. putFile <local m.mod> -> <remoteRoot>/<runId>/m.mod.
-//   4. If $DATA <token> present, putFile <local dataset> -> <remoteRoot>/<runId>/<basename>.
-//   5. Run `cd <remoteRoot>/<runId> && <nmfeBinary> m.mod m.lst > m.nmfe.log 2>&1; echo EXIT=$?`
-//      via the transport. The trailing `echo EXIT=$?` is how we recover the
-//      remote process exit code (the transport fires-and-forgets a single
-//      shell line; we cannot get $? out of it any other way).
+//   3. putFile <local m.mod>      -> <remoteRoot>/<runId>/m.mod.
+//   4. If $DATA <token> present:
+//      putFile <local dataset>    -> <remoteRoot>/<runId>/<basename>.
+//   5. Run `cd <remoteRoot>/<runId> && <nmfeBinary> m.mod m.lst > m.nmfe.log 2>&1; echo EXIT=$?`.
+//      The trailing `echo` is how we recover the exit code over the single-line
+//      transport.
 //   6. Parse `EXIT=N` from stdout.
-//   7. getFile m.lst (mandatory) + m.ext (best-effort) back to <localRunsDir>/<runId>/.
-//   8. Parse OFV from m.lst's `#OBJV:` banner line.
-//   9. Record `completed`; write manifest.json + append audit.jsonl
-//      (Improve-style provenance — datasetHash, modelHash, hostAlias, etc.).
+//   7. transport.readFile(`<remote>/m.lst`) → parse OFV from `#OBJV:` banner.
+//   8. Record `completed`; transport.writeFile(`<remote>/manifest.json`, …).
 //
-// Out of scope: dataset-path rewrite when $DATA points outside the .mod's
-// directory, Variables-pane comm, retry/cancel, line-ending normalisation.
-// Those land in chunk 3D and milestone M5+.
+// Out of scope (per "no local sync" decision):
+//   • Pulling outputs back to the workspace. The tree view + lazy
+//     FileSystemProvider replace `<workspace>/.positron-nonmem/runs/`.
+//   • Workspace-rooted audit.jsonl. Run discovery is now via remote `find`.
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { appendAudit, sha256File, writeManifest, type RunManifest } from './manifest';
+import { sha256File, writeManifest, type RunManifest } from './manifest';
 import type { Transport } from '../transport';
 
 export interface RunModelOptions {
@@ -32,34 +30,23 @@ export interface RunModelOptions {
   transport: Transport;
   /** Remote run root, e.g. `~/positron-nonmem`. */
   remoteRoot: string;
-  /** Local mirror root, e.g. `<workspace>/.positron-nonmem/runs`. */
-  localRunsDir: string;
   /** Path to nmfe76 on the remote host. */
   nmfeBinary: string;
   /** ~/.ssh/config alias of the host this run targets — recorded in manifest. */
   hostAlias: string;
   /** NONMEM version string for manifest provenance. */
   nonmemVersion: string;
-  /** Workspace-rooted append-only audit log, e.g. `<workspace>/.positron-nonmem/audit.jsonl`. */
-  auditLogPath: string;
 }
 
 export interface RunModelResult {
   runId: string;
   /** Exit code parsed from the remote `EXIT=$?` echo, or null if unparseable. */
   exitCode: number | null;
-  /** Local path the remote `m.lst` was downloaded to. */
-  lstPath: string;
-  /**
-   * Local path the remote `m.ext` was downloaded to (parameter trajectory),
-   * or null if the file didn't exist on the remote — happens when NMTRAN
-   * fails before estimation can start, in which case nmfe76 only writes
-   * m.lst and FMSG.
-   */
-  extPath: string | null;
-  /** Objective Function Value parsed from m.lst's `#OBJV:` line, or null. */
+  /** Remote run directory (also where m.lst / m.ext / manifest.json live). */
+  remoteRunDir: string;
+  /** OFV parsed from `<remote>/m.lst`'s `#OBJV:` line, or null when absent. */
   ofv: number | null;
-  /** Local path to the manifest.json written for this run. */
+  /** Remote path of the manifest written for this run. */
   manifestPath: string;
 }
 
@@ -68,9 +55,6 @@ export interface RunModelResult {
  * it verbatim (no path normalisation). Caller resolves it relative to
  * the .mod file's directory. Case-insensitive on the `$DATA` keyword
  * because NONMEM accepts lowercase record names.
- *
- * Out of scope: quoted paths (NONMEM doesn't really support them anyway),
- * multi-line $DATA continuations, NUL-byte handling.
  */
 export function parseDataFilename(modelText: string): string | undefined {
   for (const rawLine of modelText.split(/\r?\n/)) {
@@ -83,11 +67,8 @@ export function parseDataFilename(modelText: string): string | undefined {
 
 /**
  * Parse OFV from m.lst's `#OBJV:` banner line. NONMEM 7+ writes one
- * `#OBJV:` line per estimation step in machine-readable form; we take
- * the LAST occurrence so multi-$EST runs report the final objective.
- *
- * Returns null when the line is absent (e.g. NMTRAN-only failure that
- * never reached the estimation phase).
+ * `#OBJV:` line per estimation step; we take the LAST occurrence so
+ * multi-$EST runs report the final objective. Returns null when absent.
  */
 export function parseOfv(lstText: string): number | null {
   const re = /^\s*#OBJV:\s*\*+\s*(-?\d+(?:\.\d+)?(?:[eE][+\-]?\d+)?)\s*\*+/gm;
@@ -96,16 +77,7 @@ export function parseOfv(lstText: string): number | null {
 }
 
 export async function runModel(opts: RunModelOptions): Promise<RunModelResult> {
-  const {
-    modelPath,
-    transport,
-    remoteRoot,
-    localRunsDir,
-    nmfeBinary,
-    hostAlias,
-    nonmemVersion,
-    auditLogPath,
-  } = opts;
+  const { modelPath, transport, remoteRoot, nmfeBinary, hostAlias, nonmemVersion } = opts;
 
   // Validate inputs BEFORE any remote side-effects.
   let modelText: string;
@@ -121,7 +93,6 @@ export async function runModel(opts: RunModelOptions): Promise<RunModelResult> {
   const runId = `pn-${Date.now()}`;
   const started = new Date().toISOString();
   const remoteRunDir = `${remoteRoot}/${runId}`;
-  const localRunDir = path.join(localRunsDir, runId);
 
   await transport.run(`mkdir -p ${remoteRunDir}`);
 
@@ -139,24 +110,11 @@ export async function runModel(opts: RunModelOptions): Promise<RunModelResult> {
   const result = await transport.run(cmd);
   const exitCode = parseExitCode(result.stdout);
 
-  // m.lst is mandatory — it holds NMTRAN errors AND the OFV banner. If it
-  // failed to download, surface that as a hard error (caller toast).
-  const lstPath = path.join(localRunDir, 'm.lst');
-  await transport.getFile(`${remoteRunDir}/m.lst`, lstPath);
+  // Read m.lst remotely just to extract OFV; outputs stay on the host.
+  // NMTRAN-only failures may not produce an m.lst at all — tolerate that
+  // so the user still sees the EXIT in the toast.
+  const ofv = await tryReadOfv(transport, `${remoteRunDir}/m.lst`);
 
-  // m.ext is best-effort — NMTRAN-only failures never write it, in which
-  // case scp exits non-zero. Tolerate that so the user still sees the
-  // EXIT code + m.lst path in the toast (m.lst is where the error message
-  // lives). FMSG arrives later.
-  const extPath = await tryGetFile(
-    transport,
-    `${remoteRunDir}/m.ext`,
-    path.join(localRunDir, 'm.ext'),
-  );
-
-  const ofv = await readAndParseOfv(lstPath);
-
-  // Provenance — write manifest.json next to outputs, append one audit line.
   const manifest: RunManifest = {
     runId,
     started,
@@ -169,30 +127,15 @@ export async function runModel(opts: RunModelOptions): Promise<RunModelResult> {
     nonmemVersion,
     hostAlias,
   };
-  const manifestPath = await writeManifest(localRunDir, manifest);
-  await appendAudit(auditLogPath, manifest);
+  const manifestPath = await writeManifest(transport, remoteRunDir, manifest);
 
-  return { runId, exitCode, lstPath, extPath, ofv, manifestPath };
+  return { runId, exitCode, remoteRunDir, ofv, manifestPath };
 }
 
-/** getFile, but return null instead of throwing if the remote file is absent. */
-async function tryGetFile(
-  transport: Transport,
-  remotePath: string,
-  localPath: string,
-): Promise<string | null> {
+/** readFile + parseOfv, swallowing any error (missing file, parse miss) into null. */
+async function tryReadOfv(transport: Transport, remoteLstPath: string): Promise<number | null> {
   try {
-    await transport.getFile(remotePath, localPath);
-    return localPath;
-  } catch {
-    return null;
-  }
-}
-
-/** Read m.lst and pull OFV from it; missing file or no #OBJV line -> null. */
-async function readAndParseOfv(lstPath: string): Promise<number | null> {
-  try {
-    return parseOfv(await fs.readFile(lstPath, 'utf8'));
+    return parseOfv(await transport.readFile(remoteLstPath));
   } catch {
     return null;
   }

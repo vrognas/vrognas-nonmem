@@ -2,8 +2,6 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import {
   COMMAND,
-  LOCAL_AUDIT_FILE,
-  LOCAL_RUNS_SUBDIR,
   NMFE_BINARY,
   NONMEM_VERSION,
   OUTPUT_CHANNEL_NAME,
@@ -95,20 +93,16 @@ function registerRuntime(context: vscode.ExtensionContext, channel: vscode.Outpu
 }
 
 /**
- * "Run Current Model" command (M3 chunks 3A–3C) — uploads the active
- * `.mod` (plus any `$DATA`-referenced dataset sibling) to a per-run
- * remote subdir, runs nmfe76, pulls m.lst (mandatory) and m.ext
- * (best-effort) back to `<workspace>/.positron-nonmem/runs/<runId>/`,
- * writes a manifest.json with hashes/timestamps/hostAlias, and appends
- * one audit-log line. Surface EXIT and OFV in an info-message.
- *
- * Variables-pane wiring (3D) and the live-tail status bar (M3 plan)
- * still arrive later.
+ * "Run Current Model" command — uploads the active `.mod` (plus any
+ * `$DATA`-referenced dataset sibling) to `<remoteRoot>/<runId>/`, runs
+ * nmfe76, parses OFV from the remote m.lst, writes manifest.json
+ * remotely. Outputs stay on the host; the tree view + FileSystemProvider
+ * (M7) surface them lazily. Surface EXIT and OFV in an info-message.
  */
 async function runCurrentModel(): Promise<void> {
   const target = resolveActiveModelTarget();
   if (!target) return;
-  const { modelPath, workspaceFolder } = target;
+  const { modelPath } = target;
 
   let profile: HostProfile;
   let transport: Transport;
@@ -123,23 +117,19 @@ async function runCurrentModel(): Promise<void> {
     throw e;
   }
 
-  const localRunsDir = path.join(workspaceFolder.uri.fsPath, LOCAL_RUNS_SUBDIR);
-  const auditLogPath = path.join(workspaceFolder.uri.fsPath, LOCAL_AUDIT_FILE);
   log(`runModel: launching for ${modelPath}`);
   try {
     const result = await runModel({
       modelPath,
       transport,
       remoteRoot: REMOTE_RUN_ROOT,
-      localRunsDir,
       nmfeBinary: NMFE_BINARY,
       hostAlias: profile.alias,
       nonmemVersion: NONMEM_VERSION,
-      auditLogPath,
     });
     const exit = result.exitCode ?? 'unknown';
     const ofv = result.ofv !== null ? `, OFV=${result.ofv}` : '';
-    log(`runModel: ${result.runId} EXIT=${exit}${ofv} -> ${result.lstPath}`);
+    log(`runModel: ${result.runId} EXIT=${exit}${ofv} -> ${result.remoteRunDir}`);
     await vscode.window.showInformationMessage(`Run ${result.runId}: EXIT=${exit}${ofv}`);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -150,13 +140,12 @@ async function runCurrentModel(): Promise<void> {
 
 interface ActiveModelTarget {
   modelPath: string;
-  workspaceFolder: vscode.WorkspaceFolder;
 }
 
 /** Recognised NMTRAN control-stream extensions. Used as a fallback when vscode-nmtran (which sets languageId=nmtran) isn't installed. */
 const NMTRAN_FILE_EXTENSIONS = new Set(['.mod', '.ctl']);
 
-/** Resolve the active editor's .mod file plus its workspace folder, or null with a user-facing error toast. */
+/** Resolve the active editor's .mod file path, or null with a user-facing error toast. */
 function resolveActiveModelTarget(): ActiveModelTarget | null {
   const editor = vscode.window.activeTextEditor;
   if (!editor || !isNmtranEditor(editor)) {
@@ -165,14 +154,7 @@ function resolveActiveModelTarget(): ActiveModelTarget | null {
     );
     return null;
   }
-  const workspaceFolder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
-  if (!workspaceFolder) {
-    void vscode.window.showErrorMessage(
-      'Positron NONMEM: the .mod file must live inside an open workspace folder.',
-    );
-    return null;
-  }
-  return { modelPath: editor.document.uri.fsPath, workspaceFolder };
+  return { modelPath: editor.document.uri.fsPath };
 }
 
 function isNmtranEditor(editor: vscode.TextEditor): boolean {

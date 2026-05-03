@@ -47,4 +47,19 @@ export interface Transport {
 
   /** Download a remote file to a local path. Mirror of putFile. */
   getFile(remotePath: string, localPath: string): Promise<void>;
+
+  /**
+   * Write `content` (UTF-8) directly to a remote path. Use when the
+   * payload is generated in-memory (e.g. `manifest.json`) and we don't
+   * want to round-trip through a local temp file. Parent directory must
+   * already exist (callers typically `mkdir -p` it via `run` first).
+   */
+  writeFile(remotePath: string, content: string): Promise<void>;
+
+  /**
+   * Read a remote text file into memory. Mirror of writeFile. Returns
+   * the UTF-8 content. Throws when the path doesn't exist (caller may
+   * catch and treat absence as "no run output yet").
+   */
+  readFile(remotePath: string): Promise<string>;
 }

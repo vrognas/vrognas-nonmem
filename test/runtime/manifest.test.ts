@@ -2,12 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import {
-  sha256File,
-  writeManifest,
-  appendAudit,
-  type RunManifest,
-} from '../../src/runtime/manifest';
+import { sha256File, writeManifest, type RunManifest } from '../../src/runtime/manifest';
+import type { Transport } from '../../src/transport';
 
 let tmp: string;
 
@@ -35,11 +31,27 @@ function fixtureManifest(overrides: Partial<RunManifest> = {}): RunManifest {
   };
 }
 
+/** Records writeFile/run/etc calls; default no-op behaviour is enough for these tests. */
+class RecorderTransport implements Transport {
+  readonly kind = 'local' as const;
+  readonly writes: { remotePath: string; content: string }[] = [];
+  async run(): Promise<{ code: number; stdout: string; stderr: string }> {
+    return { code: 0, stdout: '', stderr: '' };
+  }
+  async putFile(): Promise<void> {}
+  async getFile(): Promise<void> {}
+  async writeFile(remotePath: string, content: string): Promise<void> {
+    this.writes.push({ remotePath, content });
+  }
+  async readFile(): Promise<string> {
+    return '';
+  }
+}
+
 describe('sha256File', () => {
   it('hashes "hello" to the canonical sha256 (literal-bytes oracle)', async () => {
     const p = path.join(tmp, 'hello.txt');
     fs.writeFileSync(p, 'hello');
-    // Independently verifiable: `printf hello | sha256sum`.
     expect(await sha256File(p)).toBe(
       '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824',
     );
@@ -55,51 +67,31 @@ describe('sha256File', () => {
 });
 
 describe('writeManifest', () => {
-  it('writes a JSON file with all fields', async () => {
+  it('writes manifest.json under the remote run dir via the transport', async () => {
+    const t = new RecorderTransport();
     const m = fixtureManifest();
-    const out = await writeManifest(tmp, m);
-    expect(out).toBe(path.join(tmp, 'manifest.json'));
-    const parsed = JSON.parse(fs.readFileSync(out, 'utf8'));
-    expect(parsed).toEqual(m);
+    const out = await writeManifest(t, '~/positron-nonmem/pn-1234', m);
+    expect(out).toBe('~/positron-nonmem/pn-1234/manifest.json');
+    expect(t.writes).toHaveLength(1);
+    expect(t.writes[0].remotePath).toBe('~/positron-nonmem/pn-1234/manifest.json');
+    expect(JSON.parse(t.writes[0].content)).toEqual(m);
   });
 
   it('omits parentRunId when undefined (clean shape for first-gen runs)', async () => {
-    await writeManifest(tmp, fixtureManifest());
-    const text = fs.readFileSync(path.join(tmp, 'manifest.json'), 'utf8');
-    expect(text).not.toContain('parentRunId');
+    const t = new RecorderTransport();
+    await writeManifest(t, '/tmp/run', fixtureManifest());
+    expect(t.writes[0].content).not.toContain('parentRunId');
   });
 
   it('includes parentRunId when provided (lineage chain)', async () => {
-    await writeManifest(tmp, fixtureManifest({ parentRunId: 'pn-9999' }));
-    const parsed = JSON.parse(fs.readFileSync(path.join(tmp, 'manifest.json'), 'utf8'));
-    expect(parsed.parentRunId).toBe('pn-9999');
+    const t = new RecorderTransport();
+    await writeManifest(t, '/tmp/run', fixtureManifest({ parentRunId: 'pn-9999' }));
+    expect(JSON.parse(t.writes[0].content).parentRunId).toBe('pn-9999');
   });
 
   it('NEVER serialises a hostname-shaped field (privacy hygiene)', async () => {
-    // Belt-and-braces: the type doesn't permit it, but make sure no caller
-    // can leak through some future "extra fields" path.
-    const m = fixtureManifest();
-    await writeManifest(tmp, m);
-    const text = fs.readFileSync(path.join(tmp, 'manifest.json'), 'utf8');
-    expect(text).not.toMatch(/hostname/i);
-  });
-});
-
-describe('appendAudit', () => {
-  it('appends one JSON line per call (creates file if missing)', async () => {
-    const log = path.join(tmp, 'audit.jsonl');
-    await appendAudit(log, fixtureManifest({ runId: 'pn-1' }));
-    await appendAudit(log, fixtureManifest({ runId: 'pn-2' }));
-
-    const lines = fs.readFileSync(log, 'utf8').trimEnd().split('\n');
-    expect(lines).toHaveLength(2);
-    expect(JSON.parse(lines[0]).runId).toBe('pn-1');
-    expect(JSON.parse(lines[1]).runId).toBe('pn-2');
-  });
-
-  it('creates parent directories on first append', async () => {
-    const log = path.join(tmp, 'nested', 'subdir', 'audit.jsonl');
-    await appendAudit(log, fixtureManifest());
-    expect(fs.existsSync(log)).toBe(true);
+    const t = new RecorderTransport();
+    await writeManifest(t, '/tmp/run', fixtureManifest());
+    expect(t.writes[0].content).not.toMatch(/hostname/i);
   });
 });

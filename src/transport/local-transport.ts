@@ -80,4 +80,15 @@ export class LocalTransport implements Transport {
     await fs.mkdir(path.dirname(localPath), { recursive: true });
     await fs.copyFile(src, localPath);
   }
+
+  async writeFile(remotePath: string, content: string): Promise<void> {
+    const dst = expandHome(remotePath);
+    await fs.mkdir(path.dirname(dst), { recursive: true });
+    await fs.writeFile(dst, content, 'utf8');
+  }
+
+  async readFile(remotePath: string): Promise<string> {
+    const src = expandHome(remotePath);
+    return fs.readFile(src, 'utf8');
+  }
 }

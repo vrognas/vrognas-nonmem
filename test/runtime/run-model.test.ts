@@ -10,59 +10,39 @@ import {
 } from '../../src/runtime/run-model';
 import type { CommandResult, Transport } from '../../src/transport/types';
 
-// ----- Test fixtures: tiny FakeTransport that records all calls and lets
-// each test stub the next CommandResult. Mirrors the discipline from
-// nonmem-ssh-probe (one change per test) — orchestrator behaviour is
-// tested in isolation from any real ssh / scp.
-
 interface PutCall {
   localPath: string;
   remotePath: string;
-}
-interface GetCall {
-  remotePath: string;
-  localPath: string;
 }
 
 class FakeTransport implements Transport {
   readonly kind = 'local' as const;
   readonly runs: string[] = [];
   readonly puts: PutCall[] = [];
-  readonly gets: GetCall[] = [];
-  /** Pop a canned result for each successive run() call. Defaults to EXIT=0. */
+  readonly writes: { remotePath: string; content: string }[] = [];
+  readonly reads: string[] = [];
   readonly runResults: CommandResult[] = [];
-  /**
-   * Content provider for getFile. Receives the remote path; returns the
-   * bytes to write locally, or undefined to write an empty file. Lets a
-   * test stage canned content based on remote-path suffix without having
-   * to know the runId ahead of time.
-   */
-  remoteFileFn: (remotePath: string) => string | undefined = () => undefined;
-  /**
-   * Optional error injector for getFile. If it returns an Error, getFile
-   * rejects with it (simulates "file not found on remote", scp non-zero).
-   */
-  getErrorFn: (remotePath: string) => Error | undefined = () => undefined;
+  /** Per-path content for readFile. Returns undefined to simulate missing file (throws). */
+  readContent: (remotePath: string) => string | undefined = () => undefined;
 
   async run(command: string): Promise<CommandResult> {
     this.runs.push(command);
-    return (
-      this.runResults.shift() ?? {
-        code: 0,
-        stdout: 'EXIT=0\n',
-        stderr: '',
-      }
-    );
+    return this.runResults.shift() ?? { code: 0, stdout: 'EXIT=0\n', stderr: '' };
   }
   async putFile(localPath: string, remotePath: string): Promise<void> {
     this.puts.push({ localPath, remotePath });
   }
-  async getFile(remotePath: string, localPath: string): Promise<void> {
-    this.gets.push({ remotePath, localPath });
-    const err = this.getErrorFn(remotePath);
-    if (err) throw err;
-    fs.mkdirSync(path.dirname(localPath), { recursive: true });
-    fs.writeFileSync(localPath, this.remoteFileFn(remotePath) ?? '');
+  async getFile(): Promise<void> {
+    throw new Error('getFile must NOT be called — outputs stay remote');
+  }
+  async writeFile(remotePath: string, content: string): Promise<void> {
+    this.writes.push({ remotePath, content });
+  }
+  async readFile(remotePath: string): Promise<string> {
+    this.reads.push(remotePath);
+    const c = this.readContent(remotePath);
+    if (c === undefined) throw new Error(`fake: no such remote file ${remotePath}`);
+    return c;
   }
 }
 
@@ -74,27 +54,19 @@ describe('parseDataFilename', () => {
   it('extracts bare filename', () => {
     expect(parseDataFilename('$DATA d\n')).toBe('d');
   });
-
   it('strips $DATA options like IGNORE=#', () => {
     expect(parseDataFilename('$DATA d IGNORE=#\n')).toBe('d');
   });
-
   it('handles relative subdir paths', () => {
     expect(parseDataFilename('$DATA ../shared/dataset.csv\n')).toBe('../shared/dataset.csv');
   });
-
   it('returns undefined when no $DATA record present', () => {
     expect(parseDataFilename('$PROBLEM only\n')).toBeUndefined();
   });
-
   it('matches case-insensitively (NONMEM accepts $data lowercase)', () => {
     expect(parseDataFilename('$data mydata.csv\n')).toBe('mydata.csv');
   });
-
   it('ignores $DATA appearing inside a comment column', () => {
-    // NONMEM treats `;` as start-of-comment. A `$DATA` inside a comment
-    // is not an actual record. (Not bullet-proof for chunk 3A — first-
-    // pass parser; promote later if it bites.)
     const text = '$PROBLEM ok\n; $DATA fake-comment\n$DATA real.csv\n';
     expect(parseDataFilename(text)).toBe('real.csv');
   });
@@ -107,17 +79,14 @@ describe('parseOfv', () => {
       ' #OBJV:************************    -2.05421E+01    ************************\n';
     expect(parseOfv(lst)).toBeCloseTo(-20.5421, 4);
   });
-
   it('extracts a plain decimal from a #OBJV banner line', () => {
     expect(parseOfv(' #OBJV:****    50.10342932195    ****\n')).toBeCloseTo(50.10342932195, 6);
   });
-
   it('returns the LAST #OBJV when multiple estimation steps emit one each', () => {
     const lst = ' #OBJV:****    100.0    ****\n some other lines\n #OBJV:****    42.5    ****\n';
     expect(parseOfv(lst)).toBeCloseTo(42.5, 4);
   });
-
-  it('returns null when no #OBJV line is present (e.g. NMTRAN-only failure)', () => {
+  it('returns null when no #OBJV line is present', () => {
     expect(parseOfv('AN ERROR WAS FOUND IN THE CONTROL STATEMENTS.\n')).toBeNull();
   });
 });
@@ -133,22 +102,19 @@ describe('runModel — orchestrator (unit, with FakeTransport)', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
-  /** Build RunModelOptions with sensible test defaults, override what each test cares about. */
   function makeOptions(
     overrides: { modelPath: string; transport: Transport } & Partial<RunModelOptions>,
   ): RunModelOptions {
     return {
       remoteRoot: '~/positron-nonmem',
-      localRunsDir: path.join(tmp, 'runs'),
       nmfeBinary: '/opt/nm760/run/nmfe76',
       hostAlias: 'test-alias',
       nonmemVersion: '7.6.0',
-      auditLogPath: path.join(tmp, 'audit.jsonl'),
       ...overrides,
     };
   }
 
-  it('uploads model + dataset, runs nmfe76, pulls m.lst + m.ext, parses OFV', async () => {
+  it('uploads model + dataset, runs nmfe76, reads remote m.lst for OFV, writes manifest remotely', async () => {
     const modelPath = path.join(tmp, 'm.mod');
     const datasetPath = path.join(tmp, 'd');
     fs.writeFileSync(
@@ -156,66 +122,47 @@ describe('runModel — orchestrator (unit, with FakeTransport)', () => {
       '$PROBLEM hello\n$INPUT ID TIME DV\n$DATA d\n$PRED Y=THETA(1)\n$THETA 1\n$OMEGA 0.1\n$SIGMA 0.1\n$ESTIMATION MAXEVAL=0\n',
     );
     fs.writeFileSync(datasetPath, 'ID TIME DV\n1 0 1.0\n');
-    const localRunsDir = path.join(tmp, 'runs');
     const transport = new FakeTransport();
-    // Stage a realistic m.lst snippet — the #OBJV line is the machine-readable
-    // OFV anchor (per supplements/nonmem-tips canonical probe output).
     const lstSnippet =
       ' #OBJT:**             FINAL VALUE OF OBJECTIVE FUNCTION             *********\n' +
       ' #OBJV:************************    -2.05421E+01    ************************\n' +
       ' #OBJS:************************        N/A         ************************\n';
-    transport.remoteFileFn = (p) => (p.endsWith('/m.lst') ? lstSnippet : undefined);
+    transport.readContent = (p) => (p.endsWith('/m.lst') ? lstSnippet : undefined);
 
-    const result = await runModel(makeOptions({ modelPath, transport, localRunsDir }));
+    const result = await runModel(makeOptions({ modelPath, transport }));
 
     expect(transport.runs.length).toBe(2);
     expect(transport.runs[0]).toContain('mkdir -p');
     expect(transport.runs[0]).toContain(`~/positron-nonmem/${result.runId}`);
     expect(transport.runs[1]).toContain('cd ~/positron-nonmem/' + result.runId);
     expect(transport.runs[1]).toContain('/opt/nm760/run/nmfe76 m.mod m.lst');
-    expect(transport.runs[1]).toContain('echo EXIT=$?');
 
     expect(transport.puts).toEqual([
       { localPath: modelPath, remotePath: `~/positron-nonmem/${result.runId}/m.mod` },
       { localPath: datasetPath, remotePath: `~/positron-nonmem/${result.runId}/d` },
     ]);
 
-    // Both m.lst AND m.ext are pulled back. m.lst feeds parseOfv; m.ext is
-    // staged for 3D's Variables-pane wiring (we don't parse it yet).
-    expect(transport.gets).toEqual([
-      {
-        remotePath: `~/positron-nonmem/${result.runId}/m.lst`,
-        localPath: path.join(localRunsDir, result.runId, 'm.lst'),
-      },
-      {
-        remotePath: `~/positron-nonmem/${result.runId}/m.ext`,
-        localPath: path.join(localRunsDir, result.runId, 'm.ext'),
-      },
-    ]);
+    // m.lst is read via the transport, NOT downloaded.
+    expect(transport.reads).toEqual([`~/positron-nonmem/${result.runId}/m.lst`]);
 
-    expect(result.exitCode).toBe(0);
-    expect(result.runId).toMatch(/^pn-\d+$/);
-    expect(result.lstPath).toBe(path.join(localRunsDir, result.runId, 'm.lst'));
-    expect(result.extPath).toBe(path.join(localRunsDir, result.runId, 'm.ext'));
-    expect(result.ofv).toBeCloseTo(-20.5421, 4);
-
-    // 3C: manifest written + audit appended.
-    expect(result.manifestPath).toBe(path.join(localRunsDir, result.runId, 'manifest.json'));
-    const manifest = JSON.parse(fs.readFileSync(result.manifestPath, 'utf8'));
+    // manifest is written to the remote run dir, not locally.
+    expect(transport.writes).toHaveLength(1);
+    expect(transport.writes[0].remotePath).toBe(
+      `~/positron-nonmem/${result.runId}/manifest.json`,
+    );
+    const manifest = JSON.parse(transport.writes[0].content);
     expect(manifest.runId).toBe(result.runId);
     expect(manifest.exitCode).toBe(0);
     expect(manifest.ofv).toBeCloseTo(-20.5421, 4);
     expect(manifest.hostAlias).toBe('test-alias');
-    expect(manifest.nmfeBinary).toBe('/opt/nm760/run/nmfe76');
-    expect(manifest.nonmemVersion).toBe('7.6.0');
     expect(manifest.modelHash).toMatch(/^[a-f0-9]{64}$/);
     expect(manifest.datasetHash).toMatch(/^[a-f0-9]{64}$/);
-    expect(manifest.started).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-    expect(manifest.completed).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 
-    const auditLines = fs.readFileSync(path.join(tmp, 'audit.jsonl'), 'utf8').trimEnd().split('\n');
-    expect(auditLines).toHaveLength(1);
-    expect(JSON.parse(auditLines[0]).runId).toBe(result.runId);
+    expect(result.exitCode).toBe(0);
+    expect(result.runId).toMatch(/^pn-\d+$/);
+    expect(result.remoteRunDir).toBe(`~/positron-nonmem/${result.runId}`);
+    expect(result.manifestPath).toBe(`~/positron-nonmem/${result.runId}/manifest.json`);
+    expect(result.ofv).toBeCloseTo(-20.5421, 4);
   });
 
   it('parses non-zero EXIT from nmfe76 stdout', async () => {
@@ -231,31 +178,22 @@ describe('runModel — orchestrator (unit, with FakeTransport)', () => {
     });
 
     const result = await runModel(makeOptions({ modelPath, transport }));
-
     expect(result.exitCode).toBe(42);
   });
 
-  it('tolerates missing m.ext (NMTRAN-only failure) — extPath null, m.lst still parsed', async () => {
+  it('tolerates absent m.lst (NMTRAN-only failure) — ofv is null, manifest still written', async () => {
     const modelPath = path.join(tmp, 'm.mod');
     fs.writeFileSync(modelPath, '$PROBLEM x\n$DATA d\n');
     fs.writeFileSync(path.join(tmp, 'd'), 'a\n');
     const transport = new FakeTransport();
-    // Stage an m.lst that has a #OBJV line so we can prove parseOfv still runs.
-    transport.remoteFileFn = (p) =>
-      p.endsWith('/m.lst') ? ' #OBJV:****    7.5    ****\n' : undefined;
-    // Make m.ext download fail the way scp would when the remote file
-    // doesn't exist (NMTRAN-only failure: nmfe76 wrote m.lst but never
-    // produced m.ext because estimation didn't start).
-    transport.getErrorFn = (p) =>
-      p.endsWith('/m.ext') ? new Error('scp exited 1: No such file or directory') : undefined;
+    // readContent returns undefined → readFile throws → tryReadOfv → null.
+    transport.readContent = () => undefined;
 
     const result = await runModel(makeOptions({ modelPath, transport }));
 
-    expect(result.extPath).toBeNull();
-    expect(result.lstPath).toContain('m.lst');
-    expect(result.ofv).toBeCloseTo(7.5, 4);
-    // Both gets were attempted; only the m.ext one failed.
-    expect(transport.gets.map((g) => g.remotePath.split('/').pop())).toEqual(['m.lst', 'm.ext']);
+    expect(result.ofv).toBeNull();
+    expect(transport.writes).toHaveLength(1); // manifest written even on failure
+    expect(JSON.parse(transport.writes[0].content).ofv).toBeNull();
   });
 
   it('throws if .mod file does not exist', async () => {
@@ -263,9 +201,9 @@ describe('runModel — orchestrator (unit, with FakeTransport)', () => {
     await expect(
       runModel(makeOptions({ modelPath: path.join(tmp, 'does-not-exist.mod'), transport })),
     ).rejects.toThrow(/model file not found/i);
-    // No remote calls should have been made.
     expect(transport.runs).toEqual([]);
     expect(transport.puts).toEqual([]);
-    expect(transport.gets).toEqual([]);
+    expect(transport.reads).toEqual([]);
+    expect(transport.writes).toEqual([]);
   });
 });

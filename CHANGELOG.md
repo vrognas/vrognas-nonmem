@@ -7,6 +7,25 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **Remote-first architecture (M7-prep).** Run outputs (`m.lst`,
+  `m.ext`, `manifest.json`) now stay on the host. Previous behaviour
+  pulled `m.lst` + `m.ext` back to `<workspace>/.positron-nonmem/runs/<runId>/`
+  and wrote `manifest.json` + `audit.jsonl` locally — all gone.
+  - `runModel` no longer accepts `localRunsDir` / `auditLogPath`; result
+    drops `lstPath` / `extPath` / `manifestPath` (local) and gains
+    `remoteRunDir` / `manifestPath` (remote).
+  - OFV is now extracted by `transport.readFile('<remote>/m.lst')` +
+    `parseOfv` instead of downloading the file.
+  - Manifest is written via `transport.writeFile('<remote>/manifest.json', …)`.
+  - `audit.jsonl` removed entirely. The tree view (M7) discovers runs by
+    scanning the remote root with `find`; the per-developer JSONL audit
+    is redundant given that.
+  - Constants `LOCAL_RUNS_SUBDIR` / `LOCAL_AUDIT_FILE` removed.
+- **`Transport` interface gains `writeFile(remotePath, content)` and
+  `readFile(remotePath)`**. `LocalTransport` wraps `fs`; `SshTransport`
+  pipes via `ssh <alias> 'cat > path'` (write) / `ssh <alias> 'cat path'`
+  (read), with the path single-quoted to defend against exotic names.
+
 - `chore: equation display_name prefixes the owning $RECORD`. Setting
   `has_viewer: true` causes Positron's frontend to replace the
   display_type cell with the View action button, hiding the `$PRED` /

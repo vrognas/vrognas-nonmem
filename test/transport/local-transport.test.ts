@@ -73,6 +73,19 @@ describe('LocalTransport.putFile / getFile', () => {
     expect(fs.readFileSync(dst, 'utf8')).toBe('world');
   });
 
+  it('writeFile creates the file with UTF-8 content (creates parent dirs)', async () => {
+    const dst = path.join(tmp, 'nested', 'manifest.json');
+    await new LocalTransport().writeFile(dst, '{"runId":"pn-1"}\n');
+    expect(fs.readFileSync(dst, 'utf8')).toBe('{"runId":"pn-1"}\n');
+  });
+
+  it('readFile returns UTF-8 content; throws on missing path', async () => {
+    const src = path.join(tmp, 'r.txt');
+    fs.writeFileSync(src, 'remote-bytes');
+    expect(await new LocalTransport().readFile(src)).toBe('remote-bytes');
+    await expect(new LocalTransport().readFile(path.join(tmp, 'no.txt'))).rejects.toThrow();
+  });
+
   it('expands a leading ~ to os.homedir() (so $HOME-rooted paths from the host pattern work)', async () => {
     // Use a unique filename under the user's actual home dir (we must clean up).
     const home = os.homedir();

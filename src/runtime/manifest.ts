@@ -1,11 +1,11 @@
-// Per-run provenance: manifest.json sits in <localRunDir>; audit.jsonl
-// is appended once per run at the workspace root. Captures everything
-// downstream consumers (lineage view, run-comparison) need without
-// re-reading the raw outputs. Privacy: hostAlias only — never the
-// resolved hostname.
+// Per-run provenance manifest. Lives next to outputs on the REMOTE host
+// (`<remoteRunDir>/manifest.json`) — we don't sync it locally. The tree
+// view + future lineage view discover runs by scanning the remote root
+// and read manifests via Transport.readFile on demand. Privacy: hostAlias
+// only — never the resolved hostname.
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
-import * as path from 'node:path';
+import type { Transport } from '../transport';
 
 export interface RunManifest {
   runId: string;
@@ -31,21 +31,24 @@ export interface RunManifest {
   parentRunId?: string;
 }
 
+/**
+ * sha256 of a LOCAL file (used to hash the .mod / dataset BEFORE we
+ * upload them — at that point the bytes are local, hashing them on the
+ * remote would be wasted round-trips). Outputs we hash post-run live
+ * remotely; for those callers should `transport.run('sha256sum …')`.
+ */
 export async function sha256File(filePath: string): Promise<string> {
   const data = await fs.readFile(filePath);
   return crypto.createHash('sha256').update(data).digest('hex');
 }
 
-/** Write `<localRunDir>/manifest.json`; returns the path. */
-export async function writeManifest(localRunDir: string, m: RunManifest): Promise<string> {
-  await fs.mkdir(localRunDir, { recursive: true });
-  const manifestPath = path.join(localRunDir, 'manifest.json');
-  await fs.writeFile(manifestPath, JSON.stringify(m, null, 2) + '\n');
-  return manifestPath;
-}
-
-/** Append a one-line JSON record to the workspace audit log; creates the file/parents on first use. */
-export async function appendAudit(auditLogPath: string, m: RunManifest): Promise<void> {
-  await fs.mkdir(path.dirname(auditLogPath), { recursive: true });
-  await fs.appendFile(auditLogPath, JSON.stringify(m) + '\n');
+/** Write `<remoteRunDir>/manifest.json` via the transport. Returns the remote path. */
+export async function writeManifest(
+  transport: Transport,
+  remoteRunDir: string,
+  m: RunManifest,
+): Promise<string> {
+  const remotePath = `${remoteRunDir}/manifest.json`;
+  await transport.writeFile(remotePath, JSON.stringify(m, null, 2) + '\n');
+  return remotePath;
 }
