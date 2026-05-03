@@ -177,6 +177,12 @@ export class SshTransport implements Transport {
         { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true },
       );
       let stderr = '';
+      // MUST drain stdout even though we don't use it. With VisualHostKey
+      // yes (or other chatty config) the ssh client writes banner output
+      // to stdout; if we don't read it the OS pipe buffer fills (~64KB
+      // on Linux) and the child blocks forever waiting for someone to
+      // consume it. run() drains both pipes for the same reason.
+      child.stdout.on('data', () => {});
       child.stderr.on('data', (data: Buffer) => {
         stderr += data.toString('utf8');
       });

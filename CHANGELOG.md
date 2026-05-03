@@ -7,6 +7,16 @@ All notable changes documented here. Format follows
 
 ### Fixed
 
+- `fix: ssh writeFile hung when remote ssh emits stdout banners`. With
+  `VisualHostKey yes` (or any other chatty ssh config) the client writes
+  fingerprint art to stdout. writeFile() registered a stderr listener
+  but no stdout listener, so the OS pipe buffer (~64KB) filled and the
+  ssh child blocked forever — the run completed remotely but the manifest
+  was never written and no toast surfaced. Now drains stdout symmetrically
+  with `run()`.
+
+### Fixed
+
 - `fix: ssh writeFile / readFile broke ~ expansion`. v0.0.17 single-quoted
   the path passed to `cat > / cat`, which made bash treat `~` as a
   literal so `~/positron-nonmem/.../manifest.json` failed with
