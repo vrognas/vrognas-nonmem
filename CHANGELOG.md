@@ -5,6 +5,12 @@ All notable changes documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- `feat: NONMEM runtime icon` — bold "NM" monogram on a teal rounded square
+  shows in the Positron session picker, distinguishing it from R (blue) and
+  Python. SVG is inlined and base64-encoded at module load; no asset file IO.
+
 ### Fixed
 
 - `fix: Variables comm wire format`. v0.0.7 used the legacy `{msg_type, ...}`
