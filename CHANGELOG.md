@@ -5,6 +5,17 @@ All notable changes documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `fix: Variables comm wire format`. v0.0.7 used the legacy `{msg_type, ...}`
+  envelope from positron-javascript's `variables.ts` reference, which the
+  current Positron frontend drops as "unexpected message". The actual wire
+  format is JSON-RPC per `positron/comms/variables-frontend-openrpc.json`:
+  outbound events use `{method: 'refresh', params: {variables, length, version}}`.
+  Inbound RPCs are `list / clear / delete / inspect / clipboard_format / view` —
+  we currently respond to `list` only by re-pushing a refresh. Also added the
+  spec-required `updated_time` field on each Variable.
+
 ### Added
 
 - `feat: file-context-aware Variables pane`. NONMEM sessions now serve a

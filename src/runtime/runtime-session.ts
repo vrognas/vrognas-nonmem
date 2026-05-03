@@ -244,7 +244,7 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
     // machinery doesn't treat the session as broken.
     if (type === this.positron.RuntimeClientType.Variables) {
       this.variablesClients.add(id);
-      this.pushVariablesList(id);
+      this.pushVariablesRefresh(id);
     }
   }
 
@@ -269,29 +269,35 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
     message: Record<string, unknown>,
   ): void {
     if (!this.variablesClients.has(client_id)) return;
-    // Wire format mirrors positron-javascript/src/variables.ts: front-end
-    // sends `{ msg_type: 'refresh' | 'inspect' | 'clipboard_format' }`. For
-    // 3D we only need 'refresh' — file-context-aware view, no expanded
-    // inspection yet.
-    if (message['msg_type'] === 'refresh') {
-      this.pushVariablesList(client_id);
+    // Wire format is JSON-RPC per positron/comms/variables-backend-openrpc.json.
+    // Backend RPCs the frontend may call: list, clear, delete, inspect,
+    // clipboard_format, view. For 3D we just respond to `list` by pushing a
+    // fresh `refresh` event; the other RPCs aren't load-bearing for the
+    // file-context-aware view (no mutability, no inspection yet).
+    if (message['method'] === 'list') {
+      this.pushVariablesRefresh(client_id);
     }
   }
 
-  /** Update the current model snapshot and push a fresh `list` to every open Variables comm. */
+  /** Update the current model snapshot and push a fresh `refresh` event to every open Variables comm. */
   setParsedModel(model: NmtranParsedModel | null): void {
     this.currentParsedModel = model;
-    for (const id of this.variablesClients) this.pushVariablesList(id);
+    for (const id of this.variablesClients) this.pushVariablesRefresh(id);
   }
 
-  private pushVariablesList(commId: string): void {
+  private pushVariablesRefresh(commId: string): void {
     const variables: Variable[] = this.currentParsedModel
       ? mapParsedModelToVariables(this.currentParsedModel)
       : [];
+    // Frontend event from positron/comms/variables-frontend-openrpc.json:
+    //   method=refresh, params={ variables, length, version }
     this.emitCommMessage(commId, {
-      msg_type: 'list',
-      variables,
-      length: variables.length,
+      method: 'refresh',
+      params: {
+        variables,
+        length: variables.length,
+        version: 0,
+      },
     });
   }
 

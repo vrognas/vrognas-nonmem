@@ -10,9 +10,9 @@
 import type { NmtranParsedModel, NmtranEquation } from '../nmtran-client';
 
 /**
- * Single Variables-pane row. Field names are dictated by Positron's
- * frontend; `kind` drives icon + interaction, `display_*` drive the
- * visible cells.
+ * Single Variables-pane row. Field names + required-ness come from
+ * positron/comms/variables-backend-openrpc.json. `kind` drives icon +
+ * interaction, `display_*` drive the visible cells.
  */
 export interface Variable {
   access_key: string;
@@ -26,6 +26,8 @@ export interface Variable {
   size: number;
   is_truncated: boolean;
   has_viewer: boolean;
+  /** Milliseconds since epoch, or 0 if not tracked. */
+  updated_time: number;
 }
 
 /** Convert a parsed-model snapshot into Positron Variables-pane rows. */
@@ -110,5 +112,6 @@ function leaf(args: {
     size: 0,
     is_truncated: false,
     has_viewer: false,
+    updated_time: 0,
   };
 }
