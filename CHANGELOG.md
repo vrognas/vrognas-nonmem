@@ -5,6 +5,40 @@ All notable changes documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Architecture: drop our own SSH layer; rely on Positron Remote SSH.**
+  We were reimplementing a slice of what Positron Remote SSH already does
+  better (alias resolution, control-master sessions, hostname scrubbing,
+  banner draining, `~` expansion …) and kept tripping on edge cases. The
+  contract now is: the extension must be able to invoke `nmfe76` on the
+  host it's running on. Use Positron's Remote SSH to put yourself on a
+  host that has NONMEM, or install locally.
+  - **Removed**: SSH transport, scp put/get, host-alias settings, host
+    profile resolver, `positron-nonmem://` FileSystemProvider, alias-
+    keyed runtime metadata, manifest writing, audit log, "Test Connection"
+    and "Open Remote Path" debug commands. ~1000 lines deleted.
+  - **Replaced**: Transport interface → tiny `Runner` interface (just
+    `run(cmd, cwd?)`). Single `LocalRunner` impl wraps `child_process.spawn`.
+  - **runModel** now runs `nmfe76` in the .mod's directory with classic
+    NONMEM naming: `colistin.mod` → `colistin.lst` next to it. No more
+    `pn-<ts>` subdirs, no manifest.json, no `m.lst` rename. Indistinguishable
+    from a hand-rolled `nmfe76` invocation — the extension is invisible to
+    runs done other ways (Pirana, PsN, hand-rolled).
+  - **Runs tree** now scans the open workspace folders via
+    `vscode.workspace.findFiles('**/*.lst')` (respects `.gitignore`,
+    excludes `node_modules` and `.git`) and emits plain `file://` URIs.
+    Auto-refreshes on `.lst` create / change / delete.
+  - **Runtime registration** probes `nmfe76` at activation (configurable
+    via `positronNonmem.nmfeBinary`). If absent, runtime isn't registered
+    and the user gets a one-line "use Remote SSH or install locally"
+    message in the Output channel.
+  - **Setting** `positronNonmem.nmfeBinary` (default `nmfe76`) replaces
+    `positronNonmem.host.alias` / `host.transport` / `runs.root`.
+- **`.vscode/launch.json`**: added a "Launch Extension (Remote SSH)"
+  config so the dev host can be brought up directly inside a Remote-SSH
+  session against the NONMEM box.
+
 ### Fixed
 
 - `fix: positron-nonmem:// FS provider stripped leading / on absolute paths`.

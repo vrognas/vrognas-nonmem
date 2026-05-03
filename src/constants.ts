@@ -7,19 +7,15 @@ export const EXTENSION_ID = 'vrognas.positron-nonmem';
 
 export const OUTPUT_CHANNEL_NAME = 'Positron NONMEM';
 
-export const CONFIG_HOST_SECTION = 'positronNonmem.host';
-
 export const COMMAND = {
-  testConnection: 'positronNonmem.testConnection',
   runModel: 'positronNonmem.runModel',
   showNmtranParsedModel: 'positronNonmem.showNmtranParsedModel',
-  openRemotePath: 'positronNonmem.openRemotePath',
   refreshRuns: 'positronNonmem.refreshRuns',
 } as const;
 
-/** Settings keys (paired with the `contributes.configuration` block in package.json). */
+/** Settings keys (paired with `contributes.configuration` in package.json). */
 export const SETTING = {
-  runsRoot: 'positronNonmem.runs.root',
+  nmfeBinary: 'positronNonmem.nmfeBinary',
 } as const;
 
 /** Tree-view ID used in package.json `contributes.views`. */
@@ -27,21 +23,5 @@ export const VIEW_ID = {
   runs: 'positronNonmem.runs',
 } as const;
 
-export const HOST_DEFAULTS = {
-  alias: 'primary',
-  transport: 'auto',
-} as const;
-
-/**
- * Where remote runs land on the host. Subdir-per-run discipline lives
- * below this. Outputs (`m.lst`, `m.ext`, `manifest.json`, …) stay
- * remote — the workspace no longer mirrors them locally; the tree view
- * + FileSystemProvider browse them via the transport on demand.
- */
-export const REMOTE_RUN_ROOT = '~/positron-nonmem';
-
-/** Path to nmfe76 on the host (NONMEM 7.6.0). Hard-coded for chunk 3A; settings-driven post-3D. */
-export const NMFE_BINARY = '/opt/nm760/run/nmfe76';
-
-/** NONMEM version string recorded in manifest.json; matches runtime-metadata. */
-export const NONMEM_VERSION = '7.6.0';
+/** Default nmfe76 binary path; overridable via `positronNonmem.nmfeBinary`. */
+export const DEFAULT_NMFE_BINARY = 'nmfe76';

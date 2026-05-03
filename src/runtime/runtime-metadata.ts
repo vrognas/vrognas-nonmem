@@ -1,5 +1,4 @@
 import type * as positron from 'positron';
-import type { HostProfile } from '../host-profiles';
 
 // We deliberately import Positron *types* but the actual enum values must
 // come from the runtime API at call time (PositronApi.LanguageRuntimeStartupBehavior).
@@ -19,33 +18,32 @@ const NONMEM_ICON_BASE64 = Buffer.from(NONMEM_ICON_SVG).toString('base64');
 export interface BuildMetadataDeps {
   startupBehavior: positron.LanguageRuntimeStartupBehavior;
   sessionLocation: positron.LanguageRuntimeSessionLocation;
+  /** NONMEM version string; M5+ probe the host for this. */
+  nonmemVersion: string;
 }
 
 /**
- * Construct LanguageRuntimeMetadata for a given host profile.
+ * Construct LanguageRuntimeMetadata for the local NONMEM install.
  *
- * `runtimeId` is deterministic per alias so that Positron's session
- * restoration recognises the same runtime across IDE restarts. We don't
- * use a UUID; a stable string keyed on alias is sufficient and avoids
- * having to persist GUIDs.
+ * `runtimeId` is a stable string so Positron's session restoration
+ * recognises the same runtime across IDE restarts (no UUIDs persisted).
  */
 export function buildRuntimeMetadata(
-  profile: HostProfile,
   deps: BuildMetadataDeps,
 ): positron.LanguageRuntimeMetadata {
   return {
-    runtimePath: `ssh://${profile.alias}`, // pseudo-path; never resolved as a real path
-    runtimeId: `positron-nonmem-${profile.alias}`,
-    runtimeName: `NONMEM (${profile.alias})`,
-    runtimeShortName: profile.alias,
-    runtimeVersion: '0.0.1', // extension version; bump with package.json
-    runtimeSource: 'SSH',
+    runtimePath: 'nmfe76', // pseudo-path; never resolved as a real path
+    runtimeId: 'positron-nonmem',
+    runtimeName: `NONMEM ${deps.nonmemVersion}`,
+    runtimeShortName: 'NONMEM',
+    runtimeVersion: '0.0.1',
+    runtimeSource: 'NONMEM',
     languageName: 'NMTRAN',
     languageId: 'nmtran',
-    languageVersion: '7.6.0', // NONMEM version; cosmetic until M2+ probes the host
+    languageVersion: deps.nonmemVersion,
     base64EncodedIconSvg: NONMEM_ICON_BASE64,
     startupBehavior: deps.startupBehavior,
     sessionLocation: deps.sessionLocation,
-    extraRuntimeData: { hostAlias: profile.alias },
+    extraRuntimeData: {},
   };
 }

@@ -39,14 +39,16 @@ export const FileType = {
 } as const;
 
 export const Uri = {
-  from: (parts: { scheme: string; authority: string; path: string }) => ({
+  from: (parts: { scheme: string; authority?: string; path: string }) => ({
     scheme: parts.scheme,
-    authority: parts.authority,
+    authority: parts.authority ?? '',
     path: parts.path,
+    fsPath: parts.path,
     toString(): string {
-      return `${parts.scheme}://${parts.authority}${parts.path}`;
+      return `${parts.scheme}://${parts.authority ?? ''}${parts.path}`;
     },
   }),
+  file: (p: string) => Uri.from({ scheme: 'file', path: p }),
 };
 export type Uri = ReturnType<typeof Uri.from>;
 

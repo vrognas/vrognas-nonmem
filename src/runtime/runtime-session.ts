@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { randomUUID } from 'crypto';
 import type * as positron from 'positron';
 import type { PositronApi } from '../positron-api';
-import type { Transport } from '../transport';
+import type { Runner } from '../runner';
 import type { NmtranParsedModel } from '../nmtran-client';
 import { mapParsedModelToVariables, resolveAccessKeyLine, type Variable } from './variables-comm';
 
@@ -10,27 +10,19 @@ import { mapParsedModelToVariables, resolveAccessKeyLine, type Variable } from '
 //
 // Drives the basic state machine — Uninitialized → Starting → Ready →
 // Idle → (Busy on execute) → Idle → Exited — and dispatches each execute()
-// to the configured Transport (ssh-out or local). Output streams back as
-// Stream / Error messages tied to the execute id so Positron's Console
-// pane redraws prompts and tracks per-execution status correctly.
+// to the configured Runner. Output streams back as Stream / Error messages
+// tied to the execute id so Positron's Console pane redraws prompts and
+// tracks per-execution status correctly.
 //
-// Capabilities deliberately not implemented yet (M3+): debug() throws,
-// the runtime-client comms (Variables / Plot / DataExplorer / Connection /
-// UI / Help) are silent no-ops so Positron's session machinery doesn't
-// treat the session as broken when it tries to wire them up at start.
-//
-// Privacy: this class never sees the resolved hostname, only the alias
-// (carried in runtimeMetadata.extraRuntimeData.hostAlias). The ssh
-// transport scrubs hostnames from any propagated stderr; the local
-// transport is on the host so there's nothing to scrub.
+// Capabilities deliberately not implemented yet: debug() throws; comms
+// other than Variables (Plot / DataExplorer / Connection / UI / Help)
+// are silent no-ops so Positron's session machinery doesn't treat the
+// session as broken when it tries to wire them up at start.
 
 export interface NonmemSessionDeps {
   positron: PositronApi;
-  /**
-   * Transport used to run code from execute(). Resolved at Manager
-   * creation time so all sync paths in Session can use it directly.
-   */
-  transport: Transport;
+  /** Runner used to execute code from execute(). */
+  runner: Runner;
   /**
    * Optional navigation callback fired when the Variables-pane sends a
    * `view` RPC for an equation row. Wired by the extension to
@@ -66,7 +58,7 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
   private workingDirectory: string | undefined;
   private sessionName: string;
   private readonly positron: PositronApi;
-  private readonly transport: Transport;
+  private readonly runner: Runner;
   private readonly navigator: ((uri: vscode.Uri, line: number) => void) | undefined;
   /** Open Variables-comm client IDs we should keep in sync. */
   private readonly variablesClients = new Set<string>();
@@ -83,7 +75,7 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
     this.runtimeMetadata = runtimeMetadata;
     this.metadata = sessionMetadata;
     this.positron = deps.positron;
-    this.transport = deps.transport;
+    this.runner = deps.runner;
     this.navigator = deps.navigator;
     this.state = this.positron.RuntimeState.Uninitialized;
     this.workingDirectory = sessionMetadata.workingDirectory;
@@ -123,23 +115,21 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
     // Echo input verbatim so the Console pane shows what was sent.
     this.emitInput(id, code);
 
-    // Fire-and-forget the async transport call. We can't await here because
+    // Fire-and-forget the async runner call. We can't await here because
     // the LanguageRuntimeSession.execute interface is synchronous.
-    void this.dispatchToTransport(code, id);
+    void this.dispatch(code, id);
   }
 
-  private async dispatchToTransport(code: string, id: string): Promise<void> {
+  private async dispatch(code: string, id: string): Promise<void> {
     try {
-      const result = await this.transport.run(code);
+      const result = await this.runner.run(code);
       if (result.stdout) {
         this.emitStream(id, this.positron.LanguageRuntimeStreamName.Stdout, result.stdout);
       }
       if (result.stderr) {
         this.emitStream(id, this.positron.LanguageRuntimeStreamName.Stderr, result.stderr);
       }
-      // Surface a non-zero exit code to the user. Don't repeat it for code 0
-      // and don't conflate it with the SSH transport's own 255 (which is
-      // already reported via TransportError catch below).
+      // Surface a non-zero exit code to the user. Don't repeat it for code 0.
       if (result.code !== null && result.code !== 0) {
         this.emitStream(
           id,
@@ -148,9 +138,8 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
         );
       }
     } catch (e) {
-      // Anything that bubbles out of transport.run — TransportError or a
-      // programmer bug — surfaces as a structured Error in the Console
-      // rather than getting swallowed.
+      // Anything that bubbles out of runner.run — RunnerError or a
+      // programmer bug — surfaces as a structured Error in the Console.
       const name = e instanceof Error ? e.name : 'Error';
       const message = e instanceof Error ? e.message : String(e);
       this.emitError(id, name, message);
@@ -179,7 +168,7 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
   async start(): Promise<positron.LanguageRuntimeInfo> {
     this.transitionState(this.positron.RuntimeState.Starting);
     const info: positron.LanguageRuntimeInfo = {
-      banner: `Positron NONMEM session attached to host alias [${this.runtimeMetadata.runtimeShortName}]\n`,
+      banner: `${this.runtimeMetadata.runtimeName}\n`,
       implementation_version: this.runtimeMetadata.runtimeVersion,
       language_version: this.runtimeMetadata.languageVersion,
       input_prompt: '> ',

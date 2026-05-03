@@ -1,8 +1,8 @@
 {
   "name": "positron-nonmem",
   "displayName": "Positron NONMEM",
-  "description": "NONMEM as a first-class Positron language runtime: SSH-based execution, live iteration streaming, run history, and pharmacometric workbench features. Companion to the vscode-nmtran language extension.",
-  "version": "0.0.22",
+  "description": "NONMEM as a first-class Positron language runtime: local nmfe76 execution (or via Positron Remote SSH), run history tree, and pharmacometric workbench features. Companion to the vscode-nmtran language extension.",
+  "version": "0.0.23",
   "publisher": "vrognas",
   "license": "MIT",
   "private": true,
@@ -12,7 +12,7 @@
     "node": ">=20.0.0"
   },
   "categories": ["Programming Languages", "Other"],
-  "keywords": ["nonmem", "nmtran", "pharmacometrics", "positron", "ssh"],
+  "keywords": ["nonmem", "nmtran", "pharmacometrics", "positron"],
   "activationEvents": ["*", "onStartupFinished", "onLanguage:nmtran"],
   "main": "./out/extension.js",
   "contributes": {
@@ -23,20 +23,12 @@
     ],
     "commands": [
       {
-        "command": "positronNonmem.testConnection",
-        "title": "Positron NONMEM: Test Connection"
-      },
-      {
         "command": "positronNonmem.runModel",
         "title": "Positron NONMEM: Run Current Model"
       },
       {
         "command": "positronNonmem.showNmtranParsedModel",
         "title": "Positron NONMEM: Show NMTRAN Parsed Model (Debug)"
-      },
-      {
-        "command": "positronNonmem.openRemotePath",
-        "title": "Positron NONMEM: Open Remote Path (Debug)"
       },
       {
         "command": "positronNonmem.refreshRuns",
@@ -75,26 +67,10 @@
     "configuration": {
       "title": "Positron NONMEM",
       "properties": {
-        "positronNonmem.host.alias": {
+        "positronNonmem.nmfeBinary": {
           "type": "string",
-          "default": "primary",
-          "description": "Name of a Host entry in your ~/.ssh/config. The extension shells out to the system ssh client, so HostName, User, Port, IdentityFile, ProxyJump, ControlMaster, etc. are all resolved from your existing OpenSSH configuration. The alias also appears in the Output channel as the privacy-preserving prefix."
-        },
-        "positronNonmem.runs.root": {
-          "type": "string",
-          "default": "~/positron-nonmem",
-          "description": "Remote directory the 'NONMEM Runs' tree scans for runs (any subdirectory containing one or more .lst files). Tilde-expanded against the remote $HOME. Default is where this extension's own runs land; change to e.g. '~/work' to surface Pirana/PsN/hand-rolled runs alongside."
-        },
-        "positronNonmem.host.transport": {
-          "type": "string",
-          "enum": ["auto", "ssh", "local"],
-          "default": "auto",
-          "enumDescriptions": [
-            "Detect: compare os.hostname() with `ssh -G <alias>` HostName; use local if they match, ssh otherwise.",
-            "Always shell out to ssh, even when running on the host itself.",
-            "Always run commands locally (use when Positron is in Remote SSH mode against the NONMEM host)."
-          ],
-          "description": "How the extension reaches the NONMEM host. Default 'auto' picks 'local' if the extension host is already on the configured machine (typical when using Positron's Remote SSH), otherwise 'ssh'."
+          "default": "nmfe76",
+          "description": "Path or PATH-resolvable name of the NONMEM front-end (nmfeNN). Defaults to 'nmfe76' on PATH. Set to e.g. '/opt/nm760/run/nmfe76' for absolute paths. Run the extension via Positron Remote SSH when nmfe76 lives on a different machine."
         }
       }
     }

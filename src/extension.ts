@@ -2,48 +2,35 @@ import * as path from 'node:path';
 import * as vscode from 'vscode';
 import {
   COMMAND,
-  NMFE_BINARY,
-  NONMEM_VERSION,
+  DEFAULT_NMFE_BINARY,
   OUTPUT_CHANNEL_NAME,
-  REMOTE_RUN_ROOT,
   SETTING,
   VIEW_ID,
 } from './constants';
-import { RemoteFileSystemProvider, REMOTE_FS_SCHEME } from './fs/remote-fs-provider';
-import { resolveHostProfile, HostProfileError, type HostProfile } from './host-profiles';
 import { getNmtranParsedModel } from './nmtran-client';
 import { getPositron, PositronApiUnavailableError } from './positron-api';
-import { NonmemRuntimeManager } from './runtime/runtime-manager';
+import { LocalRunner } from './runner';
 import { runModel } from './runtime/run-model';
-import { pickTransport, type Transport } from './transport';
+import { NonmemRuntimeManager } from './runtime/runtime-manager';
+import { discoverRuns } from './views/runs-discovery';
 import { RunsTreeProvider } from './views/runs-tree-provider';
 
 let outputChannel: vscode.OutputChannel | undefined;
 let runtimeManager: NonmemRuntimeManager | undefined;
+const runner = new LocalRunner();
 
-export function activate(context: vscode.ExtensionContext): void {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
   outputChannel = vscode.window.createOutputChannel(OUTPUT_CHANNEL_NAME);
   context.subscriptions.push(outputChannel);
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand(COMMAND.testConnection, testConnection),
-  );
   context.subscriptions.push(vscode.commands.registerCommand(COMMAND.runModel, runCurrentModel));
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND.showNmtranParsedModel, showNmtranParsedModel),
   );
-  context.subscriptions.push(
-    vscode.commands.registerCommand(COMMAND.openRemotePath, openRemotePath),
-  );
 
-  registerRemoteFs(context, outputChannel);
   registerRunsTree(context, outputChannel);
-  registerRuntime(context, outputChannel);
+  await registerRuntime(context, outputChannel);
 
-  // Variables-pane wiring: when the active editor switches, fetch the
-  // parsed-model from vscode-nmtran for the new file and push it to all
-  // live NONMEM sessions. Each session relays its current model to any
-  // open Variables comm.
   context.subscriptions.push(
     vscode.window.onDidChangeActiveTextEditor((editor) => void refreshVariablesForEditor(editor)),
   );
@@ -80,129 +67,103 @@ export function deactivate(): void {
   outputChannel = undefined;
 }
 
-/**
- * Register the read-only `positron-nonmem://<alias>/<path>` FileSystemProvider
- * (M7 chunk A). Transport resolution is deferred to the first FS call so we
- * don't block activation on `ssh -G`. If the host profile is missing /
- * malformed, we skip registration; the user gets the existing toast from
- * runModel paths instead of a silent activation failure.
- */
-function registerRemoteFs(
-  context: vscode.ExtensionContext,
-  channel: vscode.OutputChannel,
-): void {
-  let profile: HostProfile;
-  try {
-    profile = resolveHostProfile();
-  } catch (e) {
-    channel.appendLine(
-      `[warn] skipping ${REMOTE_FS_SCHEME}:// FS provider: ${(e as Error).message}`,
-    );
-    return;
-  }
-  const provider = new RemoteFileSystemProvider(() => pickTransport(profile), profile.alias);
-  context.subscriptions.push(
-    vscode.workspace.registerFileSystemProvider(REMOTE_FS_SCHEME, provider, {
-      isCaseSensitive: true,
-      isReadonly: true,
-    }),
-  );
-  channel.appendLine(`[positron-nonmem] registered ${REMOTE_FS_SCHEME}:// FS provider for alias [${profile.alias}].`);
+/** Single-quote a string for safe shell interpolation. */
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
-/**
- * Register the "NONMEM Runs" tree view (M7 chunk B). Reads the configured
- * remote root on each refresh; auto-refreshes when the user changes
- * `positronNonmem.runs.root` so they don't have to click refresh manually.
- */
-function registerRunsTree(
+async function registerRuntime(
   context: vscode.ExtensionContext,
   channel: vscode.OutputChannel,
-): void {
-  let profile: HostProfile;
-  try {
-    profile = resolveHostProfile();
-  } catch (e) {
-    channel.appendLine(`[warn] skipping runs tree: ${(e as Error).message}`);
-    return;
-  }
-  const provider = new RunsTreeProvider(
-    () => pickTransport(profile),
-    profile.alias,
-    () =>
-      vscode.workspace.getConfiguration().get<string>(SETTING.runsRoot) ?? REMOTE_RUN_ROOT,
-  );
-  context.subscriptions.push(
-    vscode.window.registerTreeDataProvider(VIEW_ID.runs, provider),
-    vscode.commands.registerCommand(COMMAND.refreshRuns, () => provider.refresh()),
-    vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration(SETTING.runsRoot)) provider.refresh();
-    }),
-  );
-  channel.appendLine(`[positron-nonmem] registered runs tree view (alias [${profile.alias}]).`);
-}
-
-function registerRuntime(context: vscode.ExtensionContext, channel: vscode.OutputChannel): void {
+): Promise<void> {
   let positron;
   try {
     positron = getPositron();
   } catch (e) {
     if (e instanceof PositronApiUnavailableError) {
-      // engines.positron in package.json should make this unreachable in
-      // practice; if it ever fires it means we're in plain VSCode and the
-      // user installed us anyway. Surface clearly and skip runtime setup.
       channel.appendLine(`[warn] ${e.message}`);
       return;
     }
     throw e;
   }
-  runtimeManager = new NonmemRuntimeManager(context, { positron, navigator: navigateToFileLine });
+
+  const nmfe = nmfeBinary();
+  // Probe: quote the binary path so user-supplied settings can't smuggle
+  // in shell metacharacters. nmfe76 with no args writes a banner to stdout
+  // then exits non-zero; we tolerate any exit code and just look for output.
+  const probe = await runner
+    .run(`${shellQuote(nmfe)} 2>&1 | head -1; echo EXIT=$?`)
+    .catch(() => null);
+  if (!probe || !/EXIT=/.test(probe.stdout)) {
+    channel.appendLine(
+      `[warn] could not invoke '${nmfe}' — runtime not registered. Install NONMEM locally, ` +
+        `connect via Positron Remote SSH to a host that has it, or set positronNonmem.nmfeBinary.`,
+    );
+    return;
+  }
+  const versionLine = probe.stdout.split('\n').find((l) => l && !l.startsWith('EXIT=')) ?? '';
+  const version = parseNonmemVersion(versionLine);
+
+  runtimeManager = new NonmemRuntimeManager(context, {
+    positron,
+    nonmemVersion: version,
+    runner,
+    navigator: navigateToFileLine,
+  });
   context.subscriptions.push(
     positron.runtime.registerLanguageRuntimeManager('nmtran', runtimeManager),
   );
-  channel.appendLine('[positron-nonmem] registered NMTRAN language runtime.');
+  channel.appendLine(`[positron-nonmem] registered NONMEM ${version} runtime via '${nmfe}'.`);
+}
+
+/** Extract a NONMEM version from a banner line (best-effort; falls back to "unknown"). */
+function parseNonmemVersion(line: string): string {
+  const m = /\b(\d+\.\d+(?:\.\d+)?)\b/.exec(line);
+  return m ? m[1] : 'unknown';
+}
+
+function nmfeBinary(): string {
+  return (
+    vscode.workspace.getConfiguration().get<string>(SETTING.nmfeBinary)?.trim() ||
+    DEFAULT_NMFE_BINARY
+  );
+}
+
+function registerRunsTree(
+  context: vscode.ExtensionContext,
+  channel: vscode.OutputChannel,
+): void {
+  const provider = new RunsTreeProvider(() => discoverRuns());
+  const watcher = vscode.workspace.createFileSystemWatcher('**/*.lst');
+  context.subscriptions.push(
+    vscode.window.registerTreeDataProvider(VIEW_ID.runs, provider),
+    vscode.commands.registerCommand(COMMAND.refreshRuns, () => provider.refresh()),
+    watcher,
+    watcher.onDidCreate(() => provider.refresh()),
+    watcher.onDidChange(() => provider.refresh()),
+    watcher.onDidDelete(() => provider.refresh()),
+  );
+  channel.appendLine('[positron-nonmem] registered runs tree view.');
 }
 
 /**
- * "Run Current Model" command — uploads the active `.mod` (plus any
- * `$DATA`-referenced dataset sibling) to `<remoteRoot>/<runId>/`, runs
- * nmfe76, parses OFV from the remote m.lst, writes manifest.json
- * remotely. Outputs stay on the host; the tree view + FileSystemProvider
- * (M7) surface them lazily. Surface EXIT and OFV in an info-message.
+ * "Run Current Model" command — runs nmfe76 in the active .mod's directory,
+ * with classic NONMEM naming (`<basename>.lst` next to the .mod).
  */
 async function runCurrentModel(): Promise<void> {
   const target = resolveActiveModelTarget();
   if (!target) return;
   const { modelPath } = target;
-
-  let profile: HostProfile;
-  let transport: Transport;
-  try {
-    profile = resolveHostProfile();
-    transport = await pickTransport(profile);
-  } catch (e) {
-    if (e instanceof HostProfileError) {
-      await vscode.window.showErrorMessage(`Positron NONMEM: ${e.message}`);
-      return;
-    }
-    throw e;
-  }
-
   log(`runModel: launching for ${modelPath}`);
   try {
-    const result = await runModel({
-      modelPath,
-      transport,
-      remoteRoot: REMOTE_RUN_ROOT,
-      nmfeBinary: NMFE_BINARY,
-      hostAlias: profile.alias,
-      nonmemVersion: NONMEM_VERSION,
-    });
+    const result = await runModel({ modelPath, runner, nmfeBinary: nmfeBinary() });
     const exit = result.exitCode ?? 'unknown';
     const ofv = result.ofv !== null ? `, OFV=${result.ofv}` : '';
-    log(`runModel: ${result.runId} EXIT=${exit}${ofv} -> ${result.remoteRunDir}`);
+    log(`runModel: EXIT=${exit}${ofv} -> ${result.lstPath}`);
     await vscode.commands.executeCommand(COMMAND.refreshRuns);
-    await vscode.window.showInformationMessage(`Run ${result.runId}: EXIT=${exit}${ofv}`);
+    await vscode.window.showInformationMessage(
+      `${path.basename(modelPath)}: EXIT=${exit}${ofv}`,
+    );
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     log(`runModel: failed — ${msg}`);
@@ -240,41 +201,8 @@ function log(message: string): void {
 }
 
 /**
- * Debug command (M7 chunk A): prompt for a remote path, build a
- * `positron-nonmem://<alias>/<path>` URI, open it via the FS provider.
- * Verifies the round-trip path works end-to-end before the tree view
- * (chunk B) starts emitting URIs.
- */
-async function openRemotePath(): Promise<void> {
-  let profile: HostProfile;
-  try {
-    profile = resolveHostProfile();
-  } catch (e) {
-    if (e instanceof HostProfileError) {
-      await vscode.window.showErrorMessage(`Positron NONMEM: ${e.message}`);
-      return;
-    }
-    throw e;
-  }
-  const remote = await vscode.window.showInputBox({
-    prompt: `Remote path on alias [${profile.alias}] — accepts ~/... or absolute /...`,
-    placeHolder: '~/positron-nonmem/pn-1234/manifest.json',
-  });
-  if (!remote) return;
-  const uri = RemoteFileSystemProvider.buildUri(profile.alias, remote);
-  try {
-    const doc = await vscode.workspace.openTextDocument(uri);
-    await vscode.window.showTextDocument(doc, { preview: false });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    await vscode.window.showErrorMessage(`Positron NONMEM: open failed — ${msg}`);
-  }
-}
-
-/**
  * Smoke-test command: opens the parsedModel response from vscode-nmtran's
- * `getParsedModel` API in a new JSON editor. Verifies the cross-extension
- * API path before we build Variables-pane wiring on top of it.
+ * `getParsedModel` API in a new JSON editor.
  */
 async function showNmtranParsedModel(): Promise<void> {
   const target = resolveActiveModelTarget();
@@ -292,35 +220,4 @@ async function showNmtranParsedModel(): Promise<void> {
     content: JSON.stringify(result, null, 2),
   });
   await vscode.window.showTextDocument(doc, { preview: false });
-}
-
-/**
- * "Test Connection" command — routes a uname probe through the active
- * NONMEM runtime so output lands in the Console pane (not a separate
- * OutputChannel). Per the design rule "no notifications, use the session
- * pane", this is the entry point a new user clicks to verify their
- * SSH config is reachable.
- */
-async function testConnection(): Promise<void> {
-  let positron;
-  try {
-    positron = getPositron();
-  } catch (e) {
-    if (e instanceof PositronApiUnavailableError) {
-      await vscode.window.showErrorMessage(e.message);
-      return;
-    }
-    throw e;
-  }
-
-  try {
-    await positron.runtime.executeCode('nmtran', 'uname -a', true /* focus the Console */);
-  } catch (e) {
-    // Anything that goes wrong during the run (transport errors, non-zero
-    // exit, no active session) is already shown in the Console pane via the
-    // session's emitError / emitStream — no toast on top of that. We log
-    // for diagnostic purposes only; Positron's own error string is opaque
-    // (sometimes a bare object) so we don't try to format it for users.
-    console.warn('[positron-nonmem] testConnection: executeCode rejected', e);
-  }
 }
