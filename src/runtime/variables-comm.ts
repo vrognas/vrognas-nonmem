@@ -79,8 +79,10 @@ export function mapParsedModelToVariables(model: NmtranParsedModel): Variable[] 
 }
 
 /**
- * Resolve a Variables-comm `access_key` (matches `display_name` in our
- * mapping) back to the source-line of the underlying declaration.
+ * Resolve a Variables-comm `access_key` back to the source-line of the
+ * underlying declaration. For parameters access_key matches display_name
+ * (`THETA(1)` etc.); for equations display_name is suffixed with the
+ * owning $RECORD but access_key stays as the bare equation name.
  * Returns null when the access_key doesn't correspond to a known row,
  * or when the declaration has no line tracked (older vscode-nmtran).
  */
