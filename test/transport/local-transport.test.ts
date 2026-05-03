@@ -79,11 +79,38 @@ describe('LocalTransport.putFile / getFile', () => {
     expect(fs.readFileSync(dst, 'utf8')).toBe('{"runId":"pn-1"}\n');
   });
 
-  it('readFile returns UTF-8 content; throws on missing path', async () => {
+  it('readFile returns UTF-8 content; throws RemoteFileNotFoundError on missing path', async () => {
     const src = path.join(tmp, 'r.txt');
     fs.writeFileSync(src, 'remote-bytes');
     expect(await new LocalTransport().readFile(src)).toBe('remote-bytes');
-    await expect(new LocalTransport().readFile(path.join(tmp, 'no.txt'))).rejects.toThrow();
+    await expect(new LocalTransport().readFile(path.join(tmp, 'no.txt'))).rejects.toMatchObject({
+      name: 'RemoteFileNotFoundError',
+    });
+  });
+
+  it('stat surfaces type/size/mtime; RemoteFileNotFoundError for missing paths', async () => {
+    const src = path.join(tmp, 's.txt');
+    fs.writeFileSync(src, 'abc');
+    const s = await new LocalTransport().stat(src);
+    expect(s.type).toBe('file');
+    expect(s.size).toBe(3);
+    expect(s.mtime).toBeGreaterThan(0);
+
+    const dir = await new LocalTransport().stat(tmp);
+    expect(dir.type).toBe('directory');
+
+    await expect(new LocalTransport().stat(path.join(tmp, 'no.txt'))).rejects.toMatchObject({
+      name: 'RemoteFileNotFoundError',
+    });
+  });
+
+  it('readDirectory lists entries with file types', async () => {
+    fs.writeFileSync(path.join(tmp, 'a.txt'), '');
+    fs.mkdirSync(path.join(tmp, 'sub'));
+    const entries = await new LocalTransport().readDirectory(tmp);
+    const byName = Object.fromEntries(entries.map((e) => [e.name, e.type]));
+    expect(byName['a.txt']).toBe('file');
+    expect(byName['sub']).toBe('directory');
   });
 
   it('expands a leading ~ to os.homedir() (so $HOME-rooted paths from the host pattern work)', async () => {

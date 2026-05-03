@@ -2,7 +2,7 @@
   "name": "positron-nonmem",
   "displayName": "Positron NONMEM",
   "description": "NONMEM as a first-class Positron language runtime: SSH-based execution, live iteration streaming, run history, and pharmacometric workbench features. Companion to the vscode-nmtran language extension.",
-  "version": "0.0.19",
+  "version": "0.0.20",
   "publisher": "vrognas",
   "license": "MIT",
   "private": true,
@@ -33,6 +33,10 @@
       {
         "command": "positronNonmem.showNmtranParsedModel",
         "title": "Positron NONMEM: Show NMTRAN Parsed Model (Debug)"
+      },
+      {
+        "command": "positronNonmem.openRemotePath",
+        "title": "Positron NONMEM: Open Remote Path (Debug)"
       }
     ],
     "configuration": {

@@ -18,7 +18,15 @@ import { spawn } from 'child_process';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { TransportError, type CommandResult, type Transport } from './types';
+import {
+  RemoteFileNotFoundError,
+  TransportError,
+  type CommandResult,
+  type RemoteDirEntry,
+  type RemoteFileStat,
+  type RemoteFileType,
+  type Transport,
+} from './types';
 
 /** Expand a leading `~` or `~/` against os.homedir(). Bare `~user` is not handled. */
 function expandHome(p: string): string {
@@ -89,6 +97,60 @@ export class LocalTransport implements Transport {
 
   async readFile(remotePath: string): Promise<string> {
     const src = expandHome(remotePath);
-    return fs.readFile(src, 'utf8');
+    try {
+      return await fs.readFile(src, 'utf8');
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new RemoteFileNotFoundError(remotePath);
+      }
+      throw e;
+    }
   }
+
+  async stat(remotePath: string): Promise<RemoteFileStat> {
+    const target = expandHome(remotePath);
+    let s;
+    try {
+      s = await fs.lstat(target);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new RemoteFileNotFoundError(remotePath);
+      }
+      throw e;
+    }
+    return {
+      type: localStatType(s),
+      size: s.size,
+      mtime: Math.floor(s.mtimeMs / 1000),
+    };
+  }
+
+  async readDirectory(remotePath: string): Promise<RemoteDirEntry[]> {
+    const target = expandHome(remotePath);
+    let entries;
+    try {
+      entries = await fs.readdir(target, { withFileTypes: true });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+        throw new RemoteFileNotFoundError(remotePath);
+      }
+      throw e;
+    }
+    return entries.map((d) => ({
+      name: d.name,
+      type: localDirentType(d),
+    }));
+  }
+}
+
+function localStatType(s: { isDirectory: () => boolean; isSymbolicLink: () => boolean }): RemoteFileType {
+  if (s.isSymbolicLink()) return 'symlink';
+  if (s.isDirectory()) return 'directory';
+  return 'file';
+}
+
+function localDirentType(d: { isDirectory: () => boolean; isSymbolicLink: () => boolean }): RemoteFileType {
+  if (d.isSymbolicLink()) return 'symlink';
+  if (d.isDirectory()) return 'directory';
+  return 'file';
 }

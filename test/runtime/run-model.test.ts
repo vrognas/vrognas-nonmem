@@ -8,7 +8,12 @@ import {
   parseOfv,
   type RunModelOptions,
 } from '../../src/runtime/run-model';
-import type { CommandResult, Transport } from '../../src/transport/types';
+import type {
+  CommandResult,
+  RemoteDirEntry,
+  RemoteFileStat,
+  Transport,
+} from '../../src/transport/types';
 
 interface PutCall {
   localPath: string;
@@ -43,6 +48,12 @@ class FakeTransport implements Transport {
     const c = this.readContent(remotePath);
     if (c === undefined) throw new Error(`fake: no such remote file ${remotePath}`);
     return c;
+  }
+  async stat(): Promise<RemoteFileStat> {
+    throw new Error('stat not used in run-model tests');
+  }
+  async readDirectory(): Promise<RemoteDirEntry[]> {
+    throw new Error('readDirectory not used in run-model tests');
   }
 }
 

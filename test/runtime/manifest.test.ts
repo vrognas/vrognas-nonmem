@@ -3,7 +3,11 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { sha256File, writeManifest, type RunManifest } from '../../src/runtime/manifest';
-import type { Transport } from '../../src/transport';
+import type {
+  RemoteDirEntry,
+  RemoteFileStat,
+  Transport,
+} from '../../src/transport/types';
 
 let tmp: string;
 
@@ -45,6 +49,12 @@ class RecorderTransport implements Transport {
   }
   async readFile(): Promise<string> {
     return '';
+  }
+  async stat(): Promise<RemoteFileStat> {
+    throw new Error('not used');
+  }
+  async readDirectory(): Promise<RemoteDirEntry[]> {
+    throw new Error('not used');
   }
 }
 

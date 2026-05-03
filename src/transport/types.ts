@@ -29,6 +29,29 @@ export interface CommandResult {
   stderr: string;
 }
 
+/** Subset of POSIX file types we surface via Transport.stat. */
+export type RemoteFileType = 'file' | 'directory' | 'symlink';
+
+export interface RemoteFileStat {
+  type: RemoteFileType;
+  /** File size in bytes; 0 for non-regular files. */
+  size: number;
+  /** Modification time as Unix epoch seconds. 0 if unknown. */
+  mtime: number;
+}
+
+export interface RemoteDirEntry {
+  name: string;
+  type: RemoteFileType;
+}
+
+export class RemoteFileNotFoundError extends Error {
+  constructor(public readonly remotePath: string) {
+    super(`remote file not found: ${remotePath}`);
+    this.name = 'RemoteFileNotFoundError';
+  }
+}
+
 export interface Transport {
   /** Short label for logging surfaces; never includes the resolved hostname. */
   readonly kind: 'ssh' | 'local';
@@ -58,8 +81,21 @@ export interface Transport {
 
   /**
    * Read a remote text file into memory. Mirror of writeFile. Returns
-   * the UTF-8 content. Throws when the path doesn't exist (caller may
-   * catch and treat absence as "no run output yet").
+   * the UTF-8 content. Throws RemoteFileNotFoundError on missing path
+   * so callers can distinguish "not there yet" from real I/O errors.
    */
   readFile(remotePath: string): Promise<string>;
+
+  /**
+   * Stat a remote path. Throws RemoteFileNotFoundError when absent so
+   * the FileSystemProvider can map cleanly to vscode.FileSystemError.FileNotFound.
+   */
+  stat(remotePath: string): Promise<RemoteFileStat>;
+
+  /**
+   * List the immediate children of a remote directory. Order is
+   * unspecified; symlinks are NOT followed. Throws RemoteFileNotFoundError
+   * on missing path.
+   */
+  readDirectory(remotePath: string): Promise<RemoteDirEntry[]>;
 }

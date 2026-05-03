@@ -17,7 +17,15 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { promisify } from 'util';
 import { execFile as execFileCb } from 'child_process';
-import { TransportError, type CommandResult, type Transport } from './types';
+import {
+  RemoteFileNotFoundError,
+  TransportError,
+  type CommandResult,
+  type RemoteDirEntry,
+  type RemoteFileStat,
+  type RemoteFileType,
+  type Transport,
+} from './types';
 
 const execFile = promisify(execFileCb);
 
@@ -201,11 +209,48 @@ export class SshTransport implements Transport {
   async readFile(remotePath: string): Promise<string> {
     const result = await this.run(`cat ${quoteRemotePath(remotePath)}`);
     if (result.code !== 0) {
+      if (isNoSuchFile(result.stderr)) {
+        throw new RemoteFileNotFoundError(remotePath);
+      }
       throw new SshTransportError(
         `ssh readFile exited ${result.code}: ${lastLine(result.stderr) || '(no output)'}`,
       );
     }
     return result.stdout;
+  }
+
+  async stat(remotePath: string): Promise<RemoteFileStat> {
+    // GNU stat — '%s|%Y|%F' = size|mtime|description ("regular file" / "directory" / "symbolic link" / …).
+    // `-L`-style symlink follow is OFF (default `lstat`-equivalent) so symlinks
+    // surface as their own type for consumers that care.
+    const result = await this.run(`stat -c '%s|%Y|%F' ${quoteRemotePath(remotePath)}`);
+    if (result.code !== 0) {
+      if (isNoSuchFile(result.stderr)) {
+        throw new RemoteFileNotFoundError(remotePath);
+      }
+      throw new SshTransportError(
+        `ssh stat exited ${result.code}: ${lastLine(result.stderr) || '(no output)'}`,
+      );
+    }
+    return parseStatLine(result.stdout, remotePath);
+  }
+
+  async readDirectory(remotePath: string): Promise<RemoteDirEntry[]> {
+    // `find -maxdepth 1 -mindepth 1 -printf '%f\t%y\n'` — emits one line per
+    // entry with name + GNU find type code (f=file, d=dir, l=symlink, …).
+    // Cleaner to parse than `ls -p`: explicit types, no escaping ambiguity.
+    const result = await this.run(
+      `find ${quoteRemotePath(remotePath)} -maxdepth 1 -mindepth 1 -printf '%f\\t%y\\n'`,
+    );
+    if (result.code !== 0) {
+      if (isNoSuchFile(result.stderr)) {
+        throw new RemoteFileNotFoundError(remotePath);
+      }
+      throw new SshTransportError(
+        `ssh readDirectory exited ${result.code}: ${lastLine(result.stderr) || '(no output)'}`,
+      );
+    }
+    return parseFindOutput(result.stdout);
   }
 
   /**
@@ -264,5 +309,66 @@ function lastLine(s: string): string {
   return lines.at(-1) ?? '';
 }
 
+/**
+ * Heuristic for "remote tool reported absent path". Matches the standard
+ * GNU coreutils / find phrasing across stat / cat / find. Used by stat /
+ * readFile / readDirectory to map shell errors to RemoteFileNotFoundError.
+ */
+export function isNoSuchFile(stderr: string): boolean {
+  return /No such file or directory/i.test(stderr) || /cannot stat/i.test(stderr);
+}
+
+/** Parse the `%s|%Y|%F` line emitted by `stat -c`. */
+export function parseStatLine(stdout: string, remotePath: string): RemoteFileStat {
+  const trimmed = stdout.trim();
+  const parts = trimmed.split('|');
+  if (parts.length < 3) {
+    throw new SshTransportError(
+      `ssh stat: unexpected output for ${remotePath}: ${trimmed.slice(0, 80)}`,
+    );
+  }
+  return {
+    type: statTypeFromDescription(parts[2]),
+    size: Number(parts[0]) || 0,
+    mtime: Number(parts[1]) || 0,
+  };
+}
+
+/** GNU stat's `%F` description → our RemoteFileType. Unrecognised types fall through to 'file'. */
+function statTypeFromDescription(desc: string): RemoteFileType {
+  if (desc === 'directory') return 'directory';
+  if (desc === 'symbolic link') return 'symlink';
+  return 'file';
+}
+
+/** Parse `find -printf '%f\t%y\n'` output into [{name,type}]. */
+export function parseFindOutput(stdout: string): RemoteDirEntry[] {
+  return stdout
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter(Boolean)
+    .map((line) => {
+      const tab = line.lastIndexOf('\t');
+      const name = tab >= 0 ? line.slice(0, tab) : line;
+      const code = tab >= 0 ? line.slice(tab + 1) : 'f';
+      return { name, type: findTypeFromCode(code) };
+    });
+}
+
+function findTypeFromCode(code: string): RemoteFileType {
+  if (code === 'd') return 'directory';
+  if (code === 'l') return 'symlink';
+  return 'file';
+}
+
 // Exported for unit tests; not part of the runtime API.
-export const __testing = { scrubHostname, buildScpPutArgs, buildScpGetArgs, quoteRemotePath, lastLine };
+export const __testing = {
+  scrubHostname,
+  buildScpPutArgs,
+  buildScpGetArgs,
+  quoteRemotePath,
+  lastLine,
+  isNoSuchFile,
+  parseStatLine,
+  parseFindOutput,
+};

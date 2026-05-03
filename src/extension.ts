@@ -7,6 +7,7 @@ import {
   OUTPUT_CHANNEL_NAME,
   REMOTE_RUN_ROOT,
 } from './constants';
+import { RemoteFileSystemProvider, REMOTE_FS_SCHEME } from './fs/remote-fs-provider';
 import { resolveHostProfile, HostProfileError, type HostProfile } from './host-profiles';
 import { getNmtranParsedModel } from './nmtran-client';
 import { getPositron, PositronApiUnavailableError } from './positron-api';
@@ -28,7 +29,11 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND.showNmtranParsedModel, showNmtranParsedModel),
   );
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND.openRemotePath, openRemotePath),
+  );
 
+  registerRemoteFs(context, outputChannel);
   registerRuntime(context, outputChannel);
 
   // Variables-pane wiring: when the active editor switches, fetch the
@@ -69,6 +74,36 @@ export function deactivate(): void {
   runtimeManager = undefined;
   outputChannel?.dispose();
   outputChannel = undefined;
+}
+
+/**
+ * Register the read-only `positron-nonmem://<alias>/<path>` FileSystemProvider
+ * (M7 chunk A). Transport resolution is deferred to the first FS call so we
+ * don't block activation on `ssh -G`. If the host profile is missing /
+ * malformed, we skip registration; the user gets the existing toast from
+ * runModel paths instead of a silent activation failure.
+ */
+function registerRemoteFs(
+  context: vscode.ExtensionContext,
+  channel: vscode.OutputChannel,
+): void {
+  let profile: HostProfile;
+  try {
+    profile = resolveHostProfile();
+  } catch (e) {
+    channel.appendLine(
+      `[warn] skipping ${REMOTE_FS_SCHEME}:// FS provider: ${(e as Error).message}`,
+    );
+    return;
+  }
+  const provider = new RemoteFileSystemProvider(() => pickTransport(profile), profile.alias);
+  context.subscriptions.push(
+    vscode.workspace.registerFileSystemProvider(REMOTE_FS_SCHEME, provider, {
+      isCaseSensitive: true,
+      isReadonly: true,
+    }),
+  );
+  channel.appendLine(`[positron-nonmem] registered ${REMOTE_FS_SCHEME}:// FS provider for alias [${profile.alias}].`);
 }
 
 function registerRuntime(context: vscode.ExtensionContext, channel: vscode.OutputChannel): void {
@@ -165,6 +200,38 @@ function isNmtranEditor(editor: vscode.TextEditor): boolean {
 
 function log(message: string): void {
   outputChannel?.appendLine(`[positron-nonmem] ${message}`);
+}
+
+/**
+ * Debug command (M7 chunk A): prompt for a remote path, build a
+ * `positron-nonmem://<alias>/<path>` URI, open it via the FS provider.
+ * Verifies the round-trip path works end-to-end before the tree view
+ * (chunk B) starts emitting URIs.
+ */
+async function openRemotePath(): Promise<void> {
+  let profile: HostProfile;
+  try {
+    profile = resolveHostProfile();
+  } catch (e) {
+    if (e instanceof HostProfileError) {
+      await vscode.window.showErrorMessage(`Positron NONMEM: ${e.message}`);
+      return;
+    }
+    throw e;
+  }
+  const remote = await vscode.window.showInputBox({
+    prompt: `Remote path on alias [${profile.alias}] — accepts ~/... or absolute /...`,
+    placeHolder: '~/positron-nonmem/pn-1234/manifest.json',
+  });
+  if (!remote) return;
+  const uri = RemoteFileSystemProvider.buildUri(profile.alias, remote);
+  try {
+    const doc = await vscode.workspace.openTextDocument(uri);
+    await vscode.window.showTextDocument(doc, { preview: false });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    await vscode.window.showErrorMessage(`Positron NONMEM: open failed — ${msg}`);
+  }
 }
 
 /**

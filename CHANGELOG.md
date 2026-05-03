@@ -5,6 +5,27 @@ All notable changes documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- `feat: positron-nonmem:// FileSystemProvider (M7 chunk A)`. Read-only
+  custom FS scheme that translates VSCode FS reads into `Transport` ops
+  on demand, so remote run outputs (`m.lst`, `m.ext`, `manifest.json`, …)
+  can be opened in editor tabs without local syncing.
+  - URIs: `positron-nonmem://<alias>/<remote-path>`. Leading `/` of the
+    URI path is stripped; `~/...` paths round-trip cleanly.
+  - `Transport` interface gains `stat(remotePath)` and
+    `readDirectory(remotePath)`. LocalTransport wraps `fs.lstat` /
+    `fs.readdir`; SshTransport shells out to `stat -c '%s|%Y|%F'` /
+    `find -maxdepth 1 -mindepth 1 -printf '%f\t%y\n'`.
+  - New `RemoteFileNotFoundError` lets the FS provider map missing-path
+    errors to `vscode.FileSystemError.FileNotFound`.
+  - Debug command `positronNonmem.openRemotePath` prompts for a path
+    and opens it via the FS provider; smoke-test surface for chunk A.
+  - Lazy transport: factory called on first FS request so activation
+    doesn't block on `ssh -G`.
+  - Writes (`writeFile` / `delete` / `rename` / `createDirectory`) throw
+    NoPermissions; chunk D will lift this for edit-in-place flows.
+
 ### Fixed
 
 - `fix: ssh writeFile hung when remote ssh emits stdout banners`. With

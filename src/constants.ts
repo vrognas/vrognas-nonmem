@@ -13,6 +13,7 @@ export const COMMAND = {
   testConnection: 'positronNonmem.testConnection',
   runModel: 'positronNonmem.runModel',
   showNmtranParsedModel: 'positronNonmem.showNmtranParsedModel',
+  openRemotePath: 'positronNonmem.openRemotePath',
 } as const;
 
 export const HOST_DEFAULTS = {

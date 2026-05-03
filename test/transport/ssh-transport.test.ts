@@ -1,7 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import { __testing } from '../../src/transport/ssh-transport';
 
-const { scrubHostname, buildScpPutArgs, buildScpGetArgs, quoteRemotePath, lastLine } = __testing;
+const {
+  scrubHostname,
+  buildScpPutArgs,
+  buildScpGetArgs,
+  quoteRemotePath,
+  lastLine,
+  isNoSuchFile,
+  parseStatLine,
+  parseFindOutput,
+} = __testing;
 
 describe('scrubHostname', () => {
   it('redacts the literal host from a typical DNS error message', () => {
@@ -74,6 +83,51 @@ describe('quoteRemotePath', () => {
 
   it('escapes single quotes inside the post-~ portion', () => {
     expect(quoteRemotePath(`~/o'brien`)).toBe(`"$HOME"/'o'\\''brien'`);
+  });
+});
+
+describe('isNoSuchFile', () => {
+  it('detects GNU coreutils "No such file or directory" phrasing', () => {
+    expect(isNoSuchFile('cat: foo: No such file or directory')).toBe(true);
+    expect(isNoSuchFile("stat: cannot stat 'foo': No such file or directory")).toBe(true);
+  });
+  it('returns false for unrelated errors', () => {
+    expect(isNoSuchFile('Permission denied')).toBe(false);
+    expect(isNoSuchFile('')).toBe(false);
+  });
+});
+
+describe('parseStatLine', () => {
+  it('parses size|mtime|description for a regular file', () => {
+    const s = parseStatLine('1234|1683500000|regular file\n', '/tmp/foo');
+    expect(s).toEqual({ type: 'file', size: 1234, mtime: 1683500000 });
+  });
+  it('maps "directory" and "symbolic link" descriptions', () => {
+    expect(parseStatLine('4096|1|directory\n', '/').type).toBe('directory');
+    expect(parseStatLine('11|1|symbolic link\n', '/foo').type).toBe('symlink');
+  });
+  it('falls back to file for unrecognised types (FIFO, socket, …)', () => {
+    expect(parseStatLine('0|0|fifo\n', '/foo').type).toBe('file');
+  });
+  it('throws on malformed output', () => {
+    expect(() => parseStatLine('garbage', '/foo')).toThrow();
+  });
+});
+
+describe('parseFindOutput', () => {
+  it('parses tab-separated name + type code lines', () => {
+    const out = ['m.lst\tf', 'subdir\td', 'link\tl', ''].join('\n');
+    expect(parseFindOutput(out)).toEqual([
+      { name: 'm.lst', type: 'file' },
+      { name: 'subdir', type: 'directory' },
+      { name: 'link', type: 'symlink' },
+    ]);
+  });
+  it('returns [] for empty output (empty directory)', () => {
+    expect(parseFindOutput('')).toEqual([]);
+  });
+  it('preserves names containing tabs (last tab is the separator)', () => {
+    expect(parseFindOutput('odd\tname\tf\n')).toEqual([{ name: 'odd\tname', type: 'file' }]);
   });
 });
 
