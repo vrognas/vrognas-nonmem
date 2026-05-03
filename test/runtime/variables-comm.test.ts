@@ -29,12 +29,7 @@ describe('mapParsedModelToVariables', () => {
 
     expect(vars.map((v) => v.display_name)).toEqual(['THETA(1)', 'OMEGA(1,1)', 'SIGMA(1,1)', 'Y']);
     expect(vars.map((v) => v.display_value)).toEqual(['1', '0.1', '0.1', '1']);
-    expect(vars.map((v) => v.display_type)).toEqual([
-      'theta',
-      'omega',
-      'sigma',
-      'equation = THETA(1) + ETA(1) + EPS(1)',
-    ]);
+    expect(vars.map((v) => v.display_type)).toEqual(['theta', 'omega', 'sigma', '$PRED']);
     // Parameters land in 'class' so Positron groups them under "CLASSES",
     // separating raw declarations from derived-equation values in "VALUES".
     expect(vars.map((v) => v.kind)).toEqual(['class', 'class', 'class', 'number']);
@@ -49,9 +44,9 @@ describe('mapParsedModelToVariables', () => {
     );
 
     const k = vars.find((v) => v.display_name === 'K')!;
-    expect(k.display_value).toBe('LOG(CL)');
+    expect(k.display_value).toBe('LOG(CL)'); // unevaluable falls back to the rhs text
     expect(k.kind).toBe('string');
-    expect(k.display_type).toBe('equation = LOG(CL)');
+    expect(k.display_type).toBe('$PK'); // owning block, not the equation text
   });
 
   it('marks FIX/lower/upper hints in display_value of THETA bounds', () => {

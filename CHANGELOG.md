@@ -7,6 +7,13 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- `chore: equation display_type now shows owning control record`. Previously the
+  Variables-pane right column read `equation = THETA(1) + ETA(1) + EPS(1)` for
+  every equation row — duplicating the rhs already encoded in `display_value`
+  for unevaluable equations and adding noise for evaluable ones. Now it shows
+  the owning block (`$PRED`, `$PK`, `$ERROR`, `$DES`, etc.). Concise, says
+  where the binding is defined.
+
 - `chore: split parameters from derived equations in Variables pane`. Declared
   THETA / OMEGA / SIGMA now use `kind: 'class'`, so Positron's frontend
   (group names hard-coded to Data / Values / Functions / Classes) puts them

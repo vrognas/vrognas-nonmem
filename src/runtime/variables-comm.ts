@@ -113,7 +113,10 @@ function equationRow(eq: NmtranEquation): Variable {
     name: eq.name,
     displayValue: evaluable ? `${eq.value}` : eq.rhs,
     kind: evaluable ? 'number' : 'string',
-    nmtranType: `equation = ${eq.rhs}`,
+    // Show the owning control record ($PRED / $PK / $ERROR / …) rather
+    // than the rhs text. The full expression is already encoded in the
+    // displayValue when the value can't be evaluated.
+    nmtranType: eq.block,
   });
 }
 
