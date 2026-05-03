@@ -33,7 +33,25 @@ export function activate(context: vscode.ExtensionContext): void {
 
   registerRuntime(context, outputChannel);
 
+  // Variables-pane wiring: when the active editor switches, fetch the
+  // parsed-model from vscode-nmtran for the new file and push it to all
+  // live NONMEM sessions. Each session relays its current model to any
+  // open Variables comm.
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor((editor) => void refreshVariablesForEditor(editor)),
+  );
+  void refreshVariablesForEditor(vscode.window.activeTextEditor);
+
   outputChannel.appendLine('[positron-nonmem] extension activated.');
+}
+
+async function refreshVariablesForEditor(editor: vscode.TextEditor | undefined): Promise<void> {
+  if (!runtimeManager) return;
+  const sessions = runtimeManager.getSessions();
+  if (sessions.length === 0) return;
+  const model =
+    editor && isNmtranEditor(editor) ? await getNmtranParsedModel(editor.document.uri) : null;
+  for (const session of sessions) session.setParsedModel(model);
 }
 
 export function deactivate(): void {

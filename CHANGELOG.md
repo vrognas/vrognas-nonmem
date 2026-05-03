@@ -7,6 +7,17 @@ All notable changes documented here. Format follows
 
 ### Added
 
+- `feat: file-context-aware Variables pane`. NONMEM sessions now serve a
+  `RuntimeClientType.Variables` comm whose contents reflect the *active
+  NMTRAN file's declarations*, not a runtime environment. Each THETA/OMEGA/
+  SIGMA shows its declared value; each `name = rhs` assignment in
+  `$PRED`/`$PK`/`$ERROR`/etc. shows its evaluated value (or the rhs text when
+  not evaluable). When the active editor switches, the model is re-fetched
+  via vscode-nmtran's `getParsedModel(uri)` API and pushed to all open
+  Variables comms via the wire format documented in `positron-javascript`'s
+  reference: `{msg_type: 'list', variables, length}` outbound,
+  `{msg_type: 'refresh'}` inbound.
+
 - `feat: NmtranClient + Show NMTRAN Parsed Model (Debug) command`. Bridges to
   vscode-nmtran's public `getParsedModel(uri)` API via
   `vscode.extensions.getExtension('vrognas.nmtran').activate()`. The debug

@@ -20,9 +20,16 @@ export class NonmemRuntimeManager implements positron.LanguageRuntimeManager {
   readonly onDidDiscoverRuntime = this._onDidDiscoverRuntime.event;
 
   private readonly positron: PositronApi;
+  /** Live NonmemSession instances spawned by createSession; pruned on session end. */
+  private readonly liveSessions = new Set<NonmemSession>();
 
   constructor(_context: vscode.ExtensionContext, deps: NonmemRuntimeManagerDeps) {
     this.positron = deps.positron;
+  }
+
+  /** Snapshot of currently-live sessions; used by the editor watcher to push parsed-model updates. */
+  getSessions(): readonly NonmemSession[] {
+    return [...this.liveSessions];
   }
 
   async *discoverAllRuntimes(): AsyncGenerator<positron.LanguageRuntimeMetadata> {
@@ -40,10 +47,13 @@ export class NonmemRuntimeManager implements positron.LanguageRuntimeManager {
   ): Promise<positron.LanguageRuntimeSession> {
     const profile = resolveHostProfile();
     const transport = await pickTransport(profile);
-    return new NonmemSession(runtimeMetadata, sessionMetadata, {
+    const session = new NonmemSession(runtimeMetadata, sessionMetadata, {
       positron: this.positron,
       transport,
     });
+    this.liveSessions.add(session);
+    session.onDidEndSession(() => this.liveSessions.delete(session));
+    return session;
   }
 
   async validateMetadata(

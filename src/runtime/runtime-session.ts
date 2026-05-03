@@ -3,6 +3,8 @@ import { randomUUID } from 'crypto';
 import type * as positron from 'positron';
 import type { PositronApi } from '../positron-api';
 import type { Transport } from '../transport';
+import type { NmtranParsedModel } from '../nmtran-client';
+import { mapParsedModelToVariables, type Variable } from './variables-comm';
 
 // LanguageRuntimeSession implementation for NONMEM.
 //
@@ -58,6 +60,10 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
   private sessionName: string;
   private readonly positron: PositronApi;
   private readonly transport: Transport;
+  /** Open Variables-comm client IDs we should keep in sync. */
+  private readonly variablesClients = new Set<string>();
+  /** Most recently received parsed-model snapshot — pushed to new + existing Variables comms. */
+  private currentParsedModel: NmtranParsedModel | null = null;
 
   constructor(
     runtimeMetadata: positron.LanguageRuntimeMetadata,
@@ -227,33 +233,66 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
   }
 
   async createClient(
-    _id: string,
-    _type: positron.RuntimeClientType,
+    id: string,
+    type: positron.RuntimeClientType,
     _params: Record<string, unknown>,
     _metadata?: Record<string, unknown>,
   ): Promise<void> {
-    // Variables / Plot / DataExplorer / Connection / UI / Help comms all come
-    // in M3+. We silently accept the creation request so Positron's session
-    // machinery doesn't treat the session as broken; the corresponding panes
-    // stay empty (we never emit comm messages on these client IDs) until the
-    // wire-format implementation lands. Throwing here put Positron in a
-    // half-attached state that froze the Console prompt after execute().
+    // Variables comm: track the client id and immediately push the current
+    // parsed-model snapshot (if any). Other comm types (Plot/DataExplorer/
+    // Connection/UI/Help) are accepted silently so Positron's session
+    // machinery doesn't treat the session as broken.
+    if (type === this.positron.RuntimeClientType.Variables) {
+      this.variablesClients.add(id);
+      this.pushVariablesList(id);
+    }
   }
 
-  async listClients(_type?: positron.RuntimeClientType): Promise<Record<string, string>> {
-    return {};
+  async listClients(type?: positron.RuntimeClientType): Promise<Record<string, string>> {
+    if (type !== undefined && type !== this.positron.RuntimeClientType.Variables) {
+      return {};
+    }
+    const result: Record<string, string> = {};
+    for (const id of this.variablesClients) {
+      result[id] = this.positron.RuntimeClientType.Variables;
+    }
+    return result;
   }
 
-  removeClient(_id: string): void {
-    // No-op; we don't track clients yet.
+  removeClient(id: string): void {
+    this.variablesClients.delete(id);
   }
 
   sendClientMessage(
-    _client_id: string,
+    client_id: string,
     _message_id: string,
-    _message: Record<string, unknown>,
+    message: Record<string, unknown>,
   ): void {
-    // No-op; will be implemented when comms exist.
+    if (!this.variablesClients.has(client_id)) return;
+    // Wire format mirrors positron-javascript/src/variables.ts: front-end
+    // sends `{ msg_type: 'refresh' | 'inspect' | 'clipboard_format' }`. For
+    // 3D we only need 'refresh' — file-context-aware view, no expanded
+    // inspection yet.
+    if (message['msg_type'] === 'refresh') {
+      this.pushVariablesList(client_id);
+    }
+  }
+
+  /** Update the current model snapshot and push a fresh `list` to every open Variables comm. */
+  setParsedModel(model: NmtranParsedModel | null): void {
+    this.currentParsedModel = model;
+    for (const id of this.variablesClients) this.pushVariablesList(id);
+  }
+
+  private pushVariablesList(commId: string): void {
+    const variables: Variable[] = this.currentParsedModel
+      ? mapParsedModelToVariables(this.currentParsedModel)
+      : [];
+    this.emitCommMessage(commId, {
+      msg_type: 'list',
+      variables,
+      length: variables.length,
+    });
   }
 
   replyToPrompt(_id: string, _reply: string): void {
@@ -318,6 +357,18 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
       when: new Date().toISOString(),
       type: this.positron.LanguageRuntimeMessageType.State,
       state,
+    };
+    this._onDidReceiveRuntimeMessage.fire(message);
+  }
+
+  private emitCommMessage(commId: string, data: Record<string, unknown>): void {
+    const message: positron.LanguageRuntimeCommMessage = {
+      id: randomUUID(),
+      parent_id: '',
+      when: new Date().toISOString(),
+      type: this.positron.LanguageRuntimeMessageType.CommData,
+      comm_id: commId,
+      data,
     };
     this._onDidReceiveRuntimeMessage.fire(message);
   }
