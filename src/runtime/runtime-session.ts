@@ -287,12 +287,10 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
     // message_id, body carrying jsonrpc result) or the row's "View" icon
     // gets stuck in "View Queued…".
     if (message['method'] === 'list') {
-      this.pushVariablesRefresh(client_id);
-      this.emitCommReply(client_id, message_id, {
-        variables: this.currentVariables(),
-        length: this.currentVariables().length,
-        version: 0,
-      });
+      // Per OpenRPC, `list` returns the variable set as the result. The
+      // proactive `refresh` event is for setParsedModel / createClient,
+      // not for `list` — sending both was double-work.
+      this.emitCommReply(client_id, message_id, this.buildVariablesPayload());
       return;
     }
     if (message['method'] === 'view') {
@@ -328,21 +326,20 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
   }
 
   private pushVariablesRefresh(commId: string): void {
-    const variables = this.currentVariables();
     // Frontend event from positron/comms/variables-frontend-openrpc.json:
     //   method=refresh, params={ variables, length, version }
     this.emitCommMessage(commId, {
       method: 'refresh',
-      params: {
-        variables,
-        length: variables.length,
-        version: 0,
-      },
+      params: this.buildVariablesPayload(),
     });
   }
 
-  private currentVariables(): Variable[] {
-    return this.currentParsedModel ? mapParsedModelToVariables(this.currentParsedModel) : [];
+  /** {variables, length, version} payload reused by both `list` replies and `refresh` events. */
+  private buildVariablesPayload(): { variables: Variable[]; length: number; version: number } {
+    const variables = this.currentParsedModel
+      ? mapParsedModelToVariables(this.currentParsedModel)
+      : [];
+    return { variables, length: variables.length, version: 0 };
   }
 
   /**

@@ -63,28 +63,13 @@ export function mapParsedModelToVariables(model: NmtranParsedModel): Variable[] 
   // grouping is the actual goal. A custom TreeDataProvider view (future
   // chunk) would give us proper "PARAMETERS" / "VARIABLES" labels.
   for (const t of model.thetas) {
-    out.push(parameterRow({
-      name: `THETA(${t.index})`,
-      displayValue: thetaDisplay(t.init, t.lower, t.upper, t.fix),
-      nmtranType: 'theta',
-      decl: t,
-    }));
+    out.push(parameterRow(`THETA(${t.index})`, thetaDisplay(t), 'theta', t));
   }
   for (const o of model.omegas) {
-    out.push(parameterRow({
-      name: `OMEGA(${o.index},${o.index})`,
-      displayValue: o.fix ? `${formatNumber(o.value)} (FIX)` : formatNumber(o.value),
-      nmtranType: 'omega',
-      decl: o,
-    }));
+    out.push(parameterRow(`OMEGA(${o.index},${o.index})`, omegaSigmaDisplay(o), 'omega', o));
   }
   for (const s of model.sigmas) {
-    out.push(parameterRow({
-      name: `SIGMA(${s.index},${s.index})`,
-      displayValue: s.fix ? `${formatNumber(s.value)} (FIX)` : formatNumber(s.value),
-      nmtranType: 'sigma',
-      decl: s,
-    }));
+    out.push(parameterRow(`SIGMA(${s.index},${s.index})`, omegaSigmaDisplay(s), 'sigma', s));
   }
   for (const eq of model.equations) {
     out.push(equationRow(eq));
@@ -107,75 +92,71 @@ export function resolveAccessKeyLine(
   if (eq) return eq.line;
 
   const theta = accessKey.match(/^THETA\((\d+)\)$/);
-  if (theta) {
-    const idx = parseInt(theta[1]!, 10);
-    return model.thetas.find((t) => t.index === idx)?.line ?? null;
-  }
-  const omega = accessKey.match(/^OMEGA\((\d+),(\d+)\)$/);
-  if (omega && omega[1] === omega[2]) {
-    const idx = parseInt(omega[1]!, 10);
-    return model.omegas.find((o) => o.index === idx)?.line ?? null;
-  }
-  const sigma = accessKey.match(/^SIGMA\((\d+),(\d+)\)$/);
-  if (sigma && sigma[1] === sigma[2]) {
-    const idx = parseInt(sigma[1]!, 10);
-    return model.sigmas.find((s) => s.index === idx)?.line ?? null;
+  if (theta) return findDeclLine(model.thetas, parseInt(theta[1]!, 10));
+
+  const diag = accessKey.match(/^(OMEGA|SIGMA)\((\d+),(\d+)\)$/);
+  if (diag && diag[2] === diag[3]) {
+    const idx = parseInt(diag[2]!, 10);
+    const decls = diag[1] === 'OMEGA' ? model.omegas : model.sigmas;
+    return findDeclLine(decls, idx);
   }
   return null;
 }
 
-function thetaDisplay(
-  init: number,
-  lower: number | undefined,
-  upper: number | undefined,
-  fix: boolean,
-): string {
-  const initStr = formatNumber(init);
-  if (fix) return `${initStr} (FIX)`;
-  if (lower !== undefined && upper !== undefined) {
-    return `${initStr} (${formatNumber(lower)}..${formatNumber(upper)})`;
+/** Look up a parameter decl by index and return its tracked line, or null when missing. */
+function findDeclLine(decls: { index: number; line?: number }[], index: number): number | null {
+  return decls.find((d) => d.index === index)?.line ?? null;
+}
+
+function thetaDisplay(t: NmtranThetaDecl): string {
+  const initStr = formatNumber(t.init);
+  if (t.fix) return `${initStr} (FIX)`;
+  if (t.lower !== undefined && t.upper !== undefined) {
+    return `${initStr} (${formatNumber(t.lower)}..${formatNumber(t.upper)})`;
   }
-  if (lower !== undefined) return `${initStr} (>=${formatNumber(lower)})`;
-  if (upper !== undefined) return `${initStr} (<=${formatNumber(upper)})`;
+  if (t.lower !== undefined) return `${initStr} (>=${formatNumber(t.lower)})`;
+  if (t.upper !== undefined) return `${initStr} (<=${formatNumber(t.upper)})`;
   return initStr;
 }
 
-function parameterRow(args: {
-  name: string;
-  displayValue: string;
-  nmtranType: string;
-  decl: NmtranThetaDecl | NmtranOmegaSigmaDecl;
-}): Variable {
-  // Only mark navigable when vscode-nmtran has actually tracked a line —
-  // pre-0.4.18 versions don't, and we don't want a dead double-click.
-  const navigable = typeof args.decl.line === 'number';
-  return {
-    ...leaf({
-      name: args.name,
-      displayValue: args.displayValue,
-      kind: 'class',
-      nmtranType: args.nmtranType,
-    }),
-    has_viewer: navigable,
-  };
+function omegaSigmaDisplay(d: NmtranOmegaSigmaDecl): string {
+  return d.fix ? `${formatNumber(d.value)} (FIX)` : formatNumber(d.value);
+}
+
+/**
+ * Build a parameter (THETA / OMEGA / SIGMA) row. has_viewer is wired to
+ * whether vscode-nmtran tracked a decl line (>=0.4.18); older releases
+ * lack it and we degrade gracefully to non-navigable.
+ */
+function parameterRow(
+  name: string,
+  displayValue: string,
+  nmtranType: string,
+  decl: NmtranThetaDecl | NmtranOmegaSigmaDecl,
+): Variable {
+  return leaf({
+    name,
+    displayValue,
+    kind: 'class',
+    nmtranType,
+    hasViewer: typeof decl.line === 'number',
+  });
 }
 
 function equationRow(eq: NmtranEquation): Variable {
   const evaluable = eq.value !== undefined;
-  // has_viewer:true makes Positron's frontend send a `view` RPC on
-  // double-click; runtime-session routes it to the editor at eq.line.
-  return {
-    ...leaf({
-      name: eq.name,
-      displayValue: evaluable ? formatNumber(eq.value!) : eq.rhs,
-      kind: evaluable ? 'number' : 'string',
-      // Show the owning control record ($PRED / $PK / $ERROR / …) rather
-      // than the rhs text. The full expression is already encoded in the
-      // displayValue when the value can't be evaluated.
-      nmtranType: eq.block,
-    }),
-    has_viewer: true,
-  };
+  return leaf({
+    name: eq.name,
+    displayValue: evaluable ? formatNumber(eq.value!) : eq.rhs,
+    kind: evaluable ? 'number' : 'string',
+    // Show the owning control record ($PRED / $PK / $ERROR / …) rather
+    // than the rhs text. The full expression is already encoded in
+    // displayValue when the value can't be evaluated.
+    nmtranType: eq.block,
+    // Equations always carry a line; runtime-session routes the
+    // resulting `view` RPC to the editor at eq.line.
+    hasViewer: true,
+  });
 }
 
 /**
@@ -197,6 +178,7 @@ function leaf(args: {
   displayValue: string;
   kind: Variable['kind'];
   nmtranType: string;
+  hasViewer?: boolean;
 }): Variable {
   return {
     access_key: args.name,
@@ -209,7 +191,7 @@ function leaf(args: {
     length: 0,
     size: 0,
     is_truncated: false,
-    has_viewer: false,
+    has_viewer: args.hasViewer ?? false,
     updated_time: 0,
   };
 }

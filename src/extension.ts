@@ -49,9 +49,9 @@ async function refreshVariablesForEditor(editor: vscode.TextEditor | undefined):
   if (!runtimeManager) return;
   const sessions = runtimeManager.getSessions();
   if (sessions.length === 0) return;
-  const isNmtran = !!editor && isNmtranEditor(editor);
-  const model = isNmtran ? await getNmtranParsedModel(editor!.document.uri) : null;
-  const uri = isNmtran ? editor!.document.uri : null;
+  const target = editor && isNmtranEditor(editor) ? editor : null;
+  const uri = target?.document.uri ?? null;
+  const model = target ? await getNmtranParsedModel(target.document.uri) : null;
   for (const session of sessions) session.setParsedModel(model, uri);
 }
 
