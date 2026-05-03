@@ -31,6 +31,13 @@ export interface NonmemSessionDeps {
    * creation time so all sync paths in Session can use it directly.
    */
   transport: Transport;
+  /**
+   * Optional navigation callback fired when the Variables-pane sends a
+   * `view` RPC for an equation row. Wired by the extension to
+   * `vscode.window.showTextDocument` with a 1-line selection range.
+   * Tests pass undefined to keep the session vscode-free.
+   */
+  navigator?: (uri: vscode.Uri, line: number) => void;
 }
 
 export class NonmemSession implements positron.LanguageRuntimeSession {
@@ -60,10 +67,13 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
   private sessionName: string;
   private readonly positron: PositronApi;
   private readonly transport: Transport;
+  private readonly navigator: ((uri: vscode.Uri, line: number) => void) | undefined;
   /** Open Variables-comm client IDs we should keep in sync. */
   private readonly variablesClients = new Set<string>();
   /** Most recently received parsed-model snapshot — pushed to new + existing Variables comms. */
   private currentParsedModel: NmtranParsedModel | null = null;
+  /** URI of the editor that produced `currentParsedModel`; needed to resolve `view` RPCs back to the source file. */
+  private currentSourceUri: vscode.Uri | null = null;
 
   constructor(
     runtimeMetadata: positron.LanguageRuntimeMetadata,
@@ -74,6 +84,7 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
     this.metadata = sessionMetadata;
     this.positron = deps.positron;
     this.transport = deps.transport;
+    this.navigator = deps.navigator;
     this.state = this.positron.RuntimeState.Uninitialized;
     this.workingDirectory = sessionMetadata.workingDirectory;
     this.sessionName = runtimeMetadata.runtimeName;
@@ -276,12 +287,39 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
     // file-context-aware view (no mutability, no inspection yet).
     if (message['method'] === 'list') {
       this.pushVariablesRefresh(client_id);
+      return;
+    }
+    // `view` is fired on Variables-pane double-click for rows with
+    // has_viewer:true. We only mark equation rows as such, so the
+    // access_key here is always an equation name; resolve it to the
+    // owning file + line and hand off to the navigator.
+    if (message['method'] === 'view') {
+      this.handleViewRpc(message['params']);
     }
   }
 
-  /** Update the current model snapshot and push a fresh `refresh` event to every open Variables comm. */
-  setParsedModel(model: NmtranParsedModel | null): void {
+  private handleViewRpc(params: unknown): void {
+    if (!this.navigator || !this.currentSourceUri || !this.currentParsedModel) return;
+    // Per variables-backend-openrpc.json: view.params.path is string[].
+    // For top-level vars it's a single-element array carrying the access_key.
+    const path = (params as { path?: unknown } | undefined)?.path;
+    if (!Array.isArray(path) || path.length === 0) return;
+    const accessKey = path[path.length - 1];
+    if (typeof accessKey !== 'string') return;
+    const eq = this.currentParsedModel.equations.find((e) => e.name === accessKey);
+    if (!eq) return;
+    this.navigator(this.currentSourceUri, eq.line);
+  }
+
+  /**
+   * Update the current model snapshot (and the source URI, when the model
+   * came from an editor) and push a fresh `refresh` event to every open
+   * Variables comm. URI is null when no editor is active or the active
+   * file isn't an NMTRAN document — view-RPC lookups fall through in that case.
+   */
+  setParsedModel(model: NmtranParsedModel | null, uri: vscode.Uri | null = null): void {
     this.currentParsedModel = model;
+    this.currentSourceUri = model ? uri : null;
     for (const id of this.variablesClients) this.pushVariablesRefresh(id);
   }
 

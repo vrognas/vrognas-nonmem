@@ -12,6 +12,8 @@ import type { PositronApi } from '../positron-api';
 
 export interface NonmemRuntimeManagerDeps {
   positron: PositronApi;
+  /** Forwarded to every spawned NonmemSession; see NonmemSessionDeps.navigator. */
+  navigator?: (uri: vscode.Uri, line: number) => void;
 }
 
 export class NonmemRuntimeManager implements positron.LanguageRuntimeManager {
@@ -20,11 +22,13 @@ export class NonmemRuntimeManager implements positron.LanguageRuntimeManager {
   readonly onDidDiscoverRuntime = this._onDidDiscoverRuntime.event;
 
   private readonly positron: PositronApi;
+  private readonly navigator: ((uri: vscode.Uri, line: number) => void) | undefined;
   /** Live NonmemSession instances spawned by createSession; pruned on session end. */
   private readonly liveSessions = new Set<NonmemSession>();
 
   constructor(_context: vscode.ExtensionContext, deps: NonmemRuntimeManagerDeps) {
     this.positron = deps.positron;
+    this.navigator = deps.navigator;
   }
 
   /** Snapshot of currently-live sessions; used by the editor watcher to push parsed-model updates. */
@@ -50,6 +54,7 @@ export class NonmemRuntimeManager implements positron.LanguageRuntimeManager {
     const session = new NonmemSession(runtimeMetadata, sessionMetadata, {
       positron: this.positron,
       transport,
+      navigator: this.navigator,
     });
     this.liveSessions.add(session);
     session.onDidEndSession(() => this.liveSessions.delete(session));

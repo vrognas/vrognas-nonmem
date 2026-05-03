@@ -112,15 +112,20 @@ function thetaDisplay(
 
 function equationRow(eq: NmtranEquation): Variable {
   const evaluable = eq.value !== undefined;
-  return leaf({
-    name: eq.name,
-    displayValue: evaluable ? formatNumber(eq.value!) : eq.rhs,
-    kind: evaluable ? 'number' : 'string',
-    // Show the owning control record ($PRED / $PK / $ERROR / …) rather
-    // than the rhs text. The full expression is already encoded in the
-    // displayValue when the value can't be evaluated.
-    nmtranType: eq.block,
-  });
+  // has_viewer:true makes Positron's frontend send a `view` RPC on
+  // double-click; runtime-session routes it to the editor at eq.line.
+  return {
+    ...leaf({
+      name: eq.name,
+      displayValue: evaluable ? formatNumber(eq.value!) : eq.rhs,
+      kind: evaluable ? 'number' : 'string',
+      // Show the owning control record ($PRED / $PK / $ERROR / …) rather
+      // than the rhs text. The full expression is already encoded in the
+      // displayValue when the value can't be evaluated.
+      nmtranType: eq.block,
+    }),
+    has_viewer: true,
+  };
 }
 
 /**

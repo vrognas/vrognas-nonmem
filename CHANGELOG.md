@@ -5,6 +5,16 @@ All notable changes documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- `feat: Variables-pane double-click jumps to equation source`. Equation rows
+  ($PRED / $PK / $ERROR / $DES assignments) now carry `has_viewer: true`, so
+  Positron's frontend issues a `view` RPC on double-click. The session
+  resolves the access_key against `currentParsedModel.equations`, looks up
+  the line stored on each Equation, and opens the source `.mod` editor at
+  that position via an injected `navigator` callback. THETA / OMEGA / SIGMA
+  rows stay non-navigable for now (no decl-line tracking yet).
+
 ### Changed
 
 - `chore: round Variables-pane display values to 3 decimal places`. THETA inits,

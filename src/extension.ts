@@ -49,9 +49,21 @@ async function refreshVariablesForEditor(editor: vscode.TextEditor | undefined):
   if (!runtimeManager) return;
   const sessions = runtimeManager.getSessions();
   if (sessions.length === 0) return;
-  const model =
-    editor && isNmtranEditor(editor) ? await getNmtranParsedModel(editor.document.uri) : null;
-  for (const session of sessions) session.setParsedModel(model);
+  const isNmtran = !!editor && isNmtranEditor(editor);
+  const model = isNmtran ? await getNmtranParsedModel(editor!.document.uri) : null;
+  const uri = isNmtran ? editor!.document.uri : null;
+  for (const session of sessions) session.setParsedModel(model, uri);
+}
+
+/**
+ * Open `uri` and reveal `line` (0-based) — wired into NonmemSession via the
+ * `navigator` dep so a Variables-pane double-click on an equation row jumps
+ * to the assignment. Range start==end so we only place the caret rather than
+ * highlight a span.
+ */
+function navigateToFileLine(uri: vscode.Uri, line: number): void {
+  const range = new vscode.Range(line, 0, line, 0);
+  void vscode.window.showTextDocument(uri, { selection: range, preserveFocus: false });
 }
 
 export function deactivate(): void {
@@ -75,7 +87,7 @@ function registerRuntime(context: vscode.ExtensionContext, channel: vscode.Outpu
     }
     throw e;
   }
-  runtimeManager = new NonmemRuntimeManager(context, { positron });
+  runtimeManager = new NonmemRuntimeManager(context, { positron, navigator: navigateToFileLine });
   context.subscriptions.push(
     positron.runtime.registerLanguageRuntimeManager('nmtran', runtimeManager),
   );

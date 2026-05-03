@@ -36,6 +36,31 @@ describe('mapParsedModelToVariables', () => {
     expect(vars.every((v) => !v.has_children)).toBe(true);
   });
 
+  it('marks equation rows with has_viewer=true so double-click triggers a `view` RPC', () => {
+    // Parameters (THETA/OMEGA/SIGMA) don't carry decl-line tracking yet, so
+    // they stay non-navigable. Equations always have a `line` field, so we
+    // enable the viewer so Positron's frontend opens a `view` RPC on
+    // double-click; the runtime-session handler routes that to the editor.
+    const vars = mapParsedModelToVariables(
+      model({
+        thetas: [{ index: 1, init: 1, fix: false }],
+        omegas: [{ index: 1, value: 0.1, fix: false }],
+        sigmas: [{ index: 1, value: 0.1, fix: false }],
+        equations: [
+          { name: 'Y', rhs: 'THETA(1)', block: '$PRED', line: 3, value: 1 },
+          { name: 'K', rhs: 'LOG(CL)', block: '$PK', line: 5, value: undefined },
+        ],
+      }),
+    );
+
+    const byName = Object.fromEntries(vars.map((v) => [v.display_name, v.has_viewer]));
+    expect(byName['THETA(1)']).toBe(false);
+    expect(byName['OMEGA(1,1)']).toBe(false);
+    expect(byName['SIGMA(1,1)']).toBe(false);
+    expect(byName['Y']).toBe(true);
+    expect(byName['K']).toBe(true);
+  });
+
   it('shows rhs as display_value when an equation cannot be evaluated (undefined value)', () => {
     const vars = mapParsedModelToVariables(
       model({
