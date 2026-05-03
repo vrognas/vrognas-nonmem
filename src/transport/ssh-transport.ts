@@ -88,6 +88,20 @@ export function buildScpGetArgs(alias: string, remotePath: string, localPath: st
   return ['-o', 'BatchMode=yes', `${alias}:${remotePath}`, localPath];
 }
 
+/**
+ * Quote a remote path for safe interpolation into a bash command. Leading
+ * `~` / `~/` becomes `"$HOME"` / `"$HOME"/'…'` so the remote shell expands
+ * the home dir; the rest stays single-quoted so weird chars don't escape
+ * into shell syntax. (Plain single quotes around `~/…` would NOT expand —
+ * that was the bug `cat > '~/positron-nonmem/…/manifest.json'` hit.)
+ */
+export function quoteRemotePath(p: string): string {
+  const escapeSingle = (s: string): string => s.replace(/'/g, `'\\''`);
+  if (p === '~') return '"$HOME"';
+  if (p.startsWith('~/')) return `"$HOME"/'${escapeSingle(p.slice(2))}'`;
+  return `'${escapeSingle(p)}'`;
+}
+
 export class SshTransport implements Transport {
   readonly kind = 'ssh' as const;
 
@@ -154,27 +168,24 @@ export class SshTransport implements Transport {
 
   async writeFile(remotePath: string, content: string): Promise<void> {
     const resolved = await this.requireResolvedAlias();
-    // Single-quote the path so an exotic name (spaces, $) doesn't get
-    // expanded by the remote shell. The content arrives via stdin and
-    // is written by `cat` verbatim; no escaping needed for the payload.
-    const escaped = `'${remotePath.replace(/'/g, `'\\''`)}'`;
+    // Path is quoted via quoteRemotePath; content arrives via stdin and
+    // is written by `cat` verbatim, so no payload escaping needed.
     return new Promise<void>((resolve, reject) => {
-      const child = spawn('ssh', ['-o', 'BatchMode=yes', this.alias, `cat > ${escaped}`], {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        windowsHide: true,
-      });
+      const child = spawn(
+        'ssh',
+        ['-o', 'BatchMode=yes', this.alias, `cat > ${quoteRemotePath(remotePath)}`],
+        { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true },
+      );
       let stderr = '';
       child.stderr.on('data', (data: Buffer) => {
         stderr += data.toString('utf8');
       });
       child.once('error', (err) => {
-        reject(
-          new SshTransportError(`failed to spawn ssh: ${err.message}`, err),
-        );
+        reject(new SshTransportError(`failed to spawn ssh: ${err.message}`, err));
       });
       child.once('close', (code) => {
         if (code === 0) return resolve();
-        const scrubbed = scrubHostname(stderr.trim() || '(no output)', resolved.hostname);
+        const scrubbed = scrubHostname(lastLine(stderr) || '(no output)', resolved.hostname);
         reject(new SshTransportError(`ssh writeFile exited ${code}: ${scrubbed}`));
       });
       child.stdin.end(content, 'utf8');
@@ -182,14 +193,10 @@ export class SshTransport implements Transport {
   }
 
   async readFile(remotePath: string): Promise<string> {
-    // Use the same `cat` channel as run(), but expose only stdout. Caller
-    // gets a hard error on missing file (cat exits non-zero, run() resolves
-    // with code != 0 and we throw).
-    const escaped = `'${remotePath.replace(/'/g, `'\\''`)}'`;
-    const result = await this.run(`cat ${escaped}`);
+    const result = await this.run(`cat ${quoteRemotePath(remotePath)}`);
     if (result.code !== 0) {
       throw new SshTransportError(
-        `ssh readFile exited ${result.code}: ${result.stderr.trim() || '(no output)'}`,
+        `ssh readFile exited ${result.code}: ${lastLine(result.stderr) || '(no output)'}`,
       );
     }
     return result.stdout;
@@ -241,5 +248,15 @@ function runScp(args: string[], hostnameForScrub: string): Promise<void> {
   });
 }
 
+/**
+ * Last non-empty line of a multi-line string. Used to extract the actual
+ * error from ssh stderr which may also contain `VisualHostKey yes`
+ * fingerprint art and other banner noise.
+ */
+function lastLine(s: string): string {
+  const lines = s.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  return lines.at(-1) ?? '';
+}
+
 // Exported for unit tests; not part of the runtime API.
-export const __testing = { scrubHostname, buildScpPutArgs, buildScpGetArgs };
+export const __testing = { scrubHostname, buildScpPutArgs, buildScpGetArgs, quoteRemotePath, lastLine };

@@ -5,6 +5,16 @@ All notable changes documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `fix: ssh writeFile / readFile broke ~ expansion`. v0.0.17 single-quoted
+  the path passed to `cat > / cat`, which made bash treat `~` as a
+  literal so `~/positron-nonmem/.../manifest.json` failed with
+  "No such file or directory". `quoteRemotePath` now expands a leading
+  `~/` to `"$HOME"/` and single-quotes only the rest. Error reporting
+  also takes the LAST non-empty line of stderr so the `VisualHostKey yes`
+  fingerprint banner doesn't leak into toasts.
+
 ### Changed
 
 - **Remote-first architecture (M7-prep).** Run outputs (`m.lst`,
