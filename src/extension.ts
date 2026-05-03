@@ -10,6 +10,7 @@ import {
   REMOTE_RUN_ROOT,
 } from './constants';
 import { resolveHostProfile, HostProfileError, type HostProfile } from './host-profiles';
+import { getNmtranParsedModel } from './nmtran-client';
 import { getPositron, PositronApiUnavailableError } from './positron-api';
 import { NonmemRuntimeManager } from './runtime/runtime-manager';
 import { runModel } from './runtime/run-model';
@@ -26,6 +27,9 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(COMMAND.testConnection, testConnection),
   );
   context.subscriptions.push(vscode.commands.registerCommand(COMMAND.runModel, runCurrentModel));
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND.showNmtranParsedModel, showNmtranParsedModel),
+  );
 
   registerRuntime(context, outputChannel);
 
@@ -119,10 +123,13 @@ interface ActiveModelTarget {
   workspaceFolder: vscode.WorkspaceFolder;
 }
 
+/** Recognised NMTRAN control-stream extensions. Used as a fallback when vscode-nmtran (which sets languageId=nmtran) isn't installed. */
+const NMTRAN_FILE_EXTENSIONS = new Set(['.mod', '.ctl']);
+
 /** Resolve the active editor's .mod file plus its workspace folder, or null with a user-facing error toast. */
 function resolveActiveModelTarget(): ActiveModelTarget | null {
   const editor = vscode.window.activeTextEditor;
-  if (!editor || editor.document.languageId !== 'nmtran') {
+  if (!editor || !isNmtranEditor(editor)) {
     void vscode.window.showErrorMessage(
       'Positron NONMEM: open an NMTRAN .mod file in the active editor first.',
     );
@@ -138,8 +145,37 @@ function resolveActiveModelTarget(): ActiveModelTarget | null {
   return { modelPath: editor.document.uri.fsPath, workspaceFolder };
 }
 
+function isNmtranEditor(editor: vscode.TextEditor): boolean {
+  if (editor.document.languageId === 'nmtran') return true;
+  const ext = path.extname(editor.document.uri.fsPath).toLowerCase();
+  return NMTRAN_FILE_EXTENSIONS.has(ext);
+}
+
 function log(message: string): void {
   outputChannel?.appendLine(`[positron-nonmem] ${message}`);
+}
+
+/**
+ * Smoke-test command: opens the parsedModel response from vscode-nmtran's
+ * `getParsedModel` API in a new JSON editor. Verifies the cross-extension
+ * API path before we build Variables-pane wiring on top of it.
+ */
+async function showNmtranParsedModel(): Promise<void> {
+  const target = resolveActiveModelTarget();
+  if (!target) return;
+  const editor = vscode.window.activeTextEditor!;
+  const result = await getNmtranParsedModel(editor.document.uri);
+  if (result === null) {
+    await vscode.window.showErrorMessage(
+      'Positron NONMEM: vscode-nmtran did not return a parsedModel — is the extension installed and the document open?',
+    );
+    return;
+  }
+  const doc = await vscode.workspace.openTextDocument({
+    language: 'json',
+    content: JSON.stringify(result, null, 2),
+  });
+  await vscode.window.showTextDocument(doc, { preview: false });
 }
 
 /**

@@ -12,6 +12,7 @@ export const CONFIG_HOST_SECTION = 'positronNonmem.host';
 export const COMMAND = {
   testConnection: 'positronNonmem.testConnection',
   runModel: 'positronNonmem.runModel',
+  showNmtranParsedModel: 'positronNonmem.showNmtranParsedModel',
 } as const;
 
 export const HOST_DEFAULTS = {

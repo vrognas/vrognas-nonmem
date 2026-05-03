@@ -7,6 +7,24 @@ All notable changes documented here. Format follows
 
 ### Added
 
+- `feat: NmtranClient + Show NMTRAN Parsed Model (Debug) command`. Bridges to
+  vscode-nmtran's public `getParsedModel(uri)` API via
+  `vscode.extensions.getExtension('vrognas.nmtran').activate()`. The debug
+  command opens the parsed-model JSON in a new editor; verifies the
+  cross-extension API path before Variables-pane wiring lands.
+
+### Changed
+
+- `chore: drop hard dependency on vscode-nmtran`. Removed
+  `extensionDependencies: ["vrognas.nmtran"]`. The two extensions now install
+  independently — positron-nonmem provides runtime/runModel; vscode-nmtran
+  provides syntax/IDE features. Without vscode-nmtran installed, the parsed-
+  model and (future) Variables-pane features silently degrade; runModel still
+  works on `.mod` / `.ctl` files (we now match by file extension as a fallback
+  when languageId isn't `nmtran`).
+
+### Added
+
 - `feat: per-run manifest.json + workspace audit.jsonl` (M3 chunk 3C).
   Each run writes `<workspace>/.positron-nonmem/runs/<runId>/manifest.json`
   with `{runId, started, completed, exitCode, ofv, modelHash, datasetHash,
