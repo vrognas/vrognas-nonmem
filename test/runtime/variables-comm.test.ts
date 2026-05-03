@@ -27,7 +27,16 @@ describe('mapParsedModelToVariables', () => {
       }),
     );
 
-    expect(vars.map((v) => v.display_name)).toEqual(['THETA(1)', 'OMEGA(1,1)', 'SIGMA(1,1)', 'Y']);
+    // Parameters: display_name == access_key. Equations: display_name
+    // suffixes the owning block ($PRED) so it stays visible after Positron
+    // replaces display_type with the View action button.
+    expect(vars.map((v) => v.access_key)).toEqual(['THETA(1)', 'OMEGA(1,1)', 'SIGMA(1,1)', 'Y']);
+    expect(vars.map((v) => v.display_name)).toEqual([
+      'THETA(1)',
+      'OMEGA(1,1)',
+      'SIGMA(1,1)',
+      'Y  $PRED',
+    ]);
     expect(vars.map((v) => v.display_value)).toEqual(['1', '0.1', '0.1', '1']);
     expect(vars.map((v) => v.display_type)).toEqual(['theta', 'omega', 'sigma', '$PRED']);
     // Parameters land in 'class' so Positron groups them under "CLASSES",
@@ -52,12 +61,12 @@ describe('mapParsedModelToVariables', () => {
       }),
     );
 
-    const byName = Object.fromEntries(vars.map((v) => [v.display_name, v.has_viewer]));
-    expect(byName['THETA(1)']).toBe(true);
-    expect(byName['OMEGA(1,1)']).toBe(true);
-    expect(byName['SIGMA(1,1)']).toBe(true);
-    expect(byName['Y']).toBe(true);
-    expect(byName['K']).toBe(true);
+    const byKey = Object.fromEntries(vars.map((v) => [v.access_key, v.has_viewer]));
+    expect(byKey['THETA(1)']).toBe(true);
+    expect(byKey['OMEGA(1,1)']).toBe(true);
+    expect(byKey['SIGMA(1,1)']).toBe(true);
+    expect(byKey['Y']).toBe(true);
+    expect(byKey['K']).toBe(true);
   });
 
   it('falls back to has_viewer=false on parameters when vscode-nmtran < 0.4.18 omits line', () => {
@@ -119,10 +128,11 @@ describe('resolveAccessKeyLine', () => {
       }),
     );
 
-    const k = vars.find((v) => v.display_name === 'K')!;
+    const k = vars.find((v) => v.access_key === 'K')!;
+    expect(k.display_name).toBe('K  $PK'); // block suffixed onto label
     expect(k.display_value).toBe('LOG(CL)'); // unevaluable falls back to the rhs text
     expect(k.kind).toBe('string');
-    expect(k.display_type).toBe('$PK'); // owning block, not the equation text
+    expect(k.display_type).toBe('$PK'); // still set, even though Positron hides it behind the View button
   });
 
   it('rounds noisy values to 3 decimal places in display_value', () => {

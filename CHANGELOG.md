@@ -5,6 +5,15 @@ All notable changes documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `chore: equation display_name now suffixes the owning $RECORD`. Setting
+  `has_viewer: true` causes Positron's frontend to replace the
+  display_type cell with the View action button, hiding the `$PRED` /
+  `$PK` / `$ERROR` / … label that lived there. The block is now appended
+  to display_name (`Y  $PRED`) so the context stays visible. access_key
+  is unchanged (`Y`), so view-RPC lookup still resolves correctly.
+
 ### Added
 
 - `feat: parameter rows (THETA / OMEGA / SIGMA) navigate to declaration`.

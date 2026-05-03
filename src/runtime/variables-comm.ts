@@ -147,11 +147,13 @@ function equationRow(eq: NmtranEquation): Variable {
   const evaluable = eq.value !== undefined;
   return leaf({
     name: eq.name,
+    // Positron replaces the display_type cell with the View action button
+    // when has_viewer is true, so we suffix the owning control record
+    // ($PRED / $PK / $ERROR / …) onto the display_name instead. The
+    // access_key (used by view-RPC lookup) stays as eq.name.
+    displayName: `${eq.name}  ${eq.block}`,
     displayValue: evaluable ? formatNumber(eq.value!) : eq.rhs,
     kind: evaluable ? 'number' : 'string',
-    // Show the owning control record ($PRED / $PK / $ERROR / …) rather
-    // than the rhs text. The full expression is already encoded in
-    // displayValue when the value can't be evaluated.
     nmtranType: eq.block,
     // Equations always carry a line; runtime-session routes the
     // resulting `view` RPC to the editor at eq.line.
@@ -175,6 +177,8 @@ function formatNumber(n: number): string {
 
 function leaf(args: {
   name: string;
+  /** Visible label; defaults to `name`. Lookup still uses `name` as the access_key. */
+  displayName?: string;
   displayValue: string;
   kind: Variable['kind'];
   nmtranType: string;
@@ -182,7 +186,7 @@ function leaf(args: {
 }): Variable {
   return {
     access_key: args.name,
-    display_name: args.name,
+    display_name: args.displayName ?? args.name,
     display_value: args.displayValue,
     display_type: args.nmtranType,
     type_info: '',
