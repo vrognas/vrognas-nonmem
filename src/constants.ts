@@ -14,6 +14,17 @@ export const COMMAND = {
   runModel: 'positronNonmem.runModel',
   showNmtranParsedModel: 'positronNonmem.showNmtranParsedModel',
   openRemotePath: 'positronNonmem.openRemotePath',
+  refreshRuns: 'positronNonmem.refreshRuns',
+} as const;
+
+/** Settings keys (paired with the `contributes.configuration` block in package.json). */
+export const SETTING = {
+  runsRoot: 'positronNonmem.runs.root',
+} as const;
+
+/** Tree-view ID used in package.json `contributes.views`. */
+export const VIEW_ID = {
+  runs: 'positronNonmem.runs',
 } as const;
 
 export const HOST_DEFAULTS = {

@@ -7,6 +7,22 @@ All notable changes documented here. Format follows
 
 ### Added
 
+- `feat: NONMEM Runs tree view (M7 chunk B)`. New activity-bar container
+  ("NONMEM" / `$(beaker)` icon) with a "Runs" tree that scans
+  `positronNonmem.runs.root` (default `~/positron-nonmem`) for any
+  directory containing one or more `.lst` files. Works for our own
+  `~/positron-nonmem/<id>/m.lst` layout, Pirana flat dirs, PsN nested
+  layouts, and hand-rolled folders.
+  - Discovery: `find <root> -maxdepth 4 -type f -name '*.lst' -printf '%h\t%f\t%T@\n'`,
+    grouped by parent dir, sorted by most-recent `.lst` mtime descending.
+  - Each row's click target is the dir's primary `.lst` (prefers `m.lst`,
+    otherwise alphabetically first), opened via the
+    `positron-nonmem://` FS provider. No local sync.
+  - Refresh button on the view title; auto-refresh on
+    `positronNonmem.runs.root` config change and after a successful run.
+  - Empty / errored states surface as a single tree row instead of a
+    blank pane, so users know the scan ran.
+
 - `feat: positron-nonmem:// FileSystemProvider (M7 chunk A)`. Read-only
   custom FS scheme that translates VSCode FS reads into `Transport` ops
   on demand, so remote run outputs (`m.lst`, `m.ext`, `manifest.json`, …)

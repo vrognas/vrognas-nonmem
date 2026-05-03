@@ -81,3 +81,27 @@ export class Disposable {
     this.fn?.();
   }
 }
+
+// Tree-view surface — minimal stubs so RunsTreeProvider can be unit tested.
+export const TreeItemCollapsibleState = {
+  None: 0,
+  Collapsed: 1,
+  Expanded: 2,
+} as const;
+
+export class TreeItem {
+  tooltip?: string;
+  description?: string;
+  iconPath?: unknown;
+  contextValue?: string;
+  command?: unknown;
+  resourceUri?: Uri;
+  constructor(
+    public label: string,
+    public collapsibleState: number = TreeItemCollapsibleState.None,
+  ) {}
+}
+
+export class ThemeIcon {
+  constructor(public readonly id: string) {}
+}

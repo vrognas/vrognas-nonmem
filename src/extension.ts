@@ -6,6 +6,8 @@ import {
   NONMEM_VERSION,
   OUTPUT_CHANNEL_NAME,
   REMOTE_RUN_ROOT,
+  SETTING,
+  VIEW_ID,
 } from './constants';
 import { RemoteFileSystemProvider, REMOTE_FS_SCHEME } from './fs/remote-fs-provider';
 import { resolveHostProfile, HostProfileError, type HostProfile } from './host-profiles';
@@ -14,6 +16,7 @@ import { getPositron, PositronApiUnavailableError } from './positron-api';
 import { NonmemRuntimeManager } from './runtime/runtime-manager';
 import { runModel } from './runtime/run-model';
 import { pickTransport, type Transport } from './transport';
+import { RunsTreeProvider } from './views/runs-tree-provider';
 
 let outputChannel: vscode.OutputChannel | undefined;
 let runtimeManager: NonmemRuntimeManager | undefined;
@@ -34,6 +37,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   registerRemoteFs(context, outputChannel);
+  registerRunsTree(context, outputChannel);
   registerRuntime(context, outputChannel);
 
   // Variables-pane wiring: when the active editor switches, fetch the
@@ -106,6 +110,38 @@ function registerRemoteFs(
   channel.appendLine(`[positron-nonmem] registered ${REMOTE_FS_SCHEME}:// FS provider for alias [${profile.alias}].`);
 }
 
+/**
+ * Register the "NONMEM Runs" tree view (M7 chunk B). Reads the configured
+ * remote root on each refresh; auto-refreshes when the user changes
+ * `positronNonmem.runs.root` so they don't have to click refresh manually.
+ */
+function registerRunsTree(
+  context: vscode.ExtensionContext,
+  channel: vscode.OutputChannel,
+): void {
+  let profile: HostProfile;
+  try {
+    profile = resolveHostProfile();
+  } catch (e) {
+    channel.appendLine(`[warn] skipping runs tree: ${(e as Error).message}`);
+    return;
+  }
+  const provider = new RunsTreeProvider(
+    () => pickTransport(profile),
+    profile.alias,
+    () =>
+      vscode.workspace.getConfiguration().get<string>(SETTING.runsRoot) ?? REMOTE_RUN_ROOT,
+  );
+  context.subscriptions.push(
+    vscode.window.registerTreeDataProvider(VIEW_ID.runs, provider),
+    vscode.commands.registerCommand(COMMAND.refreshRuns, () => provider.refresh()),
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration(SETTING.runsRoot)) provider.refresh();
+    }),
+  );
+  channel.appendLine(`[positron-nonmem] registered runs tree view (alias [${profile.alias}]).`);
+}
+
 function registerRuntime(context: vscode.ExtensionContext, channel: vscode.OutputChannel): void {
   let positron;
   try {
@@ -165,6 +201,7 @@ async function runCurrentModel(): Promise<void> {
     const exit = result.exitCode ?? 'unknown';
     const ofv = result.ofv !== null ? `, OFV=${result.ofv}` : '';
     log(`runModel: ${result.runId} EXIT=${exit}${ofv} -> ${result.remoteRunDir}`);
+    await vscode.commands.executeCommand(COMMAND.refreshRuns);
     await vscode.window.showInformationMessage(`Run ${result.runId}: EXIT=${exit}${ofv}`);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

@@ -2,7 +2,7 @@
   "name": "positron-nonmem",
   "displayName": "Positron NONMEM",
   "description": "NONMEM as a first-class Positron language runtime: SSH-based execution, live iteration streaming, run history, and pharmacometric workbench features. Companion to the vscode-nmtran language extension.",
-  "version": "0.0.20",
+  "version": "0.0.21",
   "publisher": "vrognas",
   "license": "MIT",
   "private": true,
@@ -37,8 +37,41 @@
       {
         "command": "positronNonmem.openRemotePath",
         "title": "Positron NONMEM: Open Remote Path (Debug)"
+      },
+      {
+        "command": "positronNonmem.refreshRuns",
+        "title": "Positron NONMEM: Refresh Runs",
+        "icon": "$(refresh)"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "positronNonmem.refreshRuns",
+          "when": "view == positronNonmem.runs",
+          "group": "navigation"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "positronNonmem",
+          "title": "NONMEM",
+          "icon": "$(beaker)"
+        }
+      ]
+    },
+    "views": {
+      "positronNonmem": [
+        {
+          "id": "positronNonmem.runs",
+          "name": "Runs",
+          "icon": "$(beaker)",
+          "contextualTitle": "NONMEM Runs"
+        }
+      ]
+    },
     "configuration": {
       "title": "Positron NONMEM",
       "properties": {
@@ -46,6 +79,11 @@
           "type": "string",
           "default": "primary",
           "description": "Name of a Host entry in your ~/.ssh/config. The extension shells out to the system ssh client, so HostName, User, Port, IdentityFile, ProxyJump, ControlMaster, etc. are all resolved from your existing OpenSSH configuration. The alias also appears in the Output channel as the privacy-preserving prefix."
+        },
+        "positronNonmem.runs.root": {
+          "type": "string",
+          "default": "~/positron-nonmem",
+          "description": "Remote directory the 'NONMEM Runs' tree scans for runs (any subdirectory containing one or more .lst files). Tilde-expanded against the remote $HOME. Default is where this extension's own runs land; change to e.g. '~/work' to surface Pirana/PsN/hand-rolled runs alongside."
         },
         "positronNonmem.host.transport": {
           "type": "string",
