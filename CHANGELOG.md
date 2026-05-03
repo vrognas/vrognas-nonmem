@@ -5,6 +5,17 @@ All notable changes documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `fix: positron-nonmem:// FS provider stripped leading / on absolute paths`.
+  v0.0.21 unconditionally stripped the URI path's leading `/`, which turned
+  absolute remote paths (e.g. `/home/<user>/positron-nonmem/pn-X/m.lst` —
+  what `find` emits when the user's `$HOME` is involved) into relative
+  paths the SSH `cat` resolved against `$HOME`, so opening any tree-view
+  row failed with "Unable to resolve nonexistent file". Now the leading
+  `/` only strips for tilde-form URIs (`/~/...`); absolute-form URIs keep
+  the slash so the path stays absolute on the remote side.
+
 ### Added
 
 - `feat: NONMEM Runs tree view (M7 chunk B)`. New activity-bar container

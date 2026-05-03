@@ -119,6 +119,20 @@ describe('RemoteFileSystemProvider — read ops', () => {
     const entries = await p.readDirectory(RemoteFileSystemProvider.buildUri('primary', ''));
     expect(entries).toEqual([['positron-nonmem', vscode.FileType.Directory]]);
   });
+
+  it('preserves leading / on absolute remote paths (regression: v0.0.21 stripped it -> relative -> resolved against $HOME)', async () => {
+    const t = new StubTransport();
+    // Mimic the user-facing failure: find emitted /home/<user>/positron-nonmem/pn-X/m.lst.
+    const remoteAbs = '/home/viktor.rognas@qpharmetra.com/positron-nonmem/pn-1/m.lst';
+    t.files.set(remoteAbs, { type: 'file', size: 7, mtime: 0, content: 'lstdata' });
+    const p = makeProvider(t);
+
+    const uri = RemoteFileSystemProvider.buildUri('primary', remoteAbs);
+    expect(uri.path).toBe(remoteAbs); // built URI keeps the leading /
+
+    const bytes = await p.readFile(uri);
+    expect(Buffer.from(bytes).toString('utf8')).toBe('lstdata');
+  });
 });
 
 describe('RemoteFileSystemProvider — write surface (read-only chunk A)', () => {

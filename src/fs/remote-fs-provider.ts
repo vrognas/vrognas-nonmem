@@ -8,11 +8,16 @@
 // URI shape:
 //   positron-nonmem://<alias>/<path>
 //
-// `<path>` is the URI path with the leading `/` stripped, so:
+// Tilde-form (relative to remote $HOME): the URI path carries a synthetic
+// leading slash before `~` that we strip on extract.
 //   positron-nonmem://primary/~/positron-nonmem/pn-1/m.lst
 //     -> remote path "~/positron-nonmem/pn-1/m.lst"
-//   positron-nonmem://primary//abs/path/foo
-//     -> remote path "/abs/path/foo"
+// Absolute form: the URI path IS the remote path. Keep the leading `/`,
+// otherwise the remote shell would resolve a relative path against $HOME
+// (the bug v0.0.21 had: discovered runs lived under `/home/.../...` which
+// got stripped to `home/.../...` and never resolved).
+//   positron-nonmem://primary/home/u/runs/r1/m.lst
+//     -> remote path "/home/u/runs/r1/m.lst"
 //
 // Lazy transport — we don't want to run `ssh -G` at activation time, so
 // the constructor takes a factory that resolves on first FS request.
@@ -111,10 +116,14 @@ export class RemoteFileSystemProvider implements vscode.FileSystemProvider {
     if (uri.scheme !== REMOTE_FS_SCHEME || uri.authority !== this.alias) {
       throw vscode.FileSystemError.FileNotFound(uri);
     }
-    // Strip the leading slash so `~/...` round-trips cleanly. Empty path
-    // means the URI was `positron-nonmem://alias/` — treat as the home dir.
-    const stripped = uri.path.replace(/^\//, '');
-    return stripped || '~';
+    // Empty / root URI path means "the remote home dir".
+    if (!uri.path || uri.path === '/') return '~';
+    // Tilde-form: synthetic leading `/` before `~` — strip it so the
+    // remote shell sees `~/...` and expands $HOME itself.
+    if (uri.path.startsWith('/~')) return uri.path.slice(1);
+    // Absolute form: keep the leading `/` intact (the URI path IS the
+    // remote absolute path).
+    return uri.path;
   }
 
   private getTransport(): Promise<Transport> {
