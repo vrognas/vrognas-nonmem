@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { mapParsedModelToVariables } from '../../src/runtime/variables-comm';
+import { mapParsedModelToVariables, resolveAccessKeyLine } from '../../src/runtime/variables-comm';
 import type { NmtranParsedModel } from '../../src/nmtran-client';
 
 function model(overrides: Partial<NmtranParsedModel> = {}): NmtranParsedModel {
@@ -36,16 +36,15 @@ describe('mapParsedModelToVariables', () => {
     expect(vars.every((v) => !v.has_children)).toBe(true);
   });
 
-  it('marks equation rows with has_viewer=true so double-click triggers a `view` RPC', () => {
-    // Parameters (THETA/OMEGA/SIGMA) don't carry decl-line tracking yet, so
-    // they stay non-navigable. Equations always have a `line` field, so we
-    // enable the viewer so Positron's frontend opens a `view` RPC on
-    // double-click; the runtime-session handler routes that to the editor.
+  it('marks rows with has_viewer=true (params + equations) when decl-line is known', () => {
+    // Equations always carry a line. Parameters carry one when vscode-nmtran
+    // >= 0.4.18; older releases omit the field and we degrade gracefully
+    // (no false navigation).
     const vars = mapParsedModelToVariables(
       model({
-        thetas: [{ index: 1, init: 1, fix: false }],
-        omegas: [{ index: 1, value: 0.1, fix: false }],
-        sigmas: [{ index: 1, value: 0.1, fix: false }],
+        thetas: [{ index: 1, init: 1, fix: false, line: 10 }],
+        omegas: [{ index: 1, value: 0.1, fix: false, line: 12 }],
+        sigmas: [{ index: 1, value: 0.1, fix: false, line: 14 }],
         equations: [
           { name: 'Y', rhs: 'THETA(1)', block: '$PRED', line: 3, value: 1 },
           { name: 'K', rhs: 'LOG(CL)', block: '$PK', line: 5, value: undefined },
@@ -54,11 +53,63 @@ describe('mapParsedModelToVariables', () => {
     );
 
     const byName = Object.fromEntries(vars.map((v) => [v.display_name, v.has_viewer]));
-    expect(byName['THETA(1)']).toBe(false);
-    expect(byName['OMEGA(1,1)']).toBe(false);
-    expect(byName['SIGMA(1,1)']).toBe(false);
+    expect(byName['THETA(1)']).toBe(true);
+    expect(byName['OMEGA(1,1)']).toBe(true);
+    expect(byName['SIGMA(1,1)']).toBe(true);
     expect(byName['Y']).toBe(true);
     expect(byName['K']).toBe(true);
+  });
+
+  it('falls back to has_viewer=false on parameters when vscode-nmtran < 0.4.18 omits line', () => {
+    const vars = mapParsedModelToVariables(
+      model({
+        thetas: [{ index: 1, init: 1, fix: false }],
+        omegas: [{ index: 1, value: 0.1, fix: false }],
+        sigmas: [{ index: 1, value: 0.1, fix: false }],
+      }),
+    );
+    expect(vars.every((v) => !v.has_viewer)).toBe(true);
+  });
+});
+
+describe('resolveAccessKeyLine', () => {
+  const m: NmtranParsedModel = {
+    dataFile: 'd.csv',
+    inputColumns: [],
+    thetas: [
+      { index: 1, init: 1, fix: false, line: 10 },
+      { index: 2, init: 2, fix: false, line: 11 },
+    ],
+    omegas: [{ index: 1, value: 0.1, fix: false, line: 14 }],
+    sigmas: [{ index: 1, value: 0.05, fix: false, line: 17 }],
+    equations: [
+      { name: 'Y', rhs: 'THETA(1)', block: '$PRED', line: 5, value: 1 },
+      { name: 'CL', rhs: 'THETA(2)', block: '$PK', line: 7, value: 2 },
+    ],
+  };
+
+  it('resolves equation names, THETA(n), OMEGA(n,n), SIGMA(n,n)', () => {
+    expect(resolveAccessKeyLine(m, 'Y')).toBe(5);
+    expect(resolveAccessKeyLine(m, 'CL')).toBe(7);
+    expect(resolveAccessKeyLine(m, 'THETA(1)')).toBe(10);
+    expect(resolveAccessKeyLine(m, 'THETA(2)')).toBe(11);
+    expect(resolveAccessKeyLine(m, 'OMEGA(1,1)')).toBe(14);
+    expect(resolveAccessKeyLine(m, 'SIGMA(1,1)')).toBe(17);
+  });
+
+  it('returns null for off-diagonal OMEGA / SIGMA, unknown indices, or garbage keys', () => {
+    expect(resolveAccessKeyLine(m, 'OMEGA(1,2)')).toBeNull();
+    expect(resolveAccessKeyLine(m, 'THETA(99)')).toBeNull();
+    expect(resolveAccessKeyLine(m, 'SIGMA(99,99)')).toBeNull();
+    expect(resolveAccessKeyLine(m, 'NOT_A_THING')).toBeNull();
+  });
+
+  it('returns null when a parameter has no tracked line (older vscode-nmtran)', () => {
+    const stale: NmtranParsedModel = {
+      ...m,
+      thetas: [{ index: 1, init: 1, fix: false }],
+    };
+    expect(resolveAccessKeyLine(stale, 'THETA(1)')).toBeNull();
   });
 
   it('shows rhs as display_value when an equation cannot be evaluated (undefined value)', () => {

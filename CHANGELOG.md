@@ -7,13 +7,35 @@ All notable changes documented here. Format follows
 
 ### Added
 
+- `feat: parameter rows (THETA / OMEGA / SIGMA) navigate to declaration`.
+  Builds on the equation goto-definition shipped in 0.0.13. With
+  vscode-nmtran >= 0.4.18 (which now exposes `line` on `ThetaDecl` /
+  `OmegaSigmaDecl`), every parameter row in the Variables pane is
+  navigable. `resolveAccessKeyLine(model, accessKey)` parses
+  `THETA(n)` / `OMEGA(n,n)` / `SIGMA(n,n)` and looks up the matching
+  decl. Off-diagonal `OMEGA(i,j)` (i≠j) and unknown access_keys fall
+  through to no-op. Older vscode-nmtran releases (no `line` on params)
+  degrade gracefully — `has_viewer` stays `false` so we don't advertise
+  a dead navigation.
+
+### Fixed
+
+- `fix: Variables-pane "View Queued…" stuck after first double-click`.
+  Inbound `view` / `list` RPCs now get a JSON-RPC 2.0 response correlated
+  via `parent_id = message_id` so Positron's frontend resolves the
+  pending request. Without the reply the per-row in-flight tracker
+  blocked further double-clicks until the comm was torn down. Same
+  treatment applied to `list` for symmetry — frontend was tolerant of
+  the missing reply but it wasn't strictly correct.
+
+### Added
+
 - `feat: Variables-pane double-click jumps to equation source`. Equation rows
   ($PRED / $PK / $ERROR / $DES assignments) now carry `has_viewer: true`, so
   Positron's frontend issues a `view` RPC on double-click. The session
   resolves the access_key against `currentParsedModel.equations`, looks up
   the line stored on each Equation, and opens the source `.mod` editor at
-  that position via an injected `navigator` callback. THETA / OMEGA / SIGMA
-  rows stay non-navigable for now (no decl-line tracking yet).
+  that position via an injected `navigator` callback.
 
 ### Changed
 

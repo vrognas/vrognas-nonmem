@@ -7,7 +7,12 @@
 // the conversation history. All variables are leaves in this cut; bound
 // triples / FIX flags are folded into display_value text.
 
-import type { NmtranParsedModel, NmtranEquation } from '../nmtran-client';
+import type {
+  NmtranParsedModel,
+  NmtranEquation,
+  NmtranOmegaSigmaDecl,
+  NmtranThetaDecl,
+} from '../nmtran-client';
 
 /**
  * Single Variables-pane row. Field names + required-ness come from
@@ -58,40 +63,65 @@ export function mapParsedModelToVariables(model: NmtranParsedModel): Variable[] 
   // grouping is the actual goal. A custom TreeDataProvider view (future
   // chunk) would give us proper "PARAMETERS" / "VARIABLES" labels.
   for (const t of model.thetas) {
-    out.push(
-      leaf({
-        name: `THETA(${t.index})`,
-        displayValue: thetaDisplay(t.init, t.lower, t.upper, t.fix),
-        kind: 'class',
-        nmtranType: 'theta',
-      }),
-    );
+    out.push(parameterRow({
+      name: `THETA(${t.index})`,
+      displayValue: thetaDisplay(t.init, t.lower, t.upper, t.fix),
+      nmtranType: 'theta',
+      decl: t,
+    }));
   }
   for (const o of model.omegas) {
-    out.push(
-      leaf({
-        name: `OMEGA(${o.index},${o.index})`,
-        displayValue: o.fix ? `${formatNumber(o.value)} (FIX)` : formatNumber(o.value),
-        kind: 'class',
-        nmtranType: 'omega',
-      }),
-    );
+    out.push(parameterRow({
+      name: `OMEGA(${o.index},${o.index})`,
+      displayValue: o.fix ? `${formatNumber(o.value)} (FIX)` : formatNumber(o.value),
+      nmtranType: 'omega',
+      decl: o,
+    }));
   }
   for (const s of model.sigmas) {
-    out.push(
-      leaf({
-        name: `SIGMA(${s.index},${s.index})`,
-        displayValue: s.fix ? `${formatNumber(s.value)} (FIX)` : formatNumber(s.value),
-        kind: 'class',
-        nmtranType: 'sigma',
-      }),
-    );
+    out.push(parameterRow({
+      name: `SIGMA(${s.index},${s.index})`,
+      displayValue: s.fix ? `${formatNumber(s.value)} (FIX)` : formatNumber(s.value),
+      nmtranType: 'sigma',
+      decl: s,
+    }));
   }
   for (const eq of model.equations) {
     out.push(equationRow(eq));
   }
 
   return out;
+}
+
+/**
+ * Resolve a Variables-comm `access_key` (matches `display_name` in our
+ * mapping) back to the source-line of the underlying declaration.
+ * Returns null when the access_key doesn't correspond to a known row,
+ * or when the declaration has no line tracked (older vscode-nmtran).
+ */
+export function resolveAccessKeyLine(
+  model: NmtranParsedModel,
+  accessKey: string,
+): number | null {
+  const eq = model.equations.find((e) => e.name === accessKey);
+  if (eq) return eq.line;
+
+  const theta = accessKey.match(/^THETA\((\d+)\)$/);
+  if (theta) {
+    const idx = parseInt(theta[1]!, 10);
+    return model.thetas.find((t) => t.index === idx)?.line ?? null;
+  }
+  const omega = accessKey.match(/^OMEGA\((\d+),(\d+)\)$/);
+  if (omega && omega[1] === omega[2]) {
+    const idx = parseInt(omega[1]!, 10);
+    return model.omegas.find((o) => o.index === idx)?.line ?? null;
+  }
+  const sigma = accessKey.match(/^SIGMA\((\d+),(\d+)\)$/);
+  if (sigma && sigma[1] === sigma[2]) {
+    const idx = parseInt(sigma[1]!, 10);
+    return model.sigmas.find((s) => s.index === idx)?.line ?? null;
+  }
+  return null;
 }
 
 function thetaDisplay(
@@ -108,6 +138,26 @@ function thetaDisplay(
   if (lower !== undefined) return `${initStr} (>=${formatNumber(lower)})`;
   if (upper !== undefined) return `${initStr} (<=${formatNumber(upper)})`;
   return initStr;
+}
+
+function parameterRow(args: {
+  name: string;
+  displayValue: string;
+  nmtranType: string;
+  decl: NmtranThetaDecl | NmtranOmegaSigmaDecl;
+}): Variable {
+  // Only mark navigable when vscode-nmtran has actually tracked a line —
+  // pre-0.4.18 versions don't, and we don't want a dead double-click.
+  const navigable = typeof args.decl.line === 'number';
+  return {
+    ...leaf({
+      name: args.name,
+      displayValue: args.displayValue,
+      kind: 'class',
+      nmtranType: args.nmtranType,
+    }),
+    has_viewer: navigable,
+  };
 }
 
 function equationRow(eq: NmtranEquation): Variable {

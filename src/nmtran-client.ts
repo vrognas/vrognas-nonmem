@@ -16,12 +16,16 @@ export interface NmtranThetaDecl {
   lower?: number;
   upper?: number;
   fix: boolean;
+  /** 0-based line number of the declaration in the source. May be missing on older vscode-nmtran versions. */
+  line?: number;
 }
 
 export interface NmtranOmegaSigmaDecl {
   index: number;
   value: number;
   fix: boolean;
+  /** 0-based line number of the declaration in the source. May be missing on older vscode-nmtran versions. */
+  line?: number;
 }
 
 export interface NmtranEquation {

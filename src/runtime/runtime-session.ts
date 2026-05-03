@@ -4,7 +4,7 @@ import type * as positron from 'positron';
 import type { PositronApi } from '../positron-api';
 import type { Transport } from '../transport';
 import type { NmtranParsedModel } from '../nmtran-client';
-import { mapParsedModelToVariables, type Variable } from './variables-comm';
+import { mapParsedModelToVariables, resolveAccessKeyLine, type Variable } from './variables-comm';
 
 // LanguageRuntimeSession implementation for NONMEM.
 //
@@ -276,25 +276,29 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
 
   sendClientMessage(
     client_id: string,
-    _message_id: string,
+    message_id: string,
     message: Record<string, unknown>,
   ): void {
     if (!this.variablesClients.has(client_id)) return;
     // Wire format is JSON-RPC per positron/comms/variables-backend-openrpc.json.
-    // Backend RPCs the frontend may call: list, clear, delete, inspect,
-    // clipboard_format, view. For 3D we just respond to `list` by pushing a
-    // fresh `refresh` event; the other RPCs aren't load-bearing for the
-    // file-context-aware view (no mutability, no inspection yet).
+    // The frontend tracks each request by id and won't dispatch a second
+    // request for the same row until the first one resolves — so for any
+    // RPC we receive we MUST emit a correlated response (parent_id =
+    // message_id, body carrying jsonrpc result) or the row's "View" icon
+    // gets stuck in "View Queued…".
     if (message['method'] === 'list') {
       this.pushVariablesRefresh(client_id);
+      this.emitCommReply(client_id, message_id, {
+        variables: this.currentVariables(),
+        length: this.currentVariables().length,
+        version: 0,
+      });
       return;
     }
-    // `view` is fired on Variables-pane double-click for rows with
-    // has_viewer:true. We only mark equation rows as such, so the
-    // access_key here is always an equation name; resolve it to the
-    // owning file + line and hand off to the navigator.
     if (message['method'] === 'view') {
       this.handleViewRpc(message['params']);
+      // `view` is a side-effect call — null result is the documented shape.
+      this.emitCommReply(client_id, message_id, null);
     }
   }
 
@@ -306,9 +310,9 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
     if (!Array.isArray(path) || path.length === 0) return;
     const accessKey = path[path.length - 1];
     if (typeof accessKey !== 'string') return;
-    const eq = this.currentParsedModel.equations.find((e) => e.name === accessKey);
-    if (!eq) return;
-    this.navigator(this.currentSourceUri, eq.line);
+    const line = resolveAccessKeyLine(this.currentParsedModel, accessKey);
+    if (line === null) return;
+    this.navigator(this.currentSourceUri, line);
   }
 
   /**
@@ -324,9 +328,7 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
   }
 
   private pushVariablesRefresh(commId: string): void {
-    const variables: Variable[] = this.currentParsedModel
-      ? mapParsedModelToVariables(this.currentParsedModel)
-      : [];
+    const variables = this.currentVariables();
     // Frontend event from positron/comms/variables-frontend-openrpc.json:
     //   method=refresh, params={ variables, length, version }
     this.emitCommMessage(commId, {
@@ -337,6 +339,24 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
         version: 0,
       },
     });
+  }
+
+  private currentVariables(): Variable[] {
+    return this.currentParsedModel ? mapParsedModelToVariables(this.currentParsedModel) : [];
+  }
+
+  /**
+   * Send a JSON-RPC 2.0 response for an inbound RPC. parent_id correlates
+   * to the original message_id so Positron's frontend can resolve the
+   * pending request. Without this, has_viewer rows stick on "View Queued…"
+   * after the first double-click.
+   */
+  private emitCommReply(commId: string, messageId: string, result: unknown): void {
+    this.emitCommMessage(
+      commId,
+      { jsonrpc: '2.0', id: messageId, result: result as Record<string, unknown> | null },
+      messageId,
+    );
   }
 
   replyToPrompt(_id: string, _reply: string): void {
@@ -405,10 +425,14 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
     this._onDidReceiveRuntimeMessage.fire(message);
   }
 
-  private emitCommMessage(commId: string, data: Record<string, unknown>): void {
+  private emitCommMessage(
+    commId: string,
+    data: Record<string, unknown>,
+    parentId = '',
+  ): void {
     const message: positron.LanguageRuntimeCommMessage = {
       id: randomUUID(),
-      parent_id: '',
+      parent_id: parentId,
       when: new Date().toISOString(),
       type: this.positron.LanguageRuntimeMessageType.CommData,
       comm_id: commId,
