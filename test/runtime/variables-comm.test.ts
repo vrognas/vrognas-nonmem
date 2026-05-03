@@ -35,7 +35,7 @@ describe('mapParsedModelToVariables', () => {
       'THETA(1)',
       'OMEGA(1,1)',
       'SIGMA(1,1)',
-      'Y  $PRED',
+      '$PRED: Y',
     ]);
     expect(vars.map((v) => v.display_value)).toEqual(['1', '0.1', '0.1', '1']);
     expect(vars.map((v) => v.display_type)).toEqual(['theta', 'omega', 'sigma', '$PRED']);
@@ -129,7 +129,7 @@ describe('resolveAccessKeyLine', () => {
     );
 
     const k = vars.find((v) => v.access_key === 'K')!;
-    expect(k.display_name).toBe('K  $PK'); // block suffixed onto label
+    expect(k.display_name).toBe('$PK: K'); // block prefixed onto label
     expect(k.display_value).toBe('LOG(CL)'); // unevaluable falls back to the rhs text
     expect(k.kind).toBe('string');
     expect(k.display_type).toBe('$PK'); // still set, even though Positron hides it behind the View button

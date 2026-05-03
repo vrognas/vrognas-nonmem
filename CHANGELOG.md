@@ -7,12 +7,13 @@ All notable changes documented here. Format follows
 
 ### Changed
 
-- `chore: equation display_name now suffixes the owning $RECORD`. Setting
+- `chore: equation display_name prefixes the owning $RECORD`. Setting
   `has_viewer: true` causes Positron's frontend to replace the
   display_type cell with the View action button, hiding the `$PRED` /
-  `$PK` / `$ERROR` / … label that lived there. The block is now appended
-  to display_name (`Y  $PRED`) so the context stays visible. access_key
-  is unchanged (`Y`), so view-RPC lookup still resolves correctly.
+  `$PK` / `$ERROR` / … label that lived there. The block is now prepended
+  to display_name (`$PRED: Y`) so the context stays visible AND the
+  alphabetic sort groups equations by record. access_key is unchanged
+  (`Y`), so view-RPC lookup still resolves correctly.
 
 ### Added
 

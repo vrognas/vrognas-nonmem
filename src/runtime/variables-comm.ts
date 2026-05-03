@@ -150,10 +150,11 @@ function equationRow(eq: NmtranEquation): Variable {
   return leaf({
     name: eq.name,
     // Positron replaces the display_type cell with the View action button
-    // when has_viewer is true, so we suffix the owning control record
-    // ($PRED / $PK / $ERROR / …) onto the display_name instead. The
+    // when has_viewer is true, so we prefix the owning control record
+    // ($PRED / $PK / $ERROR / …) onto the display_name instead. Block
+    // first so the alphabetic sort groups equations by record. The
     // access_key (used by view-RPC lookup) stays as eq.name.
-    displayName: `${eq.name}  ${eq.block}`,
+    displayName: `${eq.block}: ${eq.name}`,
     displayValue: evaluable ? formatNumber(eq.value!) : eq.rhs,
     kind: evaluable ? 'number' : 'string',
     nmtranType: eq.block,
