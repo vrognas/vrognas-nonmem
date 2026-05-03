@@ -35,7 +35,9 @@ describe('mapParsedModelToVariables', () => {
       'sigma',
       'equation = THETA(1) + ETA(1) + EPS(1)',
     ]);
-    expect(vars.every((v) => v.kind === 'number')).toBe(true);
+    // Parameters land in 'class' so Positron groups them under "CLASSES",
+    // separating raw declarations from derived-equation values in "VALUES".
+    expect(vars.map((v) => v.kind)).toEqual(['class', 'class', 'class', 'number']);
     expect(vars.every((v) => !v.has_children)).toBe(true);
   });
 

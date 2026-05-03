@@ -5,6 +5,16 @@ All notable changes documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `chore: split parameters from derived equations in Variables pane`. Declared
+  THETA / OMEGA / SIGMA now use `kind: 'class'`, so Positron's frontend
+  (group names hard-coded to Data / Values / Functions / Classes) puts them
+  under "CLASSES" while equations stay in "VALUES". Mild semantic compromise
+  on the label — proper "PARAMETERS" / "VARIABLES" headings would require a
+  custom TreeDataProvider view (deferred). Variable.kind enum widened to the
+  full OpenRPC spec set so future chunks can use 'table' / 'function' / etc.
+
 ### Added
 
 - `feat: NONMEM runtime icon` — bold "NM" monogram on a teal rounded square

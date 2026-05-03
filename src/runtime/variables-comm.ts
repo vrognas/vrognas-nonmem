@@ -20,7 +20,23 @@ export interface Variable {
   display_value: string;
   display_type: string;
   type_info: string;
-  kind: 'number' | 'string' | 'boolean' | 'collection' | 'empty' | 'other';
+  // Full kind enum per positron/comms/variables-backend-openrpc.json. We
+  // only emit 'number' / 'string' / 'class' for now; the rest are kept
+  // here so future chunks can use them without re-typing.
+  kind:
+    | 'boolean'
+    | 'bytes'
+    | 'class'
+    | 'collection'
+    | 'connection'
+    | 'empty'
+    | 'function'
+    | 'lazy'
+    | 'map'
+    | 'number'
+    | 'other'
+    | 'string'
+    | 'table';
   has_children: boolean;
   length: number;
   size: number;
@@ -34,12 +50,19 @@ export interface Variable {
 export function mapParsedModelToVariables(model: NmtranParsedModel): Variable[] {
   const out: Variable[] = [];
 
+  // Declared parameters use kind: 'class' so Positron's frontend (which
+  // hard-codes group names: Data / Values / Functions / Classes) puts them
+  // under a separate "CLASSES" header, visually splitting raw parameters
+  // from derived equations. The label is a mild semantic compromise — we
+  // can't change the group name without forking Positron — but the
+  // grouping is the actual goal. A custom TreeDataProvider view (future
+  // chunk) would give us proper "PARAMETERS" / "VARIABLES" labels.
   for (const t of model.thetas) {
     out.push(
       leaf({
         name: `THETA(${t.index})`,
         displayValue: thetaDisplay(t.init, t.lower, t.upper, t.fix),
-        kind: 'number',
+        kind: 'class',
         nmtranType: 'theta',
       }),
     );
@@ -49,7 +72,7 @@ export function mapParsedModelToVariables(model: NmtranParsedModel): Variable[] 
       leaf({
         name: `OMEGA(${o.index},${o.index})`,
         displayValue: o.fix ? `${o.value} (FIX)` : `${o.value}`,
-        kind: 'number',
+        kind: 'class',
         nmtranType: 'omega',
       }),
     );
@@ -59,7 +82,7 @@ export function mapParsedModelToVariables(model: NmtranParsedModel): Variable[] 
       leaf({
         name: `SIGMA(${s.index},${s.index})`,
         displayValue: s.fix ? `${s.value} (FIX)` : `${s.value}`,
-        kind: 'number',
+        kind: 'class',
         nmtranType: 'sigma',
       }),
     );
