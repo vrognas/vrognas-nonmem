@@ -11,17 +11,22 @@ export const COMMAND = {
   runModel: 'positronNonmem.runModel',
   showNmtranParsedModel: 'positronNonmem.showNmtranParsedModel',
   refreshRuns: 'positronNonmem.refreshRuns',
+  /** Click-handler for an Active Runs entry — dispatches by run state. */
+  openRun: 'positronNonmem.openRun',
+  /** Right-click on a `done` Active Runs entry — runs PsN's `update_inits`. */
+  promoteEstimates: 'positronNonmem.promoteEstimates',
+  /** Toolbar icon on the Runs view — opens the lineage WebView panel. */
+  showLineage: 'positronNonmem.showLineage',
 } as const;
 
-/** Settings keys (paired with `contributes.configuration` in package.json). */
-export const SETTING = {
-  nmfeBinary: 'positronNonmem.nmfeBinary',
-} as const;
-
-/** Tree-view ID used in package.json `contributes.views`. */
+/** Tree-view IDs used in package.json `contributes.views`. */
 export const VIEW_ID = {
   runs: 'positronNonmem.runs',
+  activeRuns: 'positronNonmem.activeRuns',
 } as const;
 
-/** Default nmfe76 binary path; overridable via `positronNonmem.nmfeBinary`. */
-export const DEFAULT_NMFE_BINARY = 'nmfe76';
+/**
+ * PsN's `execute` binary — the toolbelt's nmfe replacement. Always invoked
+ * by name (PATH-resolved); chunk B will add a settings override if needed.
+ */
+export const DEFAULT_EXECUTE_BINARY = 'execute';

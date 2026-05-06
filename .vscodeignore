@@ -1,0 +1,29 @@
+# devtime sources / tests — we ship out/extension.js + media/<panel>/client.js
+# (both bundled by esbuild; webview-src is the input)
+src/**
+test/**
+webview-src/**
+.vscode/**
+.vscode-test/**
+
+# build / lint / format config
+esbuild.cjs
+eslint.config.*
+.prettierrc*
+prettier.config.*
+tsconfig.json
+vitest.config.*
+.gitattributes
+.gitignore
+
+# dev docs / scratch — runtime gets README + CHANGELOG + LICENSE
+AGENTS.md
+CLAUDE.md
+docs/**
+.remember/**
+
+# build artefacts and lockfiles
+*.vsix
+package-lock.json
+**/*.test.ts
+**/*.tsbuildinfo

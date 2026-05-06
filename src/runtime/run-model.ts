@@ -1,31 +1,53 @@
-// runModel — local NONMEM run, classic layout.
+// runModel — drives PsN's `execute` to run one NONMEM model.
 //
 // Pipeline:
-//   1. Read the .mod (validate it exists; we need its text for $DATA parsing
-//      and for OFV-time hashing).
-//   2. Run `nmfe76 <basename>.mod <basename>.lst` in the .mod's directory.
-//      Output (.lst, .ext, .cov, .phi, …) lands next to the .mod, exactly
-//      like a hand-rolled `nmfe76` invocation would. We don't impose our
-//      own subdir, manifest, or naming convention — the user's existing
-//      run folders look indistinguishable from ours.
-//   3. Parse `EXIT=N` from the trailing `echo` so we can surface the
-//      remote process exit code.
+//   1. Validate the .mod exists (so the caller gets a clean "model file
+//      not found" rather than a confusing PsN error).
+//   2. Run `execute <basename>.mod; echo EXIT=$?` in the .mod's directory.
+//      PsN's `execute` is the toolbelt's nmfe replacement — it copies the
+//      dataset into modelfit_dirN/NM_run1/, drives nmfe internally, and
+//      copies the resulting `.lst` (renamed from `psn.lst`) back next to
+//      the .mod. We don't pass the lst arg; PsN names it itself.
+//   3. Detect failure modes that PsN doesn't propagate via exit code:
+//      - NMtran errors → "execute done" prints, RC=0, but no .lst.
+//      - Bad -nm_version → PsN croaks via Perl die(); error on stderr.
+//      Both cases throw with the parsed PsN/NMtran message so the caller
+//      can surface it directly.
 //   4. Parse OFV from `<basename>.lst`'s `#OBJV:` banner.
 //
-// Out of scope: $DATA-path rewrite, retry/cancel, hash provenance —
-// the previous SSH/manifest layer is gone (M7 chunk D refactor). Bring
-// any of those back as opt-in features if they earn their keep.
+// Out of scope (capture as separate chunks if/when needed):
+//   - retries, parallel models, $DATA path rewrite — PsN already does
+//     these, surface as flags in later chunks.
+//
+// See docs/psn-notes.md for the empirical behaviour this code targets.
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { Runner } from '../runner';
+import { scrubPrivate } from '../scrub';
+import { quote } from '../shell';
+import { listModelfitDirs } from './find-ext-file';
 
 export interface RunModelOptions {
   /** Absolute path to the user's .mod control stream. */
   modelPath: string;
-  /** Runner used to execute nmfe76. */
+  /** Runner used to execute PsN. */
   runner: Runner;
-  /** Path to nmfe76 (must be reachable on the runner's host). */
-  nmfeBinary: string;
+  /** Path or PATH-resolvable name of PsN's `execute` binary (default: `execute`). */
+  executeBinary: string;
+  /**
+   * psn.conf [nm_versions] label to pass through as `-nm_version=<label>`.
+   * Omit (or pass undefined) to let PsN pick its own default. The active
+   * NonmemSession's `nmVersionLabel` is the natural source.
+   */
+  nmVersionLabel?: string;
+  /**
+   * NM7 extensions to copy back via `-nm_output=<comma-list>`. PsN places
+   * the listed files at `modelfit_dirN/<basename>.<ext>` (renamed from
+   * `psn.<ext>`) instead of leaving them in `NM_run1/`. Default
+   * `['ext', 'phi', 'cov', 'cor', 'coi']` — what the Variables pane and
+   * `sumo` need to read post-run. Pass `[]` to disable.
+   */
+  nmOutputExtensions?: string[];
 }
 
 export interface RunModelResult {
@@ -35,7 +57,16 @@ export interface RunModelResult {
   lstPath: string;
   /** OFV parsed from <basename>.lst's `#OBJV:` line, or null when absent. */
   ofv: number | null;
+  /**
+   * Absolute path to PsN's `modelfit_dir<N>/` for this run, or null
+   * when no such dir was found in the .mod's parent. With the default
+   * `nmOutputExtensions`, the NM7 aux files live at
+   * `<modelfitDir>/<basename>.<ext>` (e.g. `m.ext`, `m.phi`).
+   */
+  modelfitDir: string | null;
 }
+
+const DEFAULT_NM_OUTPUT_EXTENSIONS: readonly string[] = ['ext', 'phi', 'cov', 'cor', 'coi'];
 
 /**
  * Take the first non-comment $DATA token from the model text and return
@@ -63,10 +94,14 @@ export function parseOfv(lstText: string): number | null {
 }
 
 export async function runModel(opts: RunModelOptions): Promise<RunModelResult> {
-  const { modelPath, runner, nmfeBinary } = opts;
+  const {
+    modelPath,
+    runner,
+    executeBinary,
+    nmVersionLabel,
+    nmOutputExtensions = DEFAULT_NM_OUTPUT_EXTENSIONS,
+  } = opts;
 
-  // Validate the .mod exists BEFORE shelling out to nmfe76 — gives the
-  // caller a clean "model file not found" rather than a confusing nmfe error.
   try {
     await fs.access(modelPath);
   } catch (e) {
@@ -78,34 +113,104 @@ export async function runModel(opts: RunModelOptions): Promise<RunModelResult> {
 
   const cwd = path.dirname(modelPath);
   const modelBase = path.basename(modelPath);
-  const lstName = stripExtension(modelBase) + '.lst';
-  const lstPath = path.join(cwd, lstName);
+  const lstPath = path.join(cwd, path.basename(modelBase, path.extname(modelBase)) + '.lst');
 
-  const cmd = `${shellQuote(nmfeBinary)} ${shellQuote(modelBase)} ${shellQuote(lstName)}; echo EXIT=$?`;
+  // PsN renames psn.lst → <basename>.lst when it copies back, so we pass
+  // only the .mod argument. The trailing `echo EXIT=$?` lets us recover
+  // the shell exit code for runs where the runner doesn't surface it.
+  // -nm_version=<label> selects which psn.conf [nm_versions] entry PsN
+  // resolves the NONMEM binary from. -nm_output asks PsN to also copy
+  // the listed NM7 aux files into modelfit_dirN/ (else they stay buried
+  // in NM_run1/psn.<ext>). Both flags are omitted when not asked for.
+  const versionFlag = nmVersionLabel ? ` -nm_version=${quote(nmVersionLabel)}` : '';
+  const outputFlag =
+    nmOutputExtensions.length > 0 ? ` -nm_output=${quote(nmOutputExtensions.join(','))}` : '';
+  const cmd = `${quote(executeBinary)}${versionFlag}${outputFlag} ${quote(modelBase)}; echo EXIT=$?`;
   const result = await runner.run(cmd, cwd);
   const exitCode = parseExitCode(result.stdout);
 
-  // m.lst may not exist on NMTRAN-only failures; surface OFV=null instead
-  // of throwing so the user still gets the EXIT code in the toast.
-  let ofv: number | null = null;
+  let lstText: string | null;
   try {
-    ofv = parseOfv(await fs.readFile(lstPath, 'utf8'));
+    lstText = await fs.readFile(lstPath, 'utf8');
   } catch {
-    /* missing lst — leave ofv null */
+    lstText = null;
   }
 
-  return { exitCode, lstPath, ofv };
+  // Two failure paths:
+  //   (a) .lst missing — PsN aborted before NONMEM produced output
+  //       (NMtran error, $RECORD validation, etc.)
+  //   (b) Non-zero exit but .lst exists — execute completed unhappily
+  //       (NONMEM crashed mid-run, MINIMIZATION TERMINATED escalated to
+  //       a non-zero PsN exit, etc). The .lst may have partial content
+  //       worth reading, but the run did not succeed.
+  const lstMissing = lstText === null;
+  const exitFailed = exitCode !== null && exitCode !== 0;
+  if (lstMissing || exitFailed) {
+    const parsed = scrubPrivate(diagnoseFailure(result.stdout, result.stderr));
+    const message = lstMissing
+      ? parsed
+      : `execute exited with code ${exitCode}; .lst was produced — review for termination messages.\n\n${parsed}`;
+    throw new Error(message);
+  }
+
+  const modelfitDir = await findLatestModelfitDir(cwd);
+  return { exitCode, lstPath, ofv: parseOfv(lstText!), modelfitDir };
 }
 
-/** Strip the last extension, like NONMEM-classic naming: `foo.mod` → `foo`. */
-function stripExtension(name: string): string {
-  const ext = path.extname(name);
-  return ext ? name.slice(0, -ext.length) : name;
+/**
+ * Scan `cwd` for `modelfit_dir<N>` directories (PsN's auto-incremented
+ * per-run output dir) and return the absolute path of the highest N.
+ * Returns null when none exist — happens when the run aborted before
+ * PsN created the dir, or when the user passed `-directory=<custom>`
+ * (not yet supported here).
+ */
+export async function findLatestModelfitDir(cwd: string): Promise<string | null> {
+  const dirs = await listModelfitDirs(cwd);
+  return dirs.length > 0 ? dirs[0].path : null;
 }
 
-/** Shell-quote a path for safe interpolation. Single-quotes preserve everything verbatim. */
-function shellQuote(s: string): string {
-  return `'${s.replace(/'/g, `'\\''`)}'`;
+/**
+ * Build a human-readable error message from PsN's stdout/stderr when no
+ * `.lst` was produced. Patterns are anchored on the canonical PsN/NMtran
+ * markers verified empirically in `docs/psn-notes.md`.
+ *
+ * Concatenation order matches PsN's actual output order: NMtran errors
+ * land on stdout (`AN ERROR WAS FOUND ...` / `NMtran failed.`); PsN's own
+ * Perl croaks (e.g. `-nm_version=<bad-label>`) land on stderr. Searching
+ * stdout-first keeps the more specific NMtran detail from being shadowed
+ * by an unrelated stderr fragment when both exist.
+ */
+function diagnoseFailure(stdout: string, stderr: string): string {
+  const all = `${stdout}\n${stderr}`;
+
+  // PsN config error — Perl croak from common_options.pm, on stderr.
+  const psnConfig =
+    /No NONMEM version with name "[^"]+" defined in psn\.conf[^\n]*(?:\n[^\n]*)?/.exec(all);
+  if (psnConfig) {
+    return psnConfig[0].trim();
+  }
+
+  // NMtran failure — RC=0 but no .lst, "NMtran failed." in stdout. Pull
+  // the most specific NMtran error code line if available (e.g. "208
+  // UNDEFINED VARIABLE.").
+  if (/NMtran failed\./.test(all) || /AN ERROR WAS FOUND IN THE CONTROL STATEMENTS/.test(all)) {
+    const detail = /\b\d{3}\s+[A-Z][A-Z0-9 ]{2,80}\.?/.exec(all);
+    return detail ? `NMtran failed: ${detail[0].trim()}` : 'NMtran failed';
+  }
+
+  // Generic PsN early-die — captures `PsN does not support record $X
+  // in the control stream`, `PsN cannot read input file ...`, etc.
+  // We keep the Perl `at <file> line NNN` trailer because it's
+  // diagnostically useful when the user clicks a failed entry to see
+  // the full error. The tooltip will show the multi-line message;
+  // the click handler can open it as a virtual document for clean
+  // copy/paste.
+  const psnGeneric = /^PsN [^\n]+(?:\n[^\n]*)?/m.exec(all);
+  if (psnGeneric) {
+    return psnGeneric[0].trim();
+  }
+
+  return 'execute completed but no .lst was produced';
 }
 
 function parseExitCode(stdout: string): number | null {

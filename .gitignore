@@ -7,9 +7,12 @@ coverage/
 .env
 .env.local
 
-# user-supplied workspace settings (may contain hostnames or env-var-resolved values)
+# user-supplied workspace settings + launch configs (may contain hostnames
+# or per-user paths that fall under privacy hygiene)
 .vscode/settings.json
+.vscode/launch.json
 !.vscode/settings.example.json
+!.vscode/launch.example.json
 
 # extension run mirror (per-workspace, never committed)
 .positron-nonmem/

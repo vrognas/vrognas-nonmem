@@ -1,0 +1,30 @@
+// Copy this to `.vscode/launch.json` (gitignored) — the example file is
+// the committed template so we don't leak local paths into the repo.
+//
+// "Launch Extension" — opens a Positron extension-dev window on the
+// local machine. UI features work (Variables pane, runs tree, parser);
+// the runtime probe will warn "could not invoke nmfe76" if NONMEM isn't
+// installed locally — that's expected.
+//
+// To exercise actual NONMEM runs, package + install on a Remote-SSH
+// host: `npm run package` → copy the .vsix to the host → "Extensions:
+// Install from VSIX" in a Remote-SSH window. The `extensionHost`
+// debugger type can't bootstrap Remote-SSH from a launch config, so the
+// VSIX-on-remote loop is the orthodox path for end-to-end testing.
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Launch Extension",
+      "type": "extensionHost",
+      "request": "launch",
+      "runtimeExecutable": "${execPath}",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "--extensionDevelopmentPath=C:/Users/viktor.rognas/git_repos/vscode-nmtran"
+      ],
+      "outFiles": ["${workspaceFolder}/out/**/*.js"],
+      "preLaunchTask": "${defaultBuildTask}"
+    }
+  ]
+}

@@ -51,7 +51,15 @@ export interface Variable {
   updated_time: number;
 }
 
-/** Convert a parsed-model snapshot into Positron Variables-pane rows. */
+/**
+ * Convert a parsed-model snapshot into Positron Variables-pane rows.
+ *
+ * Init-only display: declared THETA/OMEGA/SIGMA values + derived
+ * equations. Converged-estimate visualization moved to the
+ * `FitInspector` WebView — Positron's Variables comm caches row
+ * metadata (has_viewer, display_type) in ways that fight live
+ * reshaping between mod-mode and lst-mode pushes.
+ */
 export function mapParsedModelToVariables(model: NmtranParsedModel): Variable[] {
   const out: Variable[] = [];
 
@@ -86,10 +94,7 @@ export function mapParsedModelToVariables(model: NmtranParsedModel): Variable[] 
  * Returns null when the access_key doesn't correspond to a known row,
  * or when the declaration has no line tracked (older vscode-nmtran).
  */
-export function resolveAccessKeyLine(
-  model: NmtranParsedModel,
-  accessKey: string,
-): number | null {
+export function resolveAccessKeyLine(model: NmtranParsedModel, accessKey: string): number | null {
   const eq = model.equations.find((e) => e.name === accessKey);
   if (eq) return eq.line;
 
@@ -126,9 +131,13 @@ function omegaSigmaDisplay(d: NmtranOmegaSigmaDecl): string {
 }
 
 /**
- * Build a parameter (THETA / OMEGA / SIGMA) row. has_viewer is wired to
- * whether vscode-nmtran tracked a decl line (>=0.4.18); older releases
- * lack it and we degrade gracefully to non-navigable.
+ * Build a parameter (THETA / OMEGA / SIGMA) row. `display_value` is
+ * the init (with FIX/bounds hints folded in by the caller's
+ * `thetaDisplay` / `omegaSigmaDisplay`); `display_type` is the
+ * parameter class (`theta` / `omega` / `sigma`); `has_viewer` is true
+ * when the decl carries a line so double-click navigates to the
+ * source. Fit/converged display lives in the Fit Inspector WebView
+ * — see `src/views/fit-inspector-payload.ts`.
  */
 function parameterRow(
   name: string,

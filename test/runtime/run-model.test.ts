@@ -81,12 +81,12 @@ describe('runModel', () => {
     overrides: { modelPath: string; runner: Runner } & Partial<RunModelOptions>,
   ): RunModelOptions {
     return {
-      nmfeBinary: '/opt/nm760/run/nmfe76',
+      executeBinary: 'execute',
       ...overrides,
     };
   }
 
-  it('runs nmfe76 in the .mod directory; output names follow the .mod basename', async () => {
+  it('runs `execute` in the .mod directory; PsN renames the lst itself so we pass only the .mod', async () => {
     const modelPath = path.join(tmp, 'colistin.mod');
     fs.writeFileSync(modelPath, '$PROBLEM x\n$DATA d\n');
     fs.writeFileSync(path.join(tmp, 'colistin.lst'), ' #OBJV:****    -7.5    ****\n');
@@ -96,7 +96,9 @@ describe('runModel', () => {
 
     expect(runner.runs).toHaveLength(1);
     expect(runner.runs[0].cwd).toBe(tmp);
-    expect(runner.runs[0].command).toContain(`'/opt/nm760/run/nmfe76' 'colistin.mod' 'colistin.lst'`);
+    expect(runner.runs[0].command).toMatch(/^'execute' /);
+    expect(runner.runs[0].command).toContain(`'colistin.mod'`);
+    expect(runner.runs[0].command).not.toContain(`'colistin.lst'`); // PsN renames; we don't pass the lst arg
     expect(runner.runs[0].command).toContain('echo EXIT=$?');
 
     expect(result.exitCode).toBe(0);
@@ -104,24 +106,75 @@ describe('runModel', () => {
     expect(result.ofv).toBeCloseTo(-7.5, 4);
   });
 
-  it('parses non-zero EXIT from stdout', async () => {
+  it('throws when EXIT is non-zero even if .lst exists (e.g. EXIT=255)', async () => {
     const modelPath = path.join(tmp, 'm.mod');
     fs.writeFileSync(modelPath, '$PROBLEM x\n');
+    fs.writeFileSync(path.join(tmp, 'm.lst'), ''); // .lst exists but exit signals failure
     const runner = new FakeRunner();
-    runner.results.push({ code: 0, stdout: 'noise\nEXIT=42\n', stderr: '' });
+    runner.results.push({ code: 0, stdout: 'noise\nEXIT=255\n', stderr: '' });
 
-    const result = await runModel(makeOptions({ modelPath, runner }));
-    expect(result.exitCode).toBe(42);
+    await expect(runModel(makeOptions({ modelPath, runner }))).rejects.toThrow(
+      /execute exited with code 255/,
+    );
   });
 
-  it('tolerates missing .lst (NMTRAN-only failure) — ofv is null', async () => {
+  it('throws when NMtran fails (RC=0 but no .lst, stdout contains "NMtran failed.")', async () => {
     const modelPath = path.join(tmp, 'm.mod');
     fs.writeFileSync(modelPath, '$PROBLEM x\n');
-    // No m.lst file written.
+    // No m.lst written — simulating the NMtran-failure shape.
     const runner = new FakeRunner();
+    runner.results.push({
+      code: 0,
+      stdout:
+        'Starting 1 NONMEM executions. 1 in parallel.\nS:1 .. \nAll executions started.\nStarting NMTRAN\n' +
+        ' \n AN ERROR WAS FOUND IN THE CONTROL STATEMENTS.\n' +
+        ' \nAN ERROR WAS FOUND ON LINE 5 AT THE APPROXIMATE POSITION NOTED:\n' +
+        ' Y = THETA(1) + GARBAGE_KEYWORD(1) + EPS(1)\n' +
+        '                X              \n' +
+        ' THE CHARACTERS IN ERROR ARE: GARBAGE_KEYWORD\n' +
+        '  208  UNDEFINED VARIABLE.\n' +
+        'NMtran failed. There is no output for model 1.\n' +
+        'Not restarting this model.\n' +
+        'F:1 .. \nexecute done\n' +
+        'EXIT=0\n',
+      stderr: '',
+    });
 
-    const result = await runModel(makeOptions({ modelPath, runner }));
-    expect(result.ofv).toBeNull();
+    await expect(runModel(makeOptions({ modelPath, runner }))).rejects.toThrow(/NMtran failed/i);
+  });
+
+  it("throws with PsN's early-die message when an unknown $RECORD bails PsN before NMtran (e.g. $BAD_RECORD)", async () => {
+    const modelPath = path.join(tmp, 'm.mod');
+    fs.writeFileSync(modelPath, '$PROBLEM x\n');
+    const runner = new FakeRunner();
+    runner.results.push({
+      code: 0,
+      stdout: '',
+      stderr:
+        'PsN does not support record $BAD_RECORD in the control stream\n' +
+        ' at /usr/local/share/perl/5.38.2/PsN_5_3_1/Mouse/PurePerl.pm line 302.\n',
+    });
+
+    await expect(runModel(makeOptions({ modelPath, runner }))).rejects.toThrow(
+      /PsN does not support record \$BAD_RECORD in the control stream/,
+    );
+  });
+
+  it('throws with the PsN config error when -nm_version is invalid (RC=2, no .lst)', async () => {
+    const modelPath = path.join(tmp, 'm.mod');
+    fs.writeFileSync(modelPath, '$PROBLEM x\n');
+    const runner = new FakeRunner();
+    runner.results.push({
+      code: 0, // execute returns its own error to stdout/stderr; LocalRunner code is from the shell wrapper
+      stdout: 'EXIT=2\n',
+      stderr:
+        'No NONMEM version with name "bogus" defined in psn.conf. ' +
+        'Format should be: name=directory,version at /usr/local/share/perl/5.38.2/PsN_5_3_1/common_options.pm line 216.\n',
+    });
+
+    await expect(runModel(makeOptions({ modelPath, runner }))).rejects.toThrow(
+      /No NONMEM version with name "bogus" defined in psn\.conf/,
+    );
   });
 
   it('throws if .mod file does not exist', async () => {
@@ -132,9 +185,106 @@ describe('runModel', () => {
     expect(runner.runs).toEqual([]);
   });
 
-  it('shell-quotes paths so spaces / quotes in the .mod basename do not break the command', async () => {
+  it('passes -nm_version=<label> when nmVersionLabel is set', async () => {
+    const modelPath = path.join(tmp, 'm.mod');
+    fs.writeFileSync(modelPath, '$PROBLEM x\n');
+    fs.writeFileSync(path.join(tmp, 'm.lst'), '');
+    const runner = new FakeRunner();
+
+    await runModel(makeOptions({ modelPath, runner, nmVersionLabel: '74' }));
+
+    expect(runner.runs[0].command).toContain("-nm_version='74'");
+    expect(runner.runs[0].command).toContain("'m.mod'");
+  });
+
+  it("omits -nm_version when nmVersionLabel is undefined (PsN's bundled default applies)", async () => {
+    const modelPath = path.join(tmp, 'm.mod');
+    fs.writeFileSync(modelPath, '$PROBLEM x\n');
+    fs.writeFileSync(path.join(tmp, 'm.lst'), '');
+    const runner = new FakeRunner();
+
+    await runModel(makeOptions({ modelPath, runner })); // nmVersionLabel intentionally absent
+
+    expect(runner.runs[0].command).not.toContain('-nm_version');
+  });
+
+  it('passes -nm_output=ext,phi,cov,cor,coi by default so PsN copies the NM7 aux files into modelfit_dirN/', async () => {
+    const modelPath = path.join(tmp, 'm.mod');
+    fs.writeFileSync(modelPath, '$PROBLEM x\n');
+    fs.writeFileSync(path.join(tmp, 'm.lst'), '');
+    const runner = new FakeRunner();
+
+    await runModel(makeOptions({ modelPath, runner }));
+
+    expect(runner.runs[0].command).toContain("-nm_output='ext,phi,cov,cor,coi'");
+  });
+
+  it('omits -nm_output when nmOutputExtensions is an empty array (caller opts out)', async () => {
+    const modelPath = path.join(tmp, 'm.mod');
+    fs.writeFileSync(modelPath, '$PROBLEM x\n');
+    fs.writeFileSync(path.join(tmp, 'm.lst'), '');
+    const runner = new FakeRunner();
+
+    await runModel(makeOptions({ modelPath, runner, nmOutputExtensions: [] }));
+
+    expect(runner.runs[0].command).not.toContain('-nm_output');
+  });
+
+  it('honors a custom nmOutputExtensions list', async () => {
+    const modelPath = path.join(tmp, 'm.mod');
+    fs.writeFileSync(modelPath, '$PROBLEM x\n');
+    fs.writeFileSync(path.join(tmp, 'm.lst'), '');
+    const runner = new FakeRunner();
+
+    await runModel(makeOptions({ modelPath, runner, nmOutputExtensions: ['ext', 'phi'] }));
+
+    expect(runner.runs[0].command).toContain("-nm_output='ext,phi'");
+  });
+
+  it('returns the highest-N modelfit_dir<N> as modelfitDir when one (or more) exist', async () => {
+    const modelPath = path.join(tmp, 'm.mod');
+    fs.writeFileSync(modelPath, '$PROBLEM x\n');
+    fs.writeFileSync(path.join(tmp, 'm.lst'), '');
+    fs.mkdirSync(path.join(tmp, 'modelfit_dir1'));
+    fs.mkdirSync(path.join(tmp, 'modelfit_dir2'));
+    fs.mkdirSync(path.join(tmp, 'modelfit_dir10'));
+    const runner = new FakeRunner();
+
+    const result = await runModel(makeOptions({ modelPath, runner }));
+
+    expect(result.modelfitDir).toBe(path.join(tmp, 'modelfit_dir10'));
+  });
+
+  it('returns modelfitDir=null when no modelfit_dir<N> directory was created', async () => {
+    const modelPath = path.join(tmp, 'm.mod');
+    fs.writeFileSync(modelPath, '$PROBLEM x\n');
+    fs.writeFileSync(path.join(tmp, 'm.lst'), '');
+    const runner = new FakeRunner();
+
+    const result = await runModel(makeOptions({ modelPath, runner }));
+
+    expect(result.modelfitDir).toBeNull();
+  });
+
+  it('ignores files / unrelated dirs when scanning for modelfit_dir<N>', async () => {
+    const modelPath = path.join(tmp, 'm.mod');
+    fs.writeFileSync(modelPath, '$PROBLEM x\n');
+    fs.writeFileSync(path.join(tmp, 'm.lst'), '');
+    fs.writeFileSync(path.join(tmp, 'modelfit_dir2'), ''); // file, not dir
+    fs.mkdirSync(path.join(tmp, 'modelfit_dir1'));
+    fs.mkdirSync(path.join(tmp, 'unrelated'));
+    fs.mkdirSync(path.join(tmp, 'modelfit_dirX')); // non-numeric suffix
+    const runner = new FakeRunner();
+
+    const result = await runModel(makeOptions({ modelPath, runner }));
+
+    expect(result.modelfitDir).toBe(path.join(tmp, 'modelfit_dir1'));
+  });
+
+  it("shell-quotes the .mod basename so spaces / quotes don't break the command", async () => {
     const modelPath = path.join(tmp, "o'brien.mod");
     fs.writeFileSync(modelPath, '$PROBLEM x\n');
+    fs.writeFileSync(path.join(tmp, "o'brien.lst"), '');
     const runner = new FakeRunner();
     await runModel(makeOptions({ modelPath, runner }));
     // ' in the basename gets replaced by '\\'' (close-and-reopen idiom).

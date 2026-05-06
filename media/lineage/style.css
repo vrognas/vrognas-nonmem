@@ -1,0 +1,118 @@
+:root { color-scheme: light dark; }
+html, body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden; /* the canvas-wrap below owns the scroll */
+}
+body {
+  font-family: var(--vscode-font-family);
+  font-size: var(--vscode-font-size);
+  color: var(--vscode-foreground);
+  background-color: var(--vscode-editor-background);
+  display: flex;
+  flex-direction: column;
+}
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px 4px 16px;
+  flex: 0 0 auto;
+}
+.header h2 { margin: 0; font-size: 1.05em; }
+#refresh {
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  border: 1px solid var(--vscode-button-border, transparent);
+  padding: 2px 8px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 0.85em;
+}
+#refresh:hover { background: var(--vscode-button-secondaryHoverBackground); }
+.nav-hint {
+  margin-left: auto;
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.85em;
+}
+.legend {
+  font-size: 0.85em;
+  color: var(--vscode-descriptionForeground);
+  padding: 0 16px 6px 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+.dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+.dot.green  { background: var(--vscode-charts-green); }
+.dot.yellow { background: var(--vscode-charts-yellow); }
+.dot.red    { background: var(--vscode-charts-red); }
+.dot.gray   { background: var(--vscode-descriptionForeground); }
+.dot.root   { background: var(--vscode-charts-blue); }
+/* Scroll wrapper — owns the native scrollbars. Cytoscape's drag-pan
+   is disabled (see client.ts); browser scroll moves the canvas. */
+#canvas-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  position: relative;
+  display: none;
+}
+/* Cytoscape canvas — sized from JS to the graph's bounding box (or
+   the wrap dimensions, whichever is bigger) so scrollbars appear when
+   the graph exceeds the visible area. `position: relative` is required
+   by cytoscape's UI extensions for correct hit-testing. */
+#cy {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+#empty {
+  flex: 1 1 auto;
+  display: none;
+  padding: 24px 16px;
+  color: var(--vscode-descriptionForeground);
+  font-style: italic;
+  text-align: center;
+}
+/* Custom right-click context menu. Floats absolute at the click
+   coordinates — replaces the prior `vscode.window.showQuickPick`
+   so the menu lands at the cursor instead of the command palette. */
+.ctx-menu {
+  position: fixed;
+  z-index: 100;
+  min-width: 220px;
+  background: var(--vscode-menu-background, var(--vscode-editor-background));
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+  border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border));
+  border-radius: 4px;
+  padding: 4px 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  font-family: var(--vscode-font-family);
+  font-size: 0.92em;
+}
+.ctx-menu[hidden] { display: none; }
+.ctx-menu button {
+  background: transparent;
+  border: none;
+  padding: 4px 12px;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.ctx-menu button:hover {
+  background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground));
+  color: var(--vscode-menu-selectionForeground, var(--vscode-list-hoverForeground));
+}

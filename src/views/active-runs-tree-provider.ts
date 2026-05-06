@@ -1,0 +1,113 @@
+// "Active Runs" tree — sibling of the existing Runs tree, but rendered
+// from `ActiveRunsTracker` instead of from .lst files on disk. Each
+// entry shows a model launched via `Run Current Model` and updates
+// live as the run transitions running → done/failed.
+//
+// View answers "what's running NOW (and what just finished this
+// session)?" — complements the static `Runs` view which answers "what
+// completed runs are on disk?".
+
+import * as path from 'node:path';
+import * as vscode from 'vscode';
+import { COMMAND } from '../constants';
+import type { ActiveRun, ActiveRunsTracker } from '../runtime/active-runs-tracker';
+
+export class ActiveRunsTreeProvider implements vscode.TreeDataProvider<ActiveRun> {
+  private readonly _onDidChangeTreeData = new vscode.EventEmitter<void>();
+  readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+
+  constructor(private readonly tracker: ActiveRunsTracker) {
+    tracker.onDidChange(() => this._onDidChangeTreeData.fire());
+  }
+
+  getChildren(element?: ActiveRun): ActiveRun[] {
+    if (element) return [];
+    return [...this.tracker.list()];
+  }
+
+  getTreeItem(run: ActiveRun): vscode.TreeItem {
+    const item = new vscode.TreeItem(
+      path.basename(run.modelPath),
+      vscode.TreeItemCollapsibleState.None,
+    );
+    item.iconPath = iconFor(run.state);
+    item.description = describe(run);
+    item.tooltip = tooltip(run);
+    item.contextValue = `positronNonmem.activeRun.${run.state}`;
+    // All entries route through one command keyed by run id; the handler
+    // dispatches by state (running → live OUTPUT; done → final .lst;
+    // failed → toast with parsed error). Keeps the tree provider
+    // vscode-only and the policy in extension.ts.
+    item.command = {
+      command: COMMAND.openRun,
+      title: 'Open run output',
+      arguments: [run.id],
+    };
+    return item;
+  }
+}
+
+function iconFor(state: ActiveRun['state']): vscode.ThemeIcon {
+  switch (state) {
+    case 'running':
+      // Built-in spinning indicator.
+      return new vscode.ThemeIcon('loading~spin');
+    case 'done':
+      return new vscode.ThemeIcon('pass', new vscode.ThemeColor('testing.iconPassed'));
+    case 'failed':
+      return new vscode.ThemeIcon('error', new vscode.ThemeColor('testing.iconFailed'));
+  }
+}
+
+function describe(run: ActiveRun): string {
+  if (run.state === 'running') {
+    const elapsed = formatDuration(Date.now() - run.startedAt);
+    if (typeof run.currentIter === 'number' && typeof run.currentOfv === 'number') {
+      return `iter ${run.currentIter}, OFV=${run.currentOfv.toFixed(3)} · ${elapsed}`;
+    }
+    return `running for ${elapsed}`;
+  }
+  const elapsed = run.finishedAt ? formatDuration(run.finishedAt - run.startedAt) : '';
+  if (run.state === 'done') {
+    const ofv = typeof run.finalOfv === 'number' ? `OFV=${run.finalOfv}` : 'no OFV';
+    return `${ofv} · ${elapsed}`.trim();
+  }
+  // failed
+  return `failed · ${elapsed}`.trim();
+}
+
+function tooltip(run: ActiveRun): string {
+  const lines = [
+    run.modelPath,
+    `state: ${run.state}`,
+    `started: ${formatTimestamp(run.startedAt)}`,
+  ];
+  if (run.finishedAt) lines.push(`finished: ${formatTimestamp(run.finishedAt)}`);
+  if (typeof run.finalOfv === 'number') lines.push(`OFV: ${run.finalOfv}`);
+  if (run.modelfitDir) lines.push(`run dir: ${run.modelfitDir}`);
+  if (run.errorMessage) lines.push(`error: ${run.errorMessage}`);
+  return lines.join('\n');
+}
+
+/**
+ * `YYYY-MM-DD HH:MM:SS` in local time, 24-hour. Prefer this over
+ * `toLocaleString()` for tooltip / log content — locale-stable so
+ * users / docs / screenshots match across machines.
+ */
+export function formatTimestamp(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number): string => String(n).padStart(2, '0');
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+    ` ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  );
+}
+
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remSeconds = seconds % 60;
+  return `${minutes}m ${remSeconds}s`;
+}

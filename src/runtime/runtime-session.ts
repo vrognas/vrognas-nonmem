@@ -4,6 +4,8 @@ import type * as positron from 'positron';
 import type { PositronApi } from '../positron-api';
 import type { Runner } from '../runner';
 import type { NmtranParsedModel } from '../nmtran-client';
+import { errMsg } from '../log-utils';
+import { scrubPrivate } from '../scrub';
 import { mapParsedModelToVariables, resolveAccessKeyLine, type Variable } from './variables-comm';
 
 // LanguageRuntimeSession implementation for NONMEM.
@@ -23,6 +25,8 @@ export interface NonmemSessionDeps {
   positron: PositronApi;
   /** Runner used to execute code from execute(). */
   runner: Runner;
+  /** psn.conf [nm_versions] label this session targets — passed to runModel as `-nm_version=<label>`. */
+  nmVersionLabel?: string;
   /**
    * Optional navigation callback fired when the Variables-pane sends a
    * `view` RPC for an equation row. Wired by the extension to
@@ -59,6 +63,8 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
   private sessionName: string;
   private readonly positron: PositronApi;
   private readonly runner: Runner;
+  /** psn.conf label this session targets — read by runModel so multi-version picks work. */
+  readonly nmVersionLabel: string | undefined;
   private readonly navigator: ((uri: vscode.Uri, line: number) => void) | undefined;
   /** Open Variables-comm client IDs we should keep in sync. */
   private readonly variablesClients = new Set<string>();
@@ -76,6 +82,7 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
     this.metadata = sessionMetadata;
     this.positron = deps.positron;
     this.runner = deps.runner;
+    this.nmVersionLabel = deps.nmVersionLabel;
     this.navigator = deps.navigator;
     this.state = this.positron.RuntimeState.Uninitialized;
     this.workingDirectory = sessionMetadata.workingDirectory;
@@ -122,27 +129,51 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
 
   private async dispatch(code: string, id: string): Promise<void> {
     try {
-      const result = await this.runner.run(code);
-      if (result.stdout) {
-        this.emitStream(id, this.positron.LanguageRuntimeStreamName.Stdout, result.stdout);
-      }
-      if (result.stderr) {
-        this.emitStream(id, this.positron.LanguageRuntimeStreamName.Stderr, result.stderr);
-      }
-      // Surface a non-zero exit code to the user. Don't repeat it for code 0.
-      if (result.code !== null && result.code !== 0) {
+      if (isExecuteModelRun(code)) {
+        // Model runs are tracked in the Active Runs view (FS-watcher-
+        // driven), so we suppress the 1000+ lines of NONMEM iteration
+        // output AND fire-and-forget the runner so the Console prompt
+        // redraws immediately. Without the early return, dispatch would
+        // await runner.run for the full ~30s+ run time and the session
+        // would stay Busy. Failures bubble up via the Active Runs entry
+        // staying "running" forever — fine for now; a stale-timeout
+        // can clean those up later.
+        //
+        // This regex is INDEPENDENT of the FS-watcher's run discovery:
+        // they detect the same event from different angles (input text
+        // here vs. PsN-created psn.mod there) and serve different jobs
+        // (Console-output suppression vs. tracker registration). A
+        // false negative here just means a verbose Console; the watcher
+        // still picks up the run.
         this.emitStream(
           id,
-          this.positron.LanguageRuntimeStreamName.Stderr,
-          `[exit code: ${result.code}]\n`,
+          this.positron.LanguageRuntimeStreamName.Stdout,
+          '[NONMEM run dispatched — see Active Runs in the NONMEM activity pane]\n',
         );
+        void this.runner.run(code).catch(() => undefined);
+        return;
+      }
+      const result = await this.runner.run(code);
+      // Scrub before emitting to the Console: PsN/NONMEM stdout leaks
+      // user emails, license-org names, and resolved hostnames; we want
+      // the SSH alias and nothing personal. See src/scrub.ts.
+      const { Stdout, Stderr } = this.positron.LanguageRuntimeStreamName;
+      const emit = (text: string, name: positron.LanguageRuntimeStreamName): void => {
+        if (text) this.emitStream(id, name, scrubPrivate(text));
+      };
+      emit(result.stdout, Stdout);
+      emit(result.stderr, Stderr);
+      // Surface a non-zero exit code; don't repeat it for 0.
+      if (result.code !== null && result.code !== 0) {
+        this.emitStream(id, Stderr, `[exit code: ${result.code}]\n`);
       }
     } catch (e) {
       // Anything that bubbles out of runner.run — RunnerError or a
       // programmer bug — surfaces as a structured Error in the Console.
+      // Scrub the message: a RunnerError can carry raw stderr fragments
+      // and arbitrary thrown errors may include /home/<user>/ paths.
       const name = e instanceof Error ? e.name : 'Error';
-      const message = e instanceof Error ? e.message : String(e);
-      this.emitError(id, name, message);
+      this.emitError(id, name, scrubPrivate(errMsg(e)));
     } finally {
       // Per-execution Idle MUST fire (or the prompt won't redraw); paired
       // with the session-level Idle.
@@ -263,11 +294,7 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
     this.variablesClients.delete(id);
   }
 
-  sendClientMessage(
-    client_id: string,
-    message_id: string,
-    message: Record<string, unknown>,
-  ): void {
+  sendClientMessage(client_id: string, message_id: string, message: Record<string, unknown>): void {
     if (!this.variablesClients.has(client_id)) return;
     // Wire format is JSON-RPC per positron/comms/variables-backend-openrpc.json.
     // The frontend tracks each request by id and won't dispatch a second
@@ -306,7 +333,9 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
    * Update the current model snapshot (and the source URI, when the model
    * came from an editor) and push a fresh `refresh` event to every open
    * Variables comm. URI is null when no editor is active or the active
-   * file isn't an NMTRAN document — view-RPC lookups fall through in that case.
+   * file isn't an NMTRAN document — view-RPC lookups fall through in
+   * that case. Fit overlay is the Fit Inspector's job; see
+   * `mapParsedModelToVariables` for the Variables pane's contract.
    */
   setParsedModel(model: NmtranParsedModel | null, uri: vscode.Uri | null = null): void {
     this.currentParsedModel = model;
@@ -411,11 +440,7 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
     this._onDidReceiveRuntimeMessage.fire(message);
   }
 
-  private emitCommMessage(
-    commId: string,
-    data: Record<string, unknown>,
-    parentId = '',
-  ): void {
+  private emitCommMessage(commId: string, data: Record<string, unknown>, parentId = ''): void {
     const message: positron.LanguageRuntimeCommMessage = {
       id: randomUUID(),
       parent_id: parentId,
@@ -439,4 +464,19 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
     };
     this._onDidReceiveRuntimeMessage.fire(msg);
   }
+}
+
+/**
+ * Detect whether a Console-typed shell command launches a NONMEM model
+ * via PsN's `execute`. Used by `dispatch` to suppress the multi-thousand-
+ * line iteration output (Active Runs has it instead).
+ *
+ * Matches `execute … <file>.mod` as a shell verb — supports the canonical
+ * `cd '<dir>' && execute …` form runCurrentModel emits, and bare typed
+ * `execute run001.mod`. Won't match `cat execute_log.mod` or other
+ * non-execute verbs because the regex requires execute at a clause
+ * boundary (start, after `&&` / `;` / `|`).
+ */
+export function isExecuteModelRun(code: string): boolean {
+  return /(?:^|&&|;|\|)\s*execute\s+(?:[^|;&\n]*\s+)?\S+\.mod\b/.test(code);
 }

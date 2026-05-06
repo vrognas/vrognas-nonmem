@@ -18,6 +18,8 @@ export interface NmtranThetaDecl {
   fix: boolean;
   /** 0-based line number of the declaration in the source. May be missing on older vscode-nmtran versions. */
   line?: number;
+  /** Inline `;<comment>` text after the decl on its source line. Pirana-style label. Available from vscode-nmtran ≥ 0.4.20. */
+  comment?: string;
 }
 
 export interface NmtranOmegaSigmaDecl {
@@ -26,6 +28,8 @@ export interface NmtranOmegaSigmaDecl {
   fix: boolean;
   /** 0-based line number of the declaration in the source. May be missing on older vscode-nmtran versions. */
   line?: number;
+  /** See `NmtranThetaDecl.comment`. Available from vscode-nmtran ≥ 0.4.20. */
+  comment?: string;
 }
 
 export interface NmtranEquation {
@@ -48,6 +52,8 @@ export interface NmtranParsedModel {
 
 interface NmtranApi {
   getParsedModel(uri: vscode.Uri): Promise<NmtranParsedModel | null>;
+  /** Available from vscode-nmtran ≥ 0.4.21. */
+  parseModelFromText?(text: string): Promise<NmtranParsedModel | null>;
 }
 
 /**
@@ -63,4 +69,20 @@ export async function getNmtranParsedModel(uri: vscode.Uri): Promise<NmtranParse
   const api = (await ext.activate()) as Partial<NmtranApi> | undefined;
   if (!api?.getParsedModel) return null;
   return api.getParsedModel(uri);
+}
+
+/**
+ * Parse a control-stream string directly via vscode-nmtran's
+ * `parseModelFromText` API (≥ 0.4.21). Used by lst-mode to derive
+ * decls from the embedded control stream in the .lst itself, so the
+ * Fit Inspector reflects the model AS RUN, not the current sibling
+ * .mod. Returns null when the API isn't available (older
+ * vscode-nmtran) — caller should fall back to sibling-.mod parsing.
+ */
+export async function parseNmtranModelFromText(text: string): Promise<NmtranParsedModel | null> {
+  const ext = vscode.extensions.getExtension(NMTRAN_EXTENSION_ID);
+  if (!ext) return null;
+  const api = (await ext.activate()) as Partial<NmtranApi> | undefined;
+  if (!api?.parseModelFromText) return null;
+  return api.parseModelFromText(text);
 }

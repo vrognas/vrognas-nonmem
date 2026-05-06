@@ -163,3 +163,8 @@ describe('resolveAccessKeyLine', () => {
     expect(vars[1].display_value).toBe('2 (FIX)');
   });
 });
+
+// Note: fit-augmented (init+final+SE) display moved to the Fit
+// Inspector WebView — see test/views/fit-inspector-payload.test.ts.
+// The Variables comm is now permanently init-only and the
+// `mapParsedModelToVariables` signature dropped its `fit` parameter.

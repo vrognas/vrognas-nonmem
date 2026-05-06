@@ -2,7 +2,7 @@
   "name": "positron-nonmem",
   "displayName": "Positron NONMEM",
   "description": "NONMEM as a first-class Positron language runtime: local nmfe76 execution (or via Positron Remote SSH), run history tree, and pharmacometric workbench features. Companion to the vscode-nmtran language extension.",
-  "version": "0.0.23",
+  "version": "0.0.82",
   "publisher": "vrognas",
   "license": "MIT",
   "private": true,
@@ -11,9 +11,21 @@
     "positron": "^2025.11.0",
     "node": ">=20.0.0"
   },
-  "categories": ["Programming Languages", "Other"],
-  "keywords": ["nonmem", "nmtran", "pharmacometrics", "positron"],
-  "activationEvents": ["*", "onStartupFinished", "onLanguage:nmtran"],
+  "categories": [
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "nonmem",
+    "nmtran",
+    "pharmacometrics",
+    "positron"
+  ],
+  "activationEvents": [
+    "*",
+    "onStartupFinished",
+    "onLanguage:nmtran"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "languageRuntimes": [
@@ -24,7 +36,8 @@
     "commands": [
       {
         "command": "positronNonmem.runModel",
-        "title": "Positron NONMEM: Run Current Model"
+        "title": "Positron NONMEM: Run Current Model",
+        "icon": "$(play)"
       },
       {
         "command": "positronNonmem.showNmtranParsedModel",
@@ -34,14 +47,61 @@
         "command": "positronNonmem.refreshRuns",
         "title": "Positron NONMEM: Refresh Runs",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "positronNonmem.openRun",
+        "title": "Positron NONMEM: Open Active Run"
+      },
+      {
+        "command": "positronNonmem.promoteEstimates",
+        "title": "Positron NONMEM: Promote Estimates to New Model"
+      },
+      {
+        "command": "positronNonmem.showLineage",
+        "title": "Positron NONMEM: Show Run Lineage",
+        "icon": "$(type-hierarchy)"
       }
     ],
     "menus": {
       "view/title": [
         {
+          "command": "positronNonmem.showLineage",
+          "when": "view == positronNonmem.runs",
+          "group": "navigation@1"
+        },
+        {
           "command": "positronNonmem.refreshRuns",
           "when": "view == positronNonmem.runs",
-          "group": "navigation"
+          "group": "navigation@2"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "positronNonmem.promoteEstimates",
+          "when": "view == positronNonmem.activeRuns && viewItem == positronNonmem.activeRun.done",
+          "group": "modification@1"
+        }
+      ],
+      "editor/title/run": [
+        {
+          "command": "positronNonmem.runModel",
+          "when": "resourceExtname == .mod || resourceExtname == .ctl",
+          "group": "navigation@1"
+        },
+        {
+          "command": "positronNonmem.showNmtranParsedModel",
+          "when": "resourceExtname == .mod || resourceExtname == .ctl",
+          "group": "navigation@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "positronNonmem.openRun",
+          "when": "false"
+        },
+        {
+          "command": "positronNonmem.promoteEstimates",
+          "when": "false"
         }
       ]
     },
@@ -50,27 +110,47 @@
         {
           "id": "positronNonmem",
           "title": "NONMEM",
-          "icon": "$(beaker)"
+          "icon": "media/nonmem-icon.svg"
         }
       ]
     },
     "views": {
       "positronNonmem": [
         {
+          "id": "positronNonmem.activeRuns",
+          "name": "Active Runs",
+          "icon": "$(pulse)",
+          "contextualTitle": "NONMEM Active Runs"
+        },
+        {
           "id": "positronNonmem.runs",
           "name": "Runs",
           "icon": "$(beaker)",
           "contextualTitle": "NONMEM Runs"
+        },
+        {
+          "type": "webview",
+          "id": "positronNonmem.fitInspector",
+          "name": "Fit Inspector",
+          "icon": "$(symbol-parameter)",
+          "contextualTitle": "NONMEM Fit Inspector"
         }
       ]
     },
     "configuration": {
       "title": "Positron NONMEM",
       "properties": {
-        "positronNonmem.nmfeBinary": {
-          "type": "string",
-          "default": "nmfe76",
-          "description": "Path or PATH-resolvable name of the NONMEM front-end (nmfeNN). Defaults to 'nmfe76' on PATH. Set to e.g. '/opt/nm760/run/nmfe76' for absolute paths. Run the extension via Positron Remote SSH when nmfe76 lives on a different machine."
+        "positronNonmem.staleRunTimeoutMinutes": {
+          "type": "number",
+          "default": 1440,
+          "minimum": 0,
+          "description": "Auto-fail Active Runs entries stuck in 'running' state for this many minutes (default: 1440 = 24 hours). Set to 0 to disable the auto-fail."
+        },
+        "positronNonmem.shrinkageWarnPct": {
+          "type": "number",
+          "default": 30,
+          "minimum": 0,
+          "description": "Shrinkage above this percent is highlighted red in the Fit Inspector (default: 30, the pharmacometrics convention). Set to 100 to effectively disable the warning."
         }
       }
     }
@@ -90,14 +170,17 @@
     "validate": "npm-run-all --parallel compile lint style-check test",
     "vscode:prepublish": "npm run build"
   },
-  "dependencies": {},
   "devDependencies": {
     "@posit-dev/positron": "^0.2.4",
+    "@types/cytoscape": "^3.21.9",
     "@types/node": "^22.0.0",
     "@types/vscode": "^1.108.0",
     "@typescript-eslint/eslint-plugin": "^8.18.0",
     "@typescript-eslint/parser": "^8.18.0",
     "@vscode/vsce": "^3.2.0",
+    "cytoscape": "^3.33.3",
+    "cytoscape-dagre": "^2.5.0",
+    "dagre": "^0.8.5",
     "esbuild": "^0.24.0",
     "eslint": "^9.17.0",
     "npm-run-all2": "^7.0.0",

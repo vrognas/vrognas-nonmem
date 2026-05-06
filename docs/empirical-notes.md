@@ -177,3 +177,34 @@ Two findings bundled here:
 
 Verified 2026-05-03 against NONMEM 7.6.0 on Linux via the runModel command path.
 
+---
+
+## `extensionHost` launch type doesn't bootstrap Remote-SSH
+
+**Expectation.** A `launch.json` config of `type: extensionHost` whose `args` include
+`--remote=ssh-remote+<alias>` and `--folder-uri=vscode-remote://...` would open a
+Positron Remote-SSH window with the dev extension loaded against that remote — same
+result as manually running `Remote-SSH: Connect to Host`.
+
+**Probe.** Set the args as above, hit "Debug: Start Without Debugging".
+
+**Outcome.** Positron opens a **local** Extension Development Host window. The
+`--remote` and `--folder-uri` args are silently ignored (or shadowed by the
+`extensionHost` debug type's local-only spawn path). VSCode docs confirm: for
+remote-aware extension dev, the orthodox flow is to manually open the Remote-SSH
+window first and *then* F5 inside it — and `--extensionDevelopmentPath` must
+resolve on the remote, not on the developer's local machine. So a launch config
+that combines a Windows `${workspaceFolder}` path with a `--remote` arg can't
+work even in principle.
+
+**Implication.** We dropped the Remote-SSH launch config in v0.0.23+. Two
+practical loops:
+
+1. **Local dev host** for UI / parser / view work — runtime probe warns
+   "could not invoke nmfe76" but every non-runtime feature exercises fine.
+2. **VSIX → install on the remote**: `npm run package` → copy `.vsix` to
+   the host → "Extensions: Install from VSIX" in a Remote-SSH window. Slow
+   loop, but the only end-to-end path until we have a synced-source flow.
+
+Verified 2026-05-03.
+

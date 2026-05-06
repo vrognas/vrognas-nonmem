@@ -1,12 +1,7 @@
 import type * as positron from 'positron';
+import * as path from 'node:path';
+import type { NmVersionEntry } from '../psn-conf';
 
-// We deliberately import Positron *types* but the actual enum values must
-// come from the runtime API at call time (PositronApi.LanguageRuntimeStartupBehavior).
-// The metadata factory therefore takes the API as a parameter.
-
-// Inline NONMEM runtime icon — bold "NM" monogram on a teal rounded square.
-// Distinguishes the entry from positron-r (blue) and positron-python (yellow/blue)
-// in the runtime-picker. Encoded once at module load.
 const NONMEM_ICON_SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">' +
   '<rect width="100" height="100" rx="22" fill="#0e7c7b"/>' +
@@ -18,32 +13,62 @@ const NONMEM_ICON_BASE64 = Buffer.from(NONMEM_ICON_SVG).toString('base64');
 export interface BuildMetadataDeps {
   startupBehavior: positron.LanguageRuntimeStartupBehavior;
   sessionLocation: positron.LanguageRuntimeSessionLocation;
-  /** NONMEM version string; M5+ probe the host for this. */
-  nonmemVersion: string;
+  /** psn.conf [nm_versions] entry — label is the picker key, installDir/version are display info. */
+  nmVersion: NmVersionEntry;
 }
 
 /**
- * Construct LanguageRuntimeMetadata for the local NONMEM install.
+ * Construct LanguageRuntimeMetadata for one psn.conf [nm_versions]
+ * entry. Multiple entries => call this once per label with distinct
+ * `nmVersion.label` values; the runtimeId is keyed off the label so
+ * each registers as its own runtime in Positron's picker.
  *
- * `runtimeId` is a stable string so Positron's session restoration
- * recognises the same runtime across IDE restarts (no UUIDs persisted).
+ * `extraRuntimeData.nmVersionLabel` is read back by the manager's
+ * createSession and flows through to runModel as `-nm_version=<label>`.
  */
-export function buildRuntimeMetadata(
-  deps: BuildMetadataDeps,
-): positron.LanguageRuntimeMetadata {
+export function buildRuntimeMetadata(deps: BuildMetadataDeps): positron.LanguageRuntimeMetadata {
+  const { label, installDir, version } = deps.nmVersion;
+  const idTag = idTagFromLabel(label);
+  const nameSuffix = label === 'default' ? '' : ` (${label})`;
+  // runtimePath has no operational role under PsN — `psn execute`
+  // resolves the binary via the label — but we set it to the canonical
+  // nmfe path so Positron's picker shows something meaningful.
+  const runtimePath = path.posix.join(installDir, 'run', `nmfe${nmfeSuffixFromVersion(version)}`);
   return {
-    runtimePath: 'nmfe76', // pseudo-path; never resolved as a real path
-    runtimeId: 'positron-nonmem',
-    runtimeName: `NONMEM ${deps.nonmemVersion}`,
-    runtimeShortName: 'NONMEM',
+    runtimePath,
+    runtimeId: `positron-nonmem-${idTag}`,
+    runtimeName: `NONMEM ${version}${nameSuffix}`,
+    runtimeShortName: `NONMEM ${version}`,
     runtimeVersion: '0.0.1',
     runtimeSource: 'NONMEM',
     languageName: 'NMTRAN',
     languageId: 'nmtran',
-    languageVersion: deps.nonmemVersion,
+    languageVersion: version,
     base64EncodedIconSvg: NONMEM_ICON_BASE64,
     startupBehavior: deps.startupBehavior,
     sessionLocation: deps.sessionLocation,
-    extraRuntimeData: {},
+    extraRuntimeData: { nmVersionLabel: label },
   };
+}
+
+/**
+ * Stable, filesystem-safe tag derived from the psn.conf label. Used
+ * as the runtimeId suffix so two entries with the same version (e.g.
+ * `default=/opt/nm760,7.6` and `nm760=/opt/nm760,7.6`) get distinct
+ * runtime IDs and Positron's session-restoration picks the right one.
+ */
+function idTagFromLabel(label: string): string {
+  return label.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'default';
+}
+
+/**
+ * "7.6" → "76", "7.6.0" → "76", "7" → "7" (single-digit fallback).
+ * Used only for the displayed runtimePath; PsN itself decides the
+ * actual nmfe binary based on the psn.conf entry.
+ */
+function nmfeSuffixFromVersion(version: string): string {
+  const m = /^(\d+)\.(\d+)/.exec(version);
+  if (m) return `${m[1]}${m[2]}`;
+  const single = /^(\d+)$/.exec(version);
+  return single ? single[1] : '';
 }
