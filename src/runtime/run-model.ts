@@ -66,7 +66,12 @@ export interface RunModelResult {
   modelfitDir: string | null;
 }
 
-const DEFAULT_NM_OUTPUT_EXTENSIONS: readonly string[] = ['ext', 'phi', 'cov', 'cor', 'coi'];
+// `xml` added v0.0.158: NM 7.2+'s machine-readable report. Carries the
+// exhaustive `<nm:estimation_options>` set the inspector surfaces, plus
+// per-step termination + timing data the .lst echo lacks. Without it
+// here, PsN never copies `psn.xml` out of `NM_run1/` and the inspector
+// has to extract from `NM_run1.7z` on every render.
+const DEFAULT_NM_OUTPUT_EXTENSIONS: readonly string[] = ['ext', 'phi', 'cov', 'cor', 'coi', 'xml'];
 
 /**
  * Take the first non-comment $DATA token from the model text and return

@@ -2,7 +2,7 @@
   "name": "positron-nonmem",
   "displayName": "Positron NONMEM",
   "description": "NONMEM as a first-class Positron language runtime: local nmfe76 execution (or via Positron Remote SSH), run history tree, and pharmacometric workbench features. Companion to the vscode-nmtran language extension.",
-  "version": "0.0.82",
+  "version": "0.0.177",
   "publisher": "vrognas",
   "license": "MIT",
   "private": true,
@@ -60,6 +60,14 @@
         "command": "positronNonmem.showLineage",
         "title": "Positron NONMEM: Show Run Lineage",
         "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "positronNonmem.signalEndMode",
+        "title": "Positron NONMEM: End Current EM Mode (next.sig)"
+      },
+      {
+        "command": "positronNonmem.signalStopRun",
+        "title": "Positron NONMEM: Stop Run Cleanly (stop.sig)"
       }
     ],
     "menus": {
@@ -80,6 +88,16 @@
           "command": "positronNonmem.promoteEstimates",
           "when": "view == positronNonmem.activeRuns && viewItem == positronNonmem.activeRun.done",
           "group": "modification@1"
+        },
+        {
+          "command": "positronNonmem.signalEndMode",
+          "when": "view == positronNonmem.activeRuns && viewItem == positronNonmem.activeRun.running",
+          "group": "signals@1"
+        },
+        {
+          "command": "positronNonmem.signalStopRun",
+          "when": "view == positronNonmem.activeRuns && viewItem == positronNonmem.activeRun.running",
+          "group": "signals@2"
         }
       ],
       "editor/title/run": [
@@ -101,6 +119,14 @@
         },
         {
           "command": "positronNonmem.promoteEstimates",
+          "when": "false"
+        },
+        {
+          "command": "positronNonmem.signalEndMode",
+          "when": "false"
+        },
+        {
+          "command": "positronNonmem.signalStopRun",
           "when": "false"
         }
       ]
@@ -138,19 +164,83 @@
       ]
     },
     "configuration": {
-      "title": "Positron NONMEM",
+      "title": "NONMEM",
       "properties": {
-        "positronNonmem.staleRunTimeoutMinutes": {
-          "type": "number",
-          "default": 1440,
-          "minimum": 0,
-          "description": "Auto-fail Active Runs entries stuck in 'running' state for this many minutes (default: 1440 = 24 hours). Set to 0 to disable the auto-fail."
-        },
-        "positronNonmem.shrinkageWarnPct": {
+        "nonmem.shrinkageWarnPct": {
           "type": "number",
           "default": 30,
           "minimum": 0,
           "description": "Shrinkage above this percent is highlighted red in the Fit Inspector (default: 30, the pharmacometrics convention). Set to 100 to effectively disable the warning."
+        },
+        "nonmem.rseThetaWarnPct": {
+          "type": "number",
+          "default": 30,
+          "minimum": 0,
+          "description": "THETA RSE% above this is highlighted orange (warn). Above `rseWarnPct` (default 100) it's red instead. Default: 30, the common pharmacometric guideline."
+        },
+        "nonmem.rseOmegaWarnPct": {
+          "type": "number",
+          "default": 50,
+          "minimum": 0,
+          "description": "OMEGA / SIGMA RSE% above this is highlighted orange (warn). Above `rseWarnPct` (default 100) it's red. Random-effect RSEs are inherently larger than fixed-effect — default 50 reflects that."
+        },
+        "nonmem.rseWarnPct": {
+          "type": "number",
+          "default": 100,
+          "minimum": 0,
+          "description": "RSE% above this is highlighted red in the Fit Inspector (default: 100 — RSE ≥ |estimate| means the parameter is effectively unidentified)."
+        },
+        "nonmem.pValWarnThreshold": {
+          "type": "number",
+          "default": 0.1,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "ETABAR P-value below this is highlighted orange (warn — borderline departure of ETABAR from zero). Below `pValBadThreshold` (default 0.05) it's red. Default: 0.1."
+        },
+        "nonmem.pValBadThreshold": {
+          "type": "number",
+          "default": 0.05,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "ETABAR P-value below this is highlighted red (significant — model mis-specification or omitted covariate suspect). Default: 0.05."
+        },
+        "nonmem.corrRedFlagThreshold": {
+          "type": "number",
+          "default": 0.95,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Pairwise parameter correlation |r| above this is highlighted RED (bad tier) in the Fit Inspector's diagnostics red-flag list. Default 0.95 (textbook near-redundancy convention)."
+        },
+        "nonmem.corrWarnThreshold": {
+          "type": "number",
+          "default": 0.9,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Pairwise parameter correlation |r| above this (and below `corrRedFlagThreshold`) is highlighted YELLOW (warn tier) in the Fit Inspector's diagnostics red-flag list. Default 0.9. Set ≥ corrRedFlagThreshold to disable the warn tier."
+        },
+        "nonmem.lineages": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "description": "Named sub-lineages — each entry maps a lineage name to its list of `.mod` absolute paths (the curated set of runs that appear when that lineage is selected in the panel). Edited via right-click → Add to lineage… in the Run Lineage panel; manual edits also work. The path-based parent overrides in `lineageOverrides` apply across all lineages."
+        },
+        "nonmem.lineageOfvThreshold": {
+          "type": "number",
+          "default": 3.84,
+          "minimum": 0,
+          "exclusiveMinimum": true,
+          "description": "ΔOFV significance threshold for the Run Lineage view edge colours. Default 3.84 (χ²₁,0.05 — Keizer 2013 convention). Set higher for a stricter \"improvement\" definition (6.63 = χ²₁,0.01)."
+        },
+        "nonmem.lineageOverrides": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": {
+            "type": ["string", "null"]
+          },
+          "description": "Workspace-side parent overrides for the Run Lineage view. Map of child .mod absolute path → parent .mod absolute path (or null to force the child to be a root regardless of any `;; Based on:` marker in the file). Set via right-click → Set parent… in the Run Lineage panel; manual edits also work. Lets you wire ANY two runs together, not just `run<NNN>` named ones."
         }
       }
     }
@@ -172,15 +262,15 @@
   },
   "devDependencies": {
     "@posit-dev/positron": "^0.2.4",
-    "@types/cytoscape": "^3.21.9",
+    "@types/d3-hierarchy": "^3.1.7",
+    "@types/d3-shape": "^3.1.8",
     "@types/node": "^22.0.0",
     "@types/vscode": "^1.108.0",
     "@typescript-eslint/eslint-plugin": "^8.18.0",
     "@typescript-eslint/parser": "^8.18.0",
     "@vscode/vsce": "^3.2.0",
-    "cytoscape": "^3.33.3",
-    "cytoscape-dagre": "^2.5.0",
-    "dagre": "^0.8.5",
+    "d3-hierarchy": "^3.1.2",
+    "d3-shape": "^3.2.0",
     "esbuild": "^0.24.0",
     "eslint": "^9.17.0",
     "npm-run-all2": "^7.0.0",

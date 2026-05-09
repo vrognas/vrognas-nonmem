@@ -20,6 +20,7 @@ vitest.config.*
 AGENTS.md
 CLAUDE.md
 docs/**
+empirical-models/**
 .remember/**
 
 # build artefacts and lockfiles

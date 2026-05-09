@@ -208,3 +208,322 @@ practical loops:
 
 Verified 2026-05-03.
 
+
+
+---
+
+## Per-method output-file probe (run001..run005)
+
+**Expectation.** From the NM7 `$EST` docs and `em-monte-carlo` reference, each estimation method produces a different subset of files and `.lst` markers. We hand-built five tiny probe models in `empirical-models/run00{1..5}.mod` (FOCE-INTER, ITS, IMP, SAEM-then-IMP-OFV, BAYES-NWPRI) sharing `data/simple-pk.csv`, so the resulting output trees can be diffed directly.
+
+**Probe.** Run on the host:
+
+```bash
+scp -r empirical-models primary:~/
+ssh primary "cd ~/empirical-models && for f in run001 run002 run003 run004 run005; do execute --nm_version=7.6.0 \$f.mod; done"
+mkdir -p empirical-models/outputs
+for f in run001 run002 run003 run004 run005; do
+  scp -r primary:~/empirical-models/$f.dir/NM_run1 empirical-models/outputs/$f
+done
+node empirical-models/compare.mjs empirical-models/outputs > empirical-models/outputs/comparison.md
+```
+
+`compare.mjs` emits three matrices:
+
+1. **File-presence per run** — which artefacts each method actually wrote.
+2. **.lst marker counts per run** — `#METH:`, `#OBJV:`, `#CPUT:`, `#PARA:`, `RESET HESSIAN`, `GRADIENT:`, `Mean Acceptance Rate`, `EBVSHRINKSD(
+
+---
+
+## Signal-file mechanism for live SAEM/IMP control
+
+**Expectation.** nmguides ([running-nonmem](https://nmguides.vrognas.com/nm7/running-nonmem) + [vrognas.com/tools-of-the-trade/nm-tips-n-tricks](https://vrognas.com/docs/tools-of-the-trade/nonmem/nm-tips-n-tricks/)) describe `next.sig` / `stop.sig` / `print.sig` / `paraprint.sig` as empty files in NONMEM's working dir that trigger graceful mode advancement / termination. Docs underspecify: exact filenames, latency, what happens to subsequent `$EST` records, whether `$COV` still runs, cleanup behaviour, location semantics.
+
+**Probe.** `~/positron-nonmem/probe-signals/` on NONMEM 7.6.0 host. SAEM (+IMP EONLY +$COV) on a 4-THETA cubic + diagonal OMEGA(4) + SIGMA model. 5 single-variable probes (`probe.sh` runner polls `run001.ext` line-count, touches signal at trigger): baseline (no sig), S1 (next.sig in burn-in), S2 (stop.sig in accumulation), S3 (stop.sig in burn-in), S4 (next.sig in *parent* dir). S5 cleanup-question answered by cumulative observation.
+
+**Outcome — distinguishing stdout/lst messages.**
+
+| Phase ended via         | `iteration N` line followed by | Final SAEM message                                                       | Reduced-stochastic message                                  |
+|------------------------ |------------------------------- |------------------------------------------------------------------------- |------------------------------------------------------------ |
+| Natural completion (no CTYPE) | (none — runs to NBURN/NITER)   | `STOCHASTIC PORTION WAS NOT TESTED FOR CONVERGENCE`                       | `REDUCED STOCHASTIC PORTION WAS COMPLETED`                  |
+| CTYPE convergence       | `Convergence achieved: ending mode` | `STOCHASTIC PORTION WAS COMPLETED`                                        | `REDUCED STOCHASTIC PORTION WAS COMPLETED`                  |
+| `next.sig` (in burn-in) | `Ending Mode`                  | `STOCHASTIC PORTION WAS NOT TESTED FOR CONVERGENCE, AND WAS USER INTERRUPTED` | `REDUCED STOCHASTIC PORTION WAS COMPLETED`                  |
+| `stop.sig` (in burn-in) | `Ending Program`               | `STOCHASTIC PORTION WAS NOT TESTED FOR CONVERGENCE, AND WAS USER INTERRUPTED` | `REDUCED STOCHASTIC PORTION WAS NOT COMPLETED PRIOR TO USER INTERRUPT` |
+| `stop.sig` (in accumulation) | `Ending Program`               | `STOCHASTIC PORTION WAS COMPLETED`                                        | `REDUCED STOCHASTIC PORTION WAS NOT COMPLETED PRIOR TO USER INTERRUPT` |
+
+The empirical parsing handle is **`USER INTERRUPTED` / `PRIOR TO USER INTERRUPT`** in the SAEM summary lines, paired with `Ending Mode` (next.sig) vs `Ending Program` (stop.sig) in the iteration trace.
+
+**Outcome — semantics.**
+
+- **Filename + location**: lower-case `next.sig` and `stop.sig` literally, in nmfe76's cwd. Parent-directory placement is **silently ignored** (S4: `../next.sig` persisted on disk untouched while burn-in ran to completion).
+- **Latency = exactly 1 `$EST PRINT` cycle.** Verified empirically across PRINT=1 / PRINT=10 / PRINT=50 (probes `p1`, `s1`, `p50` in `~/positron-nonmem/probe-signals/`). NONMEM polls its cwd for the signal at each print event:
+
+  | PRINT | Touch iter | `Ending Mode` after | Latency |
+  |---|---|---|---|
+  | 1 | -198 | -197 | 1 iter |
+  | 10 | -160 | -150 | 10 iter |
+  | 50 | -350 | -300 | 50 iter |
+
+  **nmguides does NOT document this** (`running-nonmem` page lists the signals but is silent on polling cadence). UI implication: a generic "next PRINT cycle" message is honest; promising "~N iterations" is wrong outside PRINT=N. The wallclock latency depends on per-iter cost — for slow models with PRINT=50, 50 iterations could be many minutes.
+- **Cleanup**: NONMEM **deletes the consumed `.sig` file from cwd**. UI does not need to GC it. (Stale `.sig` from a prior run *would* be honoured by the next nmfe76 invocation in the same dir, however — so per-run subdirs are required.)
+- **`next.sig` semantics**: ends the *current mode only* (burn-in → accumulation, or last accumulation → next $EST record). Subsequent $EST records and $COV all run normally.
+- **`stop.sig` semantics**: ends *all remaining $EST records*, then runs $COV if defined. **Any subsequent $EST is skipped entirely** — this is the load-bearing UX caveat. If a user `stop.sig`s during SAEM, the IMP EONLY refinement step is skipped and the reported OFV is the stochastic SAEM OFV, not the refined one. UI must warn the user before sending stop.sig if a follow-up IMP EONLY is in the model.
+- **`stop.sig` during burn-in**: skips remainder of burn-in *and* the entire accumulation phase, producing only the burn-in trace plus `$COV` outputs.
+
+**.cnv structure (bonus finding).** Empirically confirmed in S1 and S2 with `CTYPE=3 CITER=10 CALPHA=0.05`:
+
+```
+TABLE NO.     1: Stochastic Approximation ...
+ ITERATION    THETA1 ... OMEGA(4,4)   SAEMOBJ
+  -2000000000  9.81E-01 ...   <means over last CITER iterations>   -37858.76    <- mean
+  -2000000001  5.42E-03 ...   <SDs over last CITER iterations>     107.85       <- SD
+  -2000000002  9.20E-01 ...   <slope-vs-zero p-values>             0.24         <- p-value
+  -2000000003  5.68E-03 ...   <alpha thresholds, Bonferroni-corr>  5.0E-02      <- alpha
+```
+
+Per-parameter alpha is **Bonferroni-corrected** (here ≈ 0.05/8.8 ≈ 0.00568 across the 9 tested parameters); OFV column gets the **uncorrected α=0.05**. Convergence per parameter = `p ≥ α` element-wise. Off-diagonal OMEGAs that are structurally fixed at 0 in the model show p=1.000 (constant slope = 0).
+
+**How to apply.**
+
+- M13-A inspector verdict: parse `.cnv` row `-2000000002` (p-values) and `-2000000003` (alphas). Render `EM: converged (OFV p=0.24 ≥ α=0.05)` green / `NOT converged` red. Use SAEMOBJ column primarily; per-parameter detail on hover.
+- M13-D signal-button UX: write the empty file via SFTP to nmfe76's cwd (= the per-run subdir under `~/positron-nonmem/<runId>/` per CLAUDE.md execution discipline). Two buttons: "End current mode" (next.sig) and "Stop run cleanly" (stop.sig). The latter must show a confirm dialog warning that *all subsequent $EST records will be skipped* if the model has more than one $EST.
+- M13-E `.lst` post-mortem: parse `WAS USER INTERRUPTED` / `PRIOR TO USER INTERRUPT` → display "Run ended via user signal" badge in the inspector; differentiate from CTYPE-convergence (`WAS COMPLETED`).
+
+Verified 2026-05-08 against NONMEM 7.6.0 on Linux via probes `~/positron-nonmem/probe-signals/{baseline,s1,s2,s3,s4}`.
+
+---
+
+## `$EST` option defaults per method — wire-format coverage limits
+
+**Expectation.** The XML's `<nm:estimation_options nm:knob='value' .../>` is the
+canonical structured surface for `$EST` configuration. We wanted "what does NONMEM
+use if I write nothing?" per method, to power the inspector's
+non-default highlighting (`xml-est-defaults.ts`).
+
+**Probe set.** `~/positron-nonmem/probe-defaults/{zero,foce,foce_inter,hybrid,its,imp,imp_eonly,impmap,direct,saem}/run001.xml`
+— minimal model with `$EST METHOD=X` plus the smallest extra options NONMEM accepts (e.g.
+SAEM rejects without `NBURN`/`NITER`/`ISAMPLE`, so those values land in the dictionary
+but get classified as user-driven via `USER_DRIVEN_KEYS`).
+
+Plus follow-up probes with `CTYPE=3` set to capture conditionally-emitted attrs:
+`~/positron-nonmem/probe-defaults/{saem,its,imp,impmap,direct}_ctype/run001.xml`.
+
+**Outcomes.**
+
+1. **Stable skeleton, conditional children.** Most attrs appear in every method with
+   identical values (`analysis_type='pop'`, `nsig='3'`, `format='s1pe12.5'`, etc.).
+   Method-specific attrs (`isample_m1*` / `ikappa` / `massreset` for SAEM only;
+   `iaccept` / `iscale_*` / `mapiter*` for IMP / IMPMAP) appear only when their
+   parent method emits them.
+
+2. **`estimation_method` attr is method-only.** Classical methods (FOCE / FO /
+   HYBRID / LAPLACE) emit no `estimation_method` attr at all — they're
+   distinguishable only by `cond_estim` / `epseta_interaction` / `laplace` /
+   `etas_fixed_to_zero`. Our matcher routes by `estimation_method` value when
+   present, falls back to attr-presence inspection for classical methods.
+
+3. **CTYPE-conditional emit family.** `calpha` / `citer` / `cinterval` only emit
+   when `CTYPE>0`. Captured defaults: `calpha='5.000000000000000E-02'`,
+   `citer='10'`, `cinterval` follows `PRINT` (defaults to `9999`).
+
+4. **Option-dependent defaults.** `cinterval` defaults to whatever `PRINT` is set
+   to. User dialing `PRINT=10` cascades to `cinterval=10` without typing it. Static
+   baseline can't model — moved `cinterval` to `USER_DRIVEN_KEYS` (green tier)
+   instead of comparing to a stale baseline.
+
+5. **Options that never emit to XML.** `PRINT`, `NOSUB`, `OMITTED`, `NOABORT` /
+   `ABORT` family, `NOCENTERING` / `CENTERING` etc. NM applies them but the XML
+   wire-format doesn't surface them. **Fundamental limitation**: our diff system
+   can't track user customization of these. No fix possible without a different
+   data source (FCON intermediate or .lst-text parsing).
+
+6. **IMPMAP / MAPINTER doc-vs-emit discrepancy.** [em-monte-carlo](https://nmguides.vrognas.com/nm7/em-monte-carlo)
+   claims `IMPMAP ≡ IMP INTERACTION MAPITER=1 MAPINTER=1`, yet default
+   `METHOD=IMPMAP` emits `mapinter='0'` in both XML and `.lst`. Resolved by
+   binary-symbol-table inspection (`strings`/`nm` only — no disassembly): the
+   `__nmbayes_int_MOD_*` namespace contains parallel `mapiter`/`mapinter`/`mapiters`
+   (user-set) and `emapiter`/`emapinter`/`emapinterstart` (effective/internal)
+   variables, plus a runtime string `"Mapinter turned on"`. NM dispatches on the
+   `estimation_method` label and unconditionally sets `emapinter=1` for IMPMAP
+   regardless of `mapinter='0'`. The surface XML attr keeps the user-set side
+   only; the algorithmic effect matches the doc claim. **Don't "fix"** the
+   IMPMAP baseline by setting `mapinter: '1'` — that would mis-flag default
+   `METHOD=IMPMAP` runs as customised.
+
+7. **Methods deferred.** BAYES / NUTS / CHAIN / SIR / MCMC not probed (BAYES
+   needs `$PRIOR` plumbing; CHAIN is initial-value generator with different XML
+   shape; SIR runs as post-processing). `findDefaultsForStep` returns `null` for
+   these — the diff degrades gracefully (no false-positive blue, just no
+   highlighting).
+
+**How to apply.**
+
+- `runtime/xml-est-defaults.ts` carries the per-method baselines + `USER_DRIVEN_KEYS` +
+  `findNonDefaultKeys(step)` / `findUserDrivenKeys(step)` helpers. Inspector renders
+  non-default attrs blue, user-driven attrs green.
+- nmguides commit [`5aeb349`](https://github.com/vrognas/nmguides/commit/5aeb349) documents the
+  per-method tables in `supplements/nonmem-tips.qmd` (the doc-facing version of this
+  empirical-notes entry).
+- Re-probe when host upgrades to NM 7.7+; defaults can shift silently between patches.
+  Symptom of drift: false-positive blue on attrs whose true defaults moved.
+
+Verified 2026-05-09 against NONMEM 7.6.0 on Linux via the probes above.
+---
+
+
+## `$COVARIANCE` options — `<nm:problem_options>` carries `cov_*`, no dedicated `<nm:covariance_options>`
+
+**Expectation.** `$EST` options live in `<nm:estimation_options/>` per chained step. By
+analogy, `$COV` options should live in a `<nm:covariance_options/>` element. Bauer's
+NM7 docs don't explicitly say either way.
+
+**Probe.** Set up 7 minimal-model probes at `~/positron-nonmem/probe-cov-*/` on the
+NM 7.6.0 host: `bare`, `matrix_r`, `matrix_s`, `print_e`, `sir`, `uncond`, `no_cov`,
+`cov_em`. Ran in parallel via `nmfe76`. Grepped resulting `m.xml` / `run001.xml` for
+all `<nm:[a-z_]+>` tags + scanned the `<nm:problem_options/>` element's attrs.
+
+**Outcome.**
+
+1. **No `<nm:covariance_options>` element exists.** Confirmed across all 7 probes — the
+   tag-list is identical to bare-`$EST` runs minus `<nm:covariance_step>` etc. NM does
+   NOT emit a dedicated $COV-options element.
+2. **`<nm:problem_options/>` carries `cov_*` prefixed attrs** alongside `data_*`,
+   `nthetat`, `omega_diagdim`, etc. Self-closing element, one per problem (single
+   $COV per problem in NONMEM by design — no chaining).
+3. **`cov_*` attrs are entirely absent** when no `$COV` record at all (`no_cov` probe).
+   Distinct from `cov_omitted='yes'` which signals explicit `$COV OMITTED` was written.
+   Use `<nm:problem_options>` carrying any `cov_*` attr as the "has $COV" signal.
+4. **Bare-`$COV` baseline (NM 7.6.0).** 22 attrs always emitted, regardless of method:
+   ```
+   atol='-1' cholroff='0' compressed='no' eigen_print='no' fposdef='0'
+   knuthsumoff='-1' matrix='rsr' nofcov='no' omitted='no' pfcond='0'
+   posdef='-1' precond='0' preconds='tos' pretype='0' resume='no'
+   siglcov='-1' siglocov='-1' sirsample='BLANK' slow_gradient='noslow'
+   special='no' thbnd='1' tol='-1'
+   ```
+   - `cov_thbnd='1'` resolves the doc contradiction. Bauer's `$COVARIANCE` reference
+     has two paragraphs giving different defaults: one says "By default THBND=1, in
+     keeping with the behavior of earlier NONMEM versions" and another (under
+     SIRTHBND) says "Default is the value of THBND, which in turn is 0 by default."
+     Empirical: THBND=1 is the actual emitted default for the deterministic step.
+5. **`-1` is the propagation sentinel** for keys that inherit from `$EST` / `$SUBS`.
+   Empirically these are: `atol`, `tol`, `siglcov`, `siglocov`, `knuthsumoff`,
+   `posdef`. The inspector renders these as a fourth tier (yellow / propagated)
+   distinct from blue (non-default), green (user-driven), and normal (default) —
+   "the actual effective value isn't here, look at $EST" is an important user signal.
+6. **`'BLANK'` is the not-requested sentinel** (e.g. `sirsample='BLANK'` = no SIR
+   active). Different semantics from `-1`: `BLANK` is the actual default, not a
+   propagation pointer.
+7. **SIR-block attrs only emit when `SIRSAMPLE>0`.** 14 additional attrs appear in the
+   `sir` probe (`capcorr`, `clockseed`, `df`, `file`, `format`, `iaccept`, `iacceptl`,
+   `print`, `ranmethod`, `seed`, `sircenter`, `sirmaxwt`, `sirminwt`, `sirniter`,
+   `sirthbnd`). These compose `SIR_BLOCK` in `xml-cov-defaults.ts`, layered on top
+   of the bare baseline only when SIR is active.
+8. **`MATRIX=R` suppresses `cov_atol`, `cov_cholroff`, `cov_special`** from XML
+   emission. Defensive: missing attrs in input never false-flag as non-default
+   (the diff only checks `defaults[k] !== opts[k]` for keys present in `opts`).
+9. **EM methods do not change the bare baseline.** `cov_em` probe (with `METHOD=IMP`)
+   produced identical 22-attr `cov_*` set as the bare-FOCE probe. The `posdef='-1'`
+   propagation handles the method-dependent default (0 for classical, 3 for EM)
+   internally — XML doesn't differentiate.
+
+**How to apply.**
+
+- `runtime/parse-xml-problem-options.ts` extracts `cov_*` attrs from the
+  `<nm:problem_options/>` element. Returns `null` when no `cov_*` attrs (no $COV
+  record) — distinct from `omitted='yes'` (explicit OMITTED).
+- `runtime/xml-cov-defaults.ts` carries `BARE_COV` + `SIR_BLOCK` + `PROPAGATED_KEYS` +
+  `USER_DRIVEN_KEYS` + the three classifier helpers
+  (`findCovNonDefaultKeys` / `findCovPropagatedKeys` / `findCovUserDrivenKeys`).
+- Re-probe when host upgrades to NM 7.7+; new attrs ship silently between patches.
+  Symptom of drift: false-positive blue on attrs whose true defaults moved or were
+  added without baseline updates.
+
+Verified 2026-05-09 against NONMEM 7.6.0 on Linux via the probes above.
+
+## `$COV` option propagation from `$EST` is real (NM 7.6.0)
+
+**Expectation.** Per Bauer's `$COVARIANCE ATOL=n` doc: "If ATOL is coded on $ESTIMATION,
+it overrides the default for that step. If ATOL is coded on $COVARIANCE, it overrides
+$ESTIMATION and/or the default for that step." So `cov_atol='-1'` (user didn't set on
+$COV) should mean the effective $COV ATOL = whatever $EST set.
+
+But: like IMPMAP/MAPINTER (where XML `mapinter='0'` is a user-input sentinel and the
+binary unconditionally sets the internal `emapinter=1`), the XML's `cov_atol='-1'`
+might be a UI-only marker that NONMEM resolves to its own internal default (12) without
+consulting $EST. We had to probe.
+
+**Probe.** `~/positron-nonmem/probe-cov-propagation/run001.mod` — `$SUBROUTINES ADVAN13
+TOL=6`, `$ESTIMATION ... ATOL=10`, bare `$COVARIANCE` (no ATOL). The .lst's tolerance
+trace lines reveal the resolved per-step values:
+
+```
+INITIAL (BASE) TOLERANCE SETTINGS:
+ NRD (RELATIVE)  VALUE(S) OF TOLERANCE:   6
+ ANRD (ABSOLUTE) VALUE(S) OF TOLERANCE:  12   ← built-in default
+
+TOLERANCES FOR ESTIMATION/EVALUATION STEP:
+ NRD (RELATIVE)  VALUE(S) OF TOLERANCE:   6
+ ANRD (ABSOLUTE) VALUE(S) OF TOLERANCE:  10   ← user's $EST ATOL=10
+
+TOLERANCES FOR COVARIANCE STEP:
+ NRD (RELATIVE)  VALUE(S) OF TOLERANCE:   6
+ ANRD (ABSOLUTE) VALUE(S) OF TOLERANCE:  10   ← inherits from $EST!
+```
+
+XML side: `nm:atol='10'` on the `<nm:estimation_options/>`, `nm:cov_atol='-1'` on
+`<nm:problem_options/>`.
+
+**Outcome.** Propagation is **real** — the binary actually uses $EST's value for $COV
+when `cov_atol='-1'`. This validates the v0.0.177 propagated-tier semantic:
+
+- Yellow flag fires only when `cov_*='-1'` AND the $EST sibling is itself non-default.
+  Justified — there is a real user-customised value being inherited that the user can
+  go look at.
+- Yellow flag does NOT fire when $EST is also at default. Correct — the effective $COV
+  value is just the built-in default, not a propagated user choice.
+
+**Subtle empirical**: NM emits `nm:atol='0'` on `<nm:estimation_options/>` for the
+bare-$EST default. The actual base ANRD is 12 (per the BASE TOLERANCE SETTINGS line).
+So `atol='0'` is itself a "user didn't set" sentinel at the $EST level, distinct from
+"user wrote ATOL=0". Visually the inspector treats it as default; semantically it
+means the built-in 12 is in effect. This matters only if a user really did write
+`ATOL=0` on $EST — they'd see no highlight in the inspector even though they
+customised. We'd need to read the .lst BASE/EST trace to disambiguate, which we don't
+do today. Logging as a known limitation.
+
+**How to apply.**
+
+- `runtime/xml-cov-defaults.ts` cross-references the LAST `$EST` step's `findNonDefaultKeys`
+  to gate the propagated tier.
+- `tol`/`posdef` excluded from PROPAGATION_SOURCES (different inheritance chains —
+  $SUBROUTINES-direct and method-determined respectively).
+- Re-probe when host upgrades to NM 7.7+; inheritance behavior could shift.
+
+Verified 2026-05-09 against NONMEM 7.6.0 on Linux via the probe above.
+
+### Binary-symbol-table corroboration (NONMEM 7.6.0)
+
+**Probe.** `nm /opt/nm760/run/nonmem | grep cmnm1_int_MOD_` to enumerate the
+`cmnm1_int` Fortran module's variables.
+
+**Outcome.** Paired `$EST`/`$COV` variables exist as separate Fortran storage:
+
+```
+__cmnm1_int_MOD_sigl       __cmnm1_int_MOD_siglcov
+__cmnm1_int_MOD_siglo      __cmnm1_int_MOD_siglocov
+__cmnm1_int_MOD_tol        __cmnm1_int_MOD_tolcov
+__cmnm1_int_MOD_atol       __cmnm1_int_MOD_atolcov
+```
+
+The binary stores estimation-step and covariance-step tolerance/precision values
+separately. The XML emits the user-input layer (`cov_atol='-1'` = "user didn't set on
+$COV") and the binary internally computes `atolcov := atol` (i.e. inherits) when
+`cov_atol` was not user-set. Same pattern as IMPMAP's `mapinter`/`emapinter` split
+documented in the $EST defaults section above.
+
+**Implication for our tiering.** Yellow propagated correctly captures "the runtime
+$COV value comes from $EST" — when the user reads the inspector, they need to look
+at $EST's value to know the effective $COV setting. The .lst trace
+(`TOLERANCES FOR COVARIANCE STEP: ANRD: 10`) confirms this is what's actually
+applied at runtime.

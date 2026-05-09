@@ -16,6 +16,17 @@ export async function pathExists(p: string): Promise<boolean> {
 }
 
 /**
+ * Last directory segment of a path's parent — i.e. `path.basename(path.dirname(p))`.
+ * Used as a disambiguator in the lineage view (showing `step1/run1` vs
+ * `step2/run1` rather than just `run1`) and in QuickPick descriptions
+ * (`<parent-dir> · OFV = …`). Returns an empty string when the parent
+ * is a filesystem root (`/`, `C:\`).
+ */
+export function parentDirName(p: string): string {
+  return path.basename(path.dirname(p));
+}
+
+/**
  * Locate `<dir>/<stem>.<ext>` for the first ext in `exts` that exists.
  * Cheap path first (exact-case `path.join` + `pathExists`); falls
  * back to a case-insensitive directory scan if none of the cheap

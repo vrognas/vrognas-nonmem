@@ -17,6 +17,10 @@ export const COMMAND = {
   promoteEstimates: 'positronNonmem.promoteEstimates',
   /** Toolbar icon on the Runs view — opens the lineage WebView panel. */
   showLineage: 'positronNonmem.showLineage',
+  /** Right-click on a running Active Runs entry — sends `next.sig` (advance to next $EST mode). */
+  signalEndMode: 'positronNonmem.signalEndMode',
+  /** Right-click on a running Active Runs entry — sends `stop.sig` (skip remaining $EST, run $COV, finish). */
+  signalStopRun: 'positronNonmem.signalStopRun',
 } as const;
 
 /** Tree-view IDs used in package.json `contributes.views`. */

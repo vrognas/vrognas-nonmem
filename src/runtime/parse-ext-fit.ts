@@ -9,8 +9,13 @@
 //             1   ...
 //    -1000000000  <final estimates>                          ← we want this
 //    -1000000001  <standard errors>                          ← and this
-//    -1000000002  <covariance values>                        (skipped)
-//    -1000000003+ <other diagnostic rows>                    (skipped)
+//    -1000000002  <eigenvalues of correlation matrix>        (skipped — .lst has them)
+//    -1000000003  <condition number + eigen bounds>          (skipped — sumo has it)
+//    -1000000004  <OMEGA/SIGMA in SD/correlation form>       ← stdcorr finals
+//    -1000000005  <SE matched to -1000000004>                ← stdcorr SEs
+//    -1000000006  <FIX flags: 1=fixed, 0=estimated>          ← authoritative FIX
+//    -1000000007  <termination codes per $EST>               ← term-status codes
+//    -1000000008  <partial derivatives>                      (skipped)
 //
 // Header column names are kept verbatim for OMEGA/SIGMA (`OMEGA(1,1)`,
 // `OMEGA(2,1)`, …) and rewritten for THETA: NONMEM emits `THETA1`
@@ -24,6 +29,10 @@
 
 const FINAL_SENTINEL = -1000000000;
 const SE_SENTINEL = -1000000001;
+const FINAL_STDCORR_SENTINEL = -1000000004;
+const SE_STDCORR_SENTINEL = -1000000005;
+const FIX_FLAGS_SENTINEL = -1000000006;
+const TERM_CODES_SENTINEL = -1000000007;
 const INIT_ITER = 0;
 
 export interface ExtEstimates {
@@ -42,6 +51,41 @@ export interface ExtEstimates {
   finals: Map<string, number>;
   /** access_key → standard error. Empty when `$COV` step didn't run or failed. */
   standardErrors: Map<string, number>;
+  /**
+   * Authoritative SD / correlation form from NONMEM's `-1000000004` row:
+   * diagonal `OMEGA(i,i)` is the SD √variance; off-diagonal `OMEGA(i,j)`
+   * is the correlation. THETA columns pass through unchanged. Empty when
+   * NONMEM didn't emit the row (older versions / aborted run). Replaces
+   * the inspector's derived `Math.sqrt` / `cov / √(vᵢvⱼ)` math when
+   * present — NONMEM does the propagation itself.
+   */
+  finalsStdcorr: Map<string, number>;
+  /**
+   * SEs matched to `finalsStdcorr` from the `-1000000005` row. NONMEM has
+   * already done the delta-method propagation here, so these are more
+   * accurate than the `cvse / 2` Taylor approximation sumo uses. Empty
+   * when row absent or all values zero (no $COV, same drop rule as
+   * `standardErrors`).
+   */
+  standardErrorsStdcorr: Map<string, number>;
+  /**
+   * Per-parameter FIX flags from the `-1000000006` row (1 = fixed,
+   * 0 = estimated). Authoritative direct-from-NONMEM source; inspector
+   * falls back to vscode-nmtran's parsed-model `fix` field when this
+   * row isn't present. Empty when row absent.
+   */
+  fixedFlags: Map<string, boolean>;
+  /**
+   * Termination status codes from the `-1000000007` row, one per `$EST`
+   * step. NONMEM 7 codes (per Bauer's user guide):
+   *   0 = successful, 1 = rounding errors, 2 = max iterations,
+   *   3 = boundary, 4 = computational issue (NaN), 5 = user interrupt,
+   *   higher = covariance / other failures.
+   * Empty when row absent. The inspector still string-matches the .lst's
+   * "MINIMIZATION SUCCESSFUL/TERMINATED" phrase for the human-readable
+   * label; this array is the machine-readable supplement.
+   */
+  terminationCodes: number[];
 }
 
 /**
@@ -54,6 +98,10 @@ export function parseExtFit(extText: string): ExtEstimates | null {
   let initRow: string[] | null = null;
   let finalRow: string[] | null = null;
   let seRow: string[] | null = null;
+  let stdcorrFinalRow: string[] | null = null;
+  let stdcorrSeRow: string[] | null = null;
+  let fixFlagsRow: string[] | null = null;
+  let termCodesRow: string[] | null = null;
 
   for (const rawLine of extText.split(/\r?\n/)) {
     const line = rawLine.trim();
@@ -61,9 +109,18 @@ export function parseExtFit(extText: string): ExtEstimates | null {
     const tokens = line.split(/\s+/);
     if (tokens[0] === 'TABLE') {
       // Multi-$EST: each $EST emits its own TABLE / iteration block.
-      // Reset initRow on each new TABLE so the LAST table's iteration-0
-      // row wins (matches the "last $EST step" rule we use for finals).
+      // Reset ALL captured rows on each new TABLE so the LAST table's
+      // values win (matches the "last $EST step" rule we use throughout).
+      // Without this, an earlier step that emitted e.g. `-1000000004`
+      // (stdcorr) but a later step that didn't would leak the earlier
+      // step's stdcorr forward as if it were the final-step's result.
       initRow = null;
+      finalRow = null;
+      seRow = null;
+      stdcorrFinalRow = null;
+      stdcorrSeRow = null;
+      fixFlagsRow = null;
+      termCodesRow = null;
       continue;
     }
     if (tokens[0] === 'ITERATION') {
@@ -73,8 +130,12 @@ export function parseExtFit(extText: string): ExtEstimates | null {
     const iter = Number(tokens[0]);
     if (!Number.isFinite(iter)) continue;
     if (iter === INIT_ITER && initRow === null) initRow = tokens;
-    if (iter === FINAL_SENTINEL) finalRow = tokens;
+    else if (iter === FINAL_SENTINEL) finalRow = tokens;
     else if (iter === SE_SENTINEL) seRow = tokens;
+    else if (iter === FINAL_STDCORR_SENTINEL) stdcorrFinalRow = tokens;
+    else if (iter === SE_STDCORR_SENTINEL) stdcorrSeRow = tokens;
+    else if (iter === FIX_FLAGS_SENTINEL) fixFlagsRow = tokens;
+    else if (iter === TERM_CODES_SENTINEL) termCodesRow = tokens;
   }
 
   if (!header || !finalRow) return null;
@@ -87,18 +148,58 @@ export function parseExtFit(extText: string): ExtEstimates | null {
   const inits = initRow ? pickRow(header, initRow) : new Map<string, number>();
   inits.delete('OBJ');
 
-  let standardErrors = new Map<string, number>();
-  if (seRow) {
-    const ses = pickRow(header, seRow);
-    ses.delete('OBJ');
-    // Drop the row entirely when every value is zero — that's NONMEM's
-    // "no $COV ran" placeholder, not a real SE.
-    if ([...ses.values()].some((v) => v !== 0)) {
-      standardErrors = ses;
-    }
+  const standardErrors = pickSeRow(header, seRow);
+  const finalsStdcorr = stdcorrFinalRow
+    ? withoutObj(pickRow(header, stdcorrFinalRow))
+    : new Map<string, number>();
+  const standardErrorsStdcorr = pickSeRow(header, stdcorrSeRow);
+
+  const fixedFlags = new Map<string, boolean>();
+  if (fixFlagsRow) {
+    const flags = pickRow(header, fixFlagsRow);
+    flags.delete('OBJ');
+    for (const [name, v] of flags) fixedFlags.set(name, v === 1);
   }
 
-  return { ofv, inits, finals, standardErrors };
+  // -1000000007: one numeric column per $EST step's termination code.
+  // Skip the leading sentinel token (column 0) — same as other rows —
+  // and tolerate non-numeric / NaN tokens (older NONMEM 7 builds emit
+  // garbage in unused columns).
+  let terminationCodes: number[] = [];
+  if (termCodesRow) {
+    terminationCodes = termCodesRow
+      .slice(1)
+      .map(Number)
+      .filter((v) => Number.isFinite(v) && Number.isInteger(v) && v >= 0);
+  }
+
+  return {
+    ofv,
+    inits,
+    finals,
+    standardErrors,
+    finalsStdcorr,
+    standardErrorsStdcorr,
+    fixedFlags,
+    terminationCodes,
+  };
+}
+
+/**
+ * Drop the `OBJ` column and the all-zero "no $COV" placeholder. Shared
+ * by `-1000000001` (variance-form SE) and `-1000000005` (SD/corr-form SE)
+ * — same drop rule applies: NONMEM emits a zero-row when COV didn't run.
+ */
+function pickSeRow(header: string[] | null, seRow: string[] | null): Map<string, number> {
+  if (!header || !seRow) return new Map();
+  const ses = pickRow(header, seRow);
+  ses.delete('OBJ');
+  return [...ses.values()].some((v) => v !== 0) ? ses : new Map();
+}
+
+function withoutObj(map: Map<string, number>): Map<string, number> {
+  map.delete('OBJ');
+  return map;
 }
 
 /**

@@ -144,6 +144,31 @@ describe('parseLst — diagnostics fields', () => {
     expect(r.eigenvalues[2]).toBeCloseTo(1.098, 3);
   });
 
+  it('derives conditionNumber as max/min eigenvalue ratio when all eigvals positive', () => {
+    // NONMEM-direct condition number for the COR matrix of estimate.
+    // Pharmacometric thresholds: >100 ill-conditioning, >1000 strong red flag.
+    // Used as a fall-back when sumo's parsed value is unavailable.
+    const r = parseLst(FOCE_FULL_DIAGNOSTICS);
+    expect(r.conditionNumber).toBeCloseTo(1.098 / 0.9001, 3);
+  });
+
+  it('conditionNumber is null when any eigenvalue is non-positive (COR not PD)', () => {
+    const text = `
+ EIGENVALUES OF COR MATRIX OF ESTIMATE
+
+            1         2         3
+
+        -1.0000E+00  2.0000E+00  4.0000E+00
+`;
+    const r = parseLst(text);
+    expect(r.eigenvalues).toHaveLength(3);
+    expect(r.conditionNumber).toBeNull();
+  });
+
+  it('conditionNumber is null when no eigenvalues block (no $COV ran)', () => {
+    expect(parseLst('').conditionNumber).toBeNull();
+  });
+
   it('captures ETABAR continuation lines (NONMEM wraps when N_ETAs > ~6)', () => {
     // Real-world fixture from a 9-ETA model — ETABAR/SE/PVAL each
     // span two lines; ETASHRINKSD likewise. Whitespace alignment is
@@ -247,6 +272,190 @@ describe('parseLst — diagnostics fields', () => {
     expect(r.numSigDigPerParam[14]).toBeCloseTo(8.8, 2);
   });
 
+  it('extracts #OBJV / #CPUT / #PARA machine-tags (NM7 Bauer markers)', () => {
+    const text = `
+ #METH: First Order Conditional Estimation
+ #PARA: PARAFILE 4 nodes
+ #OBJV:********************************************    -638.7950       *
+ #CPUT:    35.42
+ #TERE:
+`;
+    const r = parseLst(text);
+    expect(r.objv).toBeCloseTo(-638.795, 3);
+    expect(r.cput).toBeCloseTo(35.42, 2);
+    expect(r.paraNodes).toBe(4);
+  });
+
+  it('counts RESET HESSIAN occurrences and captures DIAGONAL SHIFT magnitude', () => {
+    // RESET HESSIAN ⇒ optimiser had to abandon and rebuild the Hessian.
+    // DIAGONAL SHIFT ⇒ NONMEM forced PD by adding to the diagonal.
+    // Both are convergence-quality signals that aren't in sumo.
+    const text = `
+ #METH: FOCE
+ RESET HESSIAN, TYPE I
+ ITERATION NO.:  100
+ RESET HESSIAN, TYPE II
+ DIAGONAL SHIFT OF 1.000E-04 WAS IMPOSED TO ENSURE POSITIVE DEFINITENESS
+ DIAGONAL SHIFT OF 5.000E-04 WAS IMPOSED TO ENSURE POSITIVE DEFINITENESS
+ RESET HESSIAN, TYPE I
+ #TERE:
+`;
+    const r = parseLst(text);
+    expect(r.hessianResets).toBe(3);
+    // Last shift wins (5e-4, not 1e-4).
+    expect(r.diagonalShift).toBeCloseTo(0.0005, 7);
+  });
+
+  it('classifies "OPTIMIZATION WAS NOT TESTED FOR CONVERGENCE" as a third NOT_TESTED state', () => {
+    // Empirically observed in run002.lst (ITS) and run003.lst (IMP) —
+    // the run completed but NONMEM didn't run a convergence test, so
+    // it's neither SUCCESSFUL nor TERMINATED.
+    const text = `
+ #METH: Iterative Two Stage
+ #TERM:
+ OPTIMIZATION WAS NOT TESTED FOR CONVERGENCE
+ #TERE:
+`;
+    const r = parseLst(text);
+    expect(r.termination).toBe('NOT_TESTED');
+    expect(r.terminationPhrase).toBe('OPTIMIZATION WAS NOT TESTED FOR CONVERGENCE');
+  });
+
+  it('extracts EBVSHRINKSD(%) and EBVSHRINKVR(%) (in .lst directly across all methods)', () => {
+    // Empirically: every method probed (FOCEI / ITS / IMP / SAEM /
+    // BAYES) emits these rows. They're distinct from ETASHRINKSD —
+    // EBV shrinkage is shrinkage of the variance of empirical-Bayes
+    // estimates.
+    const text = `
+ #METH: FOCE
+ ETASHRINKSD(%)  2.0E+00  4.0E+00
+ ETASHRINKVR(%)  4.0E+00  8.0E+00
+ EBVSHRINKSD(%)  1.5E+00  3.0E+00
+ EBVSHRINKVR(%)  3.0E+00  6.0E+00
+ EPSSHRINKSD(%)  3.5E+00
+`;
+    const r = parseLst(text);
+    expect(r.ebvShrinkSd).toEqual([1.5, 3.0]);
+    expect(r.ebvShrinkVr).toEqual([3.0, 6.0]);
+  });
+
+  it('captures the RSE-matrix tag from STANDARD ERROR / EIGENVALUES headers (LAST occurrence wins)', () => {
+    // run004 (SAEM → IMP chain) shows BOTH (S) and (RSR) headers; we
+    // take the LAST one, which corresponds to the final $EST step.
+    // Empirically observed in the per-method probe set.
+    const text = `
+ ********************    STANDARD ERROR OF ESTIMATE (S)         ********************
+ ...
+ ********************    STANDARD ERROR OF ESTIMATE (RSR)       ********************
+`;
+    expect(parseLst(text).rseMatrix).toBe('RSR');
+  });
+
+  it('falls back to EIGENVALUES tag when no STANDARD ERROR header exists (e.g. BAYES)', () => {
+    // run005 (BAYES) emitted only "EIGENVALUES OF COR MATRIX OF ESTIMATE
+    // (From Sample Variance)" — no separate SE header. The fallback
+    // captures the tag anyway so the inspector knows the SEs come from
+    // posterior sample variance, not Wald.
+    const text = `
+ ********************    EIGENVALUES OF COR MATRIX OF ESTIMATE (From Sample Variance)    ********************
+`;
+    expect(parseLst(text).rseMatrix).toBe('From Sample Variance');
+  });
+
+  it('extracts the user-requested NSIG target from "NO. OF SIG. FIGURES REQUIRED:"', () => {
+    // `$EST NSIG=N` (alias `SIGDIGITS=N`) is echoed by NONMEM in the
+    // estimation-options block; we use it as the per-parameter NUMSIGDIG
+    // red-threshold (params below this didn't reach the user's bar).
+    // Empirically observed in run002.lst as `NO. OF SIG. FIGURES REQUIRED: 3`.
+    const text = `
+ #METH: First Order Conditional Estimation with Interaction
+ NO. OF SIG. FIGURES REQUIRED:            3
+ #TERE:
+`;
+    expect(parseLst(text).nsigRequired).toBe(3);
+  });
+
+  it('detects $DESIGN in the echoed control stream (NM75+ optimal-design FIM)', () => {
+    const text = `
+$PROBLEM design eval
+$DESIGN APPROX=FOCEI MODE=1 NELDER FIMDIAG=0
+$THETA 1
+`;
+    const r = parseLst(text);
+    expect(r.hasDesign).toBe(true);
+  });
+
+  it('captures which COV-step matrix went singular (R vs S — separate banners)', () => {
+    // Empirically observed:
+    //   - run001 / run006 ($COV MATRIX=R, default): R singular
+    //   - run007 ($COV MATRIX=S):                    S singular
+    const rText = `
+ #METH: FOCE
+ #TERM:
+ 0MINIMIZATION SUCCESSFUL
+ 0R MATRIX ALGORITHMICALLY SINGULAR
+ 0R MATRIX IS OUTPUT
+ #TERE:
+`;
+    const sText = `
+ #METH: FOCE
+ #TERM:
+ 0MINIMIZATION SUCCESSFUL
+ 0S MATRIX ALGORITHMICALLY SINGULAR
+ 0COVARIANCE MATRIX UNOBTAINABLE
+ #TERE:
+`;
+    expect(parseLst(rText).covMatrixSingular).toBe('R');
+    // SUCCESSFUL still wins for `termination` — the optimisation worked,
+    // it's the COV step that failed. Two independent signals.
+    expect(parseLst(rText).termination).toBe('SUCCESSFUL');
+    expect(parseLst(sText).covMatrixSingular).toBe('S');
+  });
+
+  it('extracts the LAST iteration GRADIENT row (with continuation lines)', () => {
+    // MONITORING OF SEARCH emits per-iteration GRADIENT: rows. The
+    // last one is the final-iteration gradient — should be near zero
+    // at a true minimum.
+    const text = `
+ #METH: FOCE
+ MONITORING OF SEARCH:
+
+ ITERATION NO.:    1   OBJ:   1.234E+02
+  GRADIENT:        1.0E+00  2.0E+00  3.0E+00
+
+ ITERATION NO.:   42   OBJ:   -6.4E+02
+  GRADIENT:       -1.2E-04  3.4E-05  5.6E-06  7.8E-07
+                   8.9E-08
+
+ #TERE:
+`;
+    const r = parseLst(text);
+    expect(r.finalGradient).toHaveLength(5);
+    expect(r.finalGradient[0]).toBeCloseTo(-0.00012, 7);
+    expect(r.finalGradient[3]).toBeCloseTo(7.8e-7, 12);
+    expect(r.finalGradient[4]).toBeCloseTo(8.9e-8, 13);
+  });
+
+  it('shortMethodLabel handles `(Evaluation)` suffix from MAXEVAL=0 runs', () => {
+    expect(shortMethodLabel('First Order (Evaluation)')).toBe('FO-eval');
+    expect(shortMethodLabel('First Order Conditional Estimation with Interaction (Evaluation)')).toBe('FOCE-INTER-eval');
+    expect(shortMethodLabel('Stochastic Approximation Expectation-Maximization (Evaluation)')).toBe('SAEM-eval');
+    // No suffix when the (Evaluation) tag is absent:
+    expect(shortMethodLabel('First Order')).toBe('FO');
+    expect(shortMethodLabel('First Order Conditional Estimation')).toBe('FOCE');
+  });
+
+  it('shortMethodLabel preserves case in unknown-method fallback (no asymmetric lowercase)', () => {
+    // Future-proofing: any NM76+ method we haven't taught patterns
+    // for still gets the `-eval` suffix when MAXEVAL=0, AND keeps the
+    // original mixed-case (no surprise `monte carlo em-eval` surfaces).
+    expect(shortMethodLabel('Monte Carlo EM (Evaluation)')).toBe('Monte Carlo EM-eval');
+    expect(shortMethodLabel('Monte Carlo EM')).toBe('Monte Carlo EM');
+    // Multi-space inside the name collapsed (avoid weird whitespace
+    // landing in the badge):
+    expect(shortMethodLabel('Hybrid   Method (Evaluation)')).toBe('Hybrid Method-eval');
+  });
+
   it('returns empty arrays / null when the lst lacks diagnostic blocks (run failed early)', () => {
     const r = parseLst('NM-TRAN MESSAGES\n\n  WARNINGS AND ERRORS\n');
     expect(r.termination).toBeNull();
@@ -257,6 +466,18 @@ describe('parseLst — diagnostics fields', () => {
     expect(r.epsShrinkSd).toEqual([]);
     expect(r.eigenvalues).toEqual([]);
     expect(r.acceptanceRate).toBeNull();
+    expect(r.objv).toBeNull();
+    expect(r.cput).toBeNull();
+    expect(r.paraNodes).toBeNull();
+    expect(r.finalGradient).toEqual([]);
+    expect(r.hessianResets).toBe(0);
+    expect(r.diagonalShift).toBeNull();
+    expect(r.ebvShrinkSd).toEqual([]);
+    expect(r.ebvShrinkVr).toEqual([]);
+    expect(r.covMatrixSingular).toBeNull();
+    expect(r.rseMatrix).toBeNull();
+    expect(r.hasDesign).toBe(false);
+    expect(r.nsigRequired).toBeNull();
     expect(r.numSigDigPerParam).toEqual([]);
   });
 });

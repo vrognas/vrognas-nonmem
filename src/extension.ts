@@ -10,7 +10,13 @@ import { LocalRunner } from './runner';
 import { scrubPrivate } from './scrub';
 import { findLatestModelfitDir, runModel } from './runtime/run-model';
 import { computeNextModelName, promoteEstimates } from './runtime/promote-estimates';
-import { resolveVariablesContext, type VariablesContext } from './views/variables-context';
+import { countEstimationRecords } from './runtime/count-estimation-records';
+import { sendSignal, type SignalName } from './runtime/signal-dispatch';
+import {
+  resolveContextForLstUri,
+  resolveVariablesContext,
+  type VariablesContext,
+} from './views/variables-context';
 import { ActiveRunsWatcher } from './runtime/active-runs-watcher';
 import { NonmemRuntimeManager } from './runtime/runtime-manager';
 import {
@@ -47,11 +53,29 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand(COMMAND.promoteEstimates, promoteEstimatesCommand),
   );
   context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND.signalEndMode, signalEndModeCommand),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand(COMMAND.signalStopRun, signalStopRunCommand),
+  );
+  context.subscriptions.push(
     vscode.commands.registerCommand(COMMAND.showLineage, () =>
       LineagePanel.showOrFocus(
         context.extensionUri,
         (msg) => outputChannel?.appendLine(`[positron-nonmem] ${msg}`),
         runner,
+        // Click-on-node → push Fit Inspector for that .lst directly,
+        // without opening any editor (no tab, focus stays on the
+        // lineage view). Reuses the existing resolveLstMode flow via
+        // its public wrapper, then pipes through the same pushVariables
+        // path the active-editor watcher uses.
+        async (lstPath: string) => {
+          const ctx = await resolveContextForLstUri(vscode.Uri.file(lstPath), {
+            log: logVars,
+            runner,
+          });
+          if (ctx) pushVariables(ctx);
+        },
       ),
     ),
   );
@@ -96,7 +120,7 @@ function pushVariables(ctx: VariablesContext | null): void {
     }
   }
   if (fitInspector) {
-    const cfg = vscode.workspace.getConfiguration('positronNonmem');
+    const cfg = vscode.workspace.getConfiguration('nonmem');
     const payload = buildInspectorPayload(ctx?.model ?? null, {
       lstPath: ctx?.lstPath,
       fit: ctx?.fit,
@@ -104,7 +128,21 @@ function pushVariables(ctx: VariablesContext | null): void {
       lst: ctx?.lst,
       runrecord: ctx?.runrecord,
       prderr: ctx?.prderr,
+      fmsg: ctx?.fmsg,
+      cor: ctx?.cor,
+      cnv: ctx?.cnv,
+      trajectories: ctx?.trajectories,
+      xmlEstimationOptions: ctx?.xmlEstimationOptions,
+      xmlEstimationResults: ctx?.xmlEstimationResults,
+      xmlCovarianceOptions: ctx?.xmlCovarianceOptions,
       shrinkageWarnPct: cfg.get<number>('shrinkageWarnPct', 30),
+      rseWarnPct: cfg.get<number>('rseWarnPct', 100),
+      rseThetaWarnPct: cfg.get<number>('rseThetaWarnPct', 30),
+      rseOmegaWarnPct: cfg.get<number>('rseOmegaWarnPct', 50),
+      pValWarnThreshold: cfg.get<number>('pValWarnThreshold', 0.1),
+      pValBadThreshold: cfg.get<number>('pValBadThreshold', 0.05),
+      corrRedFlagThreshold: cfg.get<number>('corrRedFlagThreshold', 0.95),
+      corrWarnThreshold: cfg.get<number>('corrWarnThreshold', 0.9),
     });
     fitInspector.update(payload, ctx?.modUri);
   }
@@ -261,12 +299,9 @@ function registerActiveRunsTree(
   channel: vscode.OutputChannel,
 ): void {
   const provider = new ActiveRunsTreeProvider(activeRunsTracker);
-  const cfg = vscode.workspace.getConfiguration('positronNonmem');
-  const staleTimeoutMin = cfg.get<number>('staleRunTimeoutMinutes', 1440);
   const watcher = new ActiveRunsWatcher({
     tracker: activeRunsTracker,
     log: (msg: string) => channel.appendLine(`[positron-nonmem] ${msg}`),
-    staleTimeoutMs: Math.max(0, staleTimeoutMin) * 60_000,
   });
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider(VIEW_ID.activeRuns, provider),
@@ -451,6 +486,102 @@ async function promoteEstimatesCommand(arg?: ActiveRun): Promise<void> {
     const msg = scrubPrivate(errMsg(e));
     log(`promoteEstimates: failed — ${msg}`);
     await vscode.window.showErrorMessage(`Positron NONMEM: ${msg}`);
+  }
+}
+
+/**
+ * Right-click handler for "End current EM mode (next.sig)" on a running
+ * Active Run. Sends `next.sig` to nmfe76's cwd (`<modelfitDir>/NM_run1/`).
+ * NONMEM consumes the file at the next PRINT cycle and advances to the
+ * next mode (burn-in -> accumulation, or one $EST -> the next).
+ *
+ * Empirical UX latency: ~10 iterations / 1 PRINT cycle (see
+ * docs/empirical-notes.md). No confirmation modal — `next.sig` is
+ * non-destructive.
+ */
+async function signalEndModeCommand(arg?: ActiveRun): Promise<void> {
+  await sendSignalCommand(arg, 'next.sig', null);
+}
+
+/**
+ * Right-click handler for "Stop run cleanly (stop.sig)". Thin wrapper —
+ * the multi-`$EST`-warning + signal dispatch live in `sendSignalCommand`
+ * keyed off the signal name (only `stop.sig` gates on chain length).
+ */
+async function signalStopRunCommand(arg?: ActiveRun): Promise<void> {
+  await sendSignalCommand(arg, 'stop.sig', null);
+}
+
+/**
+ * Shared body for both signal commands. Validates the arg, builds the
+ * `stop.sig`-only multi-`$EST` warning if needed, calls `sendSignal`,
+ * surfaces success/failure as a toast + Output channel line.
+ */
+async function sendSignalCommand(
+  arg: ActiveRun | undefined,
+  signal: SignalName,
+  warningMessageOverride: string | null,
+): Promise<void> {
+  if (!arg || typeof arg !== 'object' || typeof arg.modelPath !== 'string') {
+    await vscode.window.showInformationMessage(
+      `Positron NONMEM: right-click a running entry in the Active Runs view to send ${signal}.`,
+    );
+    return;
+  }
+  if (arg.state !== 'running') {
+    await vscode.window.showWarningMessage(
+      `Positron NONMEM: can't send ${signal} to a ${arg.state} run — signal files only matter while NONMEM is iterating.`,
+    );
+    return;
+  }
+  if (!arg.modelfitDir) {
+    await vscode.window.showWarningMessage(
+      `Positron NONMEM: no modelfit_dir located yet for this run — wait for nmfe76 to start iterating, then retry.`,
+    );
+    return;
+  }
+
+  // stop.sig only: warn when the model has chained $EST records
+  // (the IMP-EONLY refinement caveat). Read failures degrade silently
+  // — the user explicitly asked for the signal, so we send it.
+  let warningMessage = warningMessageOverride;
+  if (signal === 'stop.sig' && warningMessage === null) {
+    try {
+      const text = await fs.readFile(arg.modelPath, 'utf8');
+      const estCount = countEstimationRecords(text);
+      if (estCount > 1) {
+        warningMessage =
+          `Stops at the current $EST. Remaining steps in the chain (${estCount - 1}) will be skipped — ` +
+          `use "End current EM mode" to advance through them instead.`;
+      }
+    } catch (e) {
+      log(`${signal}: read ${arg.modelPath} failed (${errMsg(e)}) — proceeding without multi-$EST warning`);
+    }
+  }
+
+  if (warningMessage !== null) {
+    const proceed = await vscode.window.showWarningMessage(
+      warningMessage,
+      { modal: true },
+      `Send ${signal}`,
+    );
+    if (proceed !== `Send ${signal}`) {
+      log(`${signal}: cancelled by user (${path.basename(arg.modelPath)})`);
+      return;
+    }
+  }
+
+  const result = await sendSignal({ modelfitDir: arg.modelfitDir, name: signal });
+  if (result.ok) {
+    log(`${signal}: sent to ${result.path}`);
+    await vscode.window.showInformationMessage(
+      `Positron NONMEM: ${signal} sent. NONMEM reacts at the next PRINT cycle.`,
+    );
+  } else {
+    log(`${signal}: FAILED to write ${result.path} — ${result.error}`);
+    await vscode.window.showErrorMessage(
+      `Positron NONMEM: failed to send ${signal} — ${result.error ?? 'unknown error'}`,
+    );
   }
 }
 

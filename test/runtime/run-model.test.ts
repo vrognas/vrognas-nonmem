@@ -208,7 +208,7 @@ describe('runModel', () => {
     expect(runner.runs[0].command).not.toContain('-nm_version');
   });
 
-  it('passes -nm_output=ext,phi,cov,cor,coi by default so PsN copies the NM7 aux files into modelfit_dirN/', async () => {
+  it('passes -nm_output=ext,phi,cov,cor,coi,xml by default so PsN copies the NM7 aux files into modelfit_dirN/', async () => {
     const modelPath = path.join(tmp, 'm.mod');
     fs.writeFileSync(modelPath, '$PROBLEM x\n');
     fs.writeFileSync(path.join(tmp, 'm.lst'), '');
@@ -216,7 +216,7 @@ describe('runModel', () => {
 
     await runModel(makeOptions({ modelPath, runner }));
 
-    expect(runner.runs[0].command).toContain("-nm_output='ext,phi,cov,cor,coi'");
+    expect(runner.runs[0].command).toContain("-nm_output='ext,phi,cov,cor,coi,xml'");
   });
 
   it('omits -nm_output when nmOutputExtensions is an empty array (caller opts out)', async () => {

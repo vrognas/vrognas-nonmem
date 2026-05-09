@@ -1,33 +1,28 @@
-// Lineage WebView client (Cytoscape renderer).
+// Lineage WebView client (d3-hierarchy + plain SVG renderer).
 //
-// Loaded by `LineagePanel` via a webview-served bundled script. Receives
-// `{ type: 'graph', graph: LineageGraph }` from the extension and
-// renders an interactive cytoscape graph with Keizer 2013 colour
-// semantics:
-//   - node border = parent-edge ΔOFV class (green / red / yellow / gray
-//     / blue-for-roots)
-//   - edge stroke matches the same class
-//   - layout = dagre top-down (parent above, children below)
+// Replaces the prior cytoscape implementation. d3-hierarchy is the
+// canonical tool for parent-child trees: `d3.tree()` runs the
+// Reingold-Tilford algorithm and returns x/y for each node, we render
+// `<g>` per node + `<path>` per edge directly into an SVG sized to
+// the layout extent. Native browser scrollbars work out of the box
+// (SVG-inside-`overflow:auto`); native click + contextmenu on `<g>`
+// elements; CSS variables work directly via the `style` attribute.
+// Bundle is ~10 KB (was 530 KB with cytoscape).
 //
-// Click a node → posts `{ type: 'open', modelPath }` to the extension
-// (handled in `lineage-panel.ts:onMessage`). Refresh button posts
-// `{ type: 'refresh' }`.
+// Wire format unchanged — `LineageGraph` from extension still drives
+// rendering. Receives `{ type: 'graph', graph }` over postMessage.
 //
-// Bundled by esbuild from `webview-src/lineage/client.ts` →
-// `media/lineage/client.js`. The bundle pulls in cytoscape +
-// cytoscape-dagre + dagre.
+// User input:
+//   - left-click a node       → postMessage('open', modelPath)
+//   - right-click a node      → custom HTML ctx menu at cursor
+//   - plain wheel             → wrap.scrollBy (browser pan)
+//   - ctrl/⌘ + wheel          → zoom (scale SVG width/height; native
+//                               scrollbars track the new size)
 
-import cytoscape from 'cytoscape';
-// cytoscape-dagre's CJS shape: registering returns void.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-import dagre from 'cytoscape-dagre';
+import { hierarchy, tree, type HierarchyPointNode } from 'd3-hierarchy';
+import { linkVertical } from 'd3-shape';
 
-cytoscape.use(dagre);
-
-// Wire-format mirror of the extension-side `LineageGraph`. Keep in sync
-// with `src/views/lineage-graph.ts`. Duplicated rather than shared
-// because the WebView runs in a sandboxed iframe and can't import TS
-// modules from the extension.
+// Wire-format mirror — keep in sync with `src/views/lineage-graph.ts`.
 type EdgeColor = 'green' | 'red' | 'yellow' | 'gray';
 interface LineageNode {
   runNumber: number | null;
@@ -37,17 +32,37 @@ interface LineageNode {
   description: string | null;
   label: string | null;
   ofv: number | null;
+  termination: 'SUCCESSFUL' | 'TERMINATED' | null;
+  dataFile: string | null;
+}
+
+interface LineageOption {
+  /** Empty string = "All Runs (workspace)"; named lineages are non-empty. */
+  name: string;
+  label: string;
 }
 interface LineageEdge {
   parentModelPath: string;
   childModelPath: string;
   deltaOfv: number | null;
   color: EdgeColor;
+  /** True iff the edge came from a workspace `lineageOverrides` entry
+   *  rather than a runrecord `;; Based on:` marker. Renders dashed. */
+  viaOverride: boolean;
 }
 interface LineageGraph {
   nodes: LineageNode[];
   edges: LineageEdge[];
   roots: string[];
+  /** See `LineageGraph.unresolvedParentCount` in lineage-graph.ts. */
+  unresolvedParentCount: number;
+}
+
+/** Wire-shape for `lineage-discovery.ts:StaleOverride`. */
+interface StaleOverride {
+  childPath: string;
+  parentPath: string | null;
+  reason: 'child-missing' | 'parent-missing';
 }
 
 interface VsCodeApi {
@@ -57,39 +72,62 @@ interface VsCodeApi {
 }
 declare function acquireVsCodeApi(): VsCodeApi;
 
-// Cytoscape's default canvas renderer doesn't resolve CSS custom
-// properties (`var(...)`) — it expects literal colour strings. Read
-// the resolved values from a probe element at startup, and re-read
-// when the user changes themes (handled by re-render after a
-// `colorSchemeChange`-style fire from VS Code).
-const PROBE_VARS: Record<EdgeColor | 'root' | 'fg' | 'bg', string> = {
-  green: '--vscode-charts-green',
-  yellow: '--vscode-charts-yellow',
-  red: '--vscode-charts-red',
-  gray: '--vscode-descriptionForeground',
-  root: '--vscode-charts-blue',
-  fg: '--vscode-editor-foreground',
-  bg: '--vscode-editor-background',
-};
-
-function resolveColors(): Record<keyof typeof PROBE_VARS, string> {
-  const cs = getComputedStyle(document.body);
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(PROBE_VARS)) {
-    out[k] = cs.getPropertyValue(v).trim() || '#888';
-  }
-  return out as Record<keyof typeof PROBE_VARS, string>;
-}
+// ---- DOM refs -------------------------------------------------------
 
 const vscode = acquireVsCodeApi();
-const containerEl = document.getElementById('cy') as HTMLDivElement | null;
 const wrapEl = document.getElementById('canvas-wrap') as HTMLDivElement | null;
+const containerEl = document.getElementById('cy') as HTMLDivElement | null;
 const emptyEl = document.getElementById('empty') as HTMLDivElement | null;
 const refreshBtn = document.getElementById('refresh') as HTMLButtonElement | null;
 const ctxMenuEl = document.getElementById('ctx-menu') as HTMLDivElement | null;
-if (!containerEl || !wrapEl || !emptyEl || !refreshBtn || !ctxMenuEl) {
+const lineageSelect = document.getElementById('lineage-select') as HTMLSelectElement | null;
+const newLineageBtn = document.getElementById('new-lineage') as HTMLButtonElement | null;
+const iofvPanelEl = document.getElementById('iofv-panel') as HTMLElement | null;
+const iofvBodyEl = document.getElementById('iofv-body') as HTMLDivElement | null;
+const iofvCloseBtn = document.getElementById('iofv-close') as HTMLButtonElement | null;
+const diagnosticsBannerEl = document.getElementById('diagnostics-banner') as HTMLDivElement | null;
+if (
+  !wrapEl ||
+  !containerEl ||
+  !emptyEl ||
+  !refreshBtn ||
+  !ctxMenuEl ||
+  !lineageSelect ||
+  !newLineageBtn ||
+  !iofvPanelEl ||
+  !iofvBodyEl ||
+  !iofvCloseBtn ||
+  !diagnosticsBannerEl
+) {
   throw new Error('lineage client: required DOM nodes missing');
 }
+
+/** True when the user is viewing a curated named lineage. Drives
+ *  context-menu mutation (Add vs Remove "from this lineage"). */
+let inCuratedLineage = false;
+
+// ---- Layout config --------------------------------------------------
+
+const NODE_W = 150;
+const NODE_H = 76;
+/** Horizontal/vertical separation between nodes after d3 layout. */
+const NODE_GAP_X = 30;
+const NODE_GAP_Y = 50;
+const PADDING = 60;
+const MIN_ZOOM = 0.3;
+const MAX_ZOOM = 3;
+const ZOOM_FACTOR = 1.1;
+
+// ---- State ----------------------------------------------------------
+
+interface RenderState {
+  /** SVG natural width/height in user units (matches layout extent + padding). */
+  naturalW: number;
+  naturalH: number;
+  zoom: number;
+  svg: SVGSVGElement;
+}
+let state: RenderState | null = null;
 
 interface CtxMenuState {
   modelPath: string;
@@ -97,11 +135,192 @@ interface CtxMenuState {
 }
 let ctxMenuState: CtxMenuState | null = null;
 
-function showCtxMenu(clientX: number, clientY: number, state: CtxMenuState): void {
-  ctxMenuState = state;
+interface DragState {
+  source: { modelPath: string; basename: string; el: SVGGElement; cx: number; cy: number };
+  downClientX: number;
+  downClientY: number;
+  started: boolean;
+  ghostLine: SVGLineElement | null;
+  dropTarget: SVGGElement | null;
+}
+/** Drag-to-parent state. Starts on mousedown on a node, becomes a real
+ *  drag past `DRAG_THRESHOLD_PX`, ends on mouseup. While `started`, the
+ *  pending click on mouseup is suppressed so the user doesn't open the
+ *  source's .mod by accident. */
+let drag: DragState | null = null;
+const DRAG_THRESHOLD_PX = 5;
+/** Set briefly true after a drag completes so the pending `click`
+ *  event on the source doesn't fire its open-handler. */
+let suppressNextClick = false;
+
+// ---- Tree-data shape we feed to d3.hierarchy ------------------------
+
+interface TreeDatum {
+  node: LineageNode | null;
+  inboundColor: EdgeColor | 'root' | null;
+  inboundDelta: number | null;
+  /** Mirrors `LineageEdge.viaOverride` for the inbound edge; drives
+   *  the dashed-stroke class on the path. */
+  inboundViaOverride: boolean;
+  isSyntheticRoot: boolean;
+  children?: TreeDatum[];
+}
+
+// ---- Bootstrap ------------------------------------------------------
+
+// ---- Side-panel ΔiOFV state ----------------------------------------
+
+interface EdgeIOfvRow {
+  id: number | string;
+  parentIOfv: number;
+  childIOfv: number;
+  deltaIOfv: number;
+}
+interface EdgeIOfvSummary {
+  n: number;
+  totalDelta: number;
+  nImproved: number;
+  nWorsened: number;
+  nIndifferent: number;
+  topImproved: EdgeIOfvRow[];
+  topWorsened: EdgeIOfvRow[];
+}
+
+interface SelectedEdgeState {
+  parentModelPath: string;
+  childModelPath: string;
+  parentBasename: string;
+  childBasename: string;
+  deltaOfv: number | null;
+}
+let selectedEdge: SelectedEdgeState | null = null;
+
+window.addEventListener('message', (ev) => {
+  const msg = ev.data as
+    | {
+        type?: string;
+        graph?: LineageGraph;
+        staleOverrides?: StaleOverride[];
+        lineages?: LineageOption[];
+        currentLineage?: string;
+        // edgeIOfv response
+        parentModelPath?: string;
+        childModelPath?: string;
+        threshold?: number;
+        summary?: EdgeIOfvSummary | null;
+        incomparableReason?: string | null;
+        warning?: string | null;
+      }
+    | undefined;
+  if (!msg) return;
+  if (msg.type === 'graph' && msg.graph) {
+    // Update the dropdown + curated-mode flag before rendering so the
+    // context menu items reflect the right add/remove path.
+    if (msg.lineages) populateLineageSelect(msg.lineages, msg.currentLineage ?? '');
+    inCuratedLineage = (msg.currentLineage ?? '') !== '';
+    updateCtxMenuVisibility();
+    renderDiagnosticsBanner(
+      msg.graph.unresolvedParentCount ?? 0,
+      msg.staleOverrides ?? [],
+    );
+    // Preserve the side-panel selection across refresh when both
+    // endpoints + the edge between them still exist in the new graph.
+    // Re-fetches the ΔiOFV (the underlying .phi may have changed if
+    // the user re-ran one of the endpoints — this is the iterative-
+    // review loop the panel is built for). When the edge is gone
+    // (parent override removed, run deleted), drop the selection.
+    if (selectedEdge) {
+      const freshEdge = msg.graph.edges.find(
+        (e) =>
+          e.parentModelPath === selectedEdge!.parentModelPath &&
+          e.childModelPath === selectedEdge!.childModelPath,
+      );
+      if (!freshEdge) {
+        selectedEdge = null;
+        hideIOfvPanel();
+      } else {
+        selectedEdge.deltaOfv = freshEdge.deltaOfv;
+        showIOfvPanelLoading(selectedEdge);
+        vscode.postMessage({
+          type: 'requestEdgeIOfv',
+          parentModelPath: selectedEdge.parentModelPath,
+          childModelPath: selectedEdge.childModelPath,
+        });
+      }
+    }
+    try {
+      render(msg.graph);
+    } catch (e) {
+      vscode.postMessage({
+        type: 'renderError',
+        message: e instanceof Error ? (e.stack ?? e.message) : String(e),
+      });
+    }
+    return;
+  }
+  if (msg.type === 'edgeIOfv') {
+    // Stale response (user clicked another edge before this one
+    // returned) — ignore. selectedEdge always tracks the freshest click.
+    if (
+      !selectedEdge ||
+      selectedEdge.parentModelPath !== msg.parentModelPath ||
+      selectedEdge.childModelPath !== msg.childModelPath
+    ) {
+      return;
+    }
+    renderIOfvSummary(
+      selectedEdge,
+      msg.threshold ?? 3.84,
+      msg.summary ?? null,
+      msg.incomparableReason ?? null,
+      msg.warning ?? null,
+    );
+  }
+});
+
+iofvCloseBtn.addEventListener('click', () => {
+  selectedEdge = null;
+  hideIOfvPanel();
+});
+
+refreshBtn.addEventListener('click', () => vscode.postMessage({ type: 'refresh' }));
+newLineageBtn.addEventListener('click', () => vscode.postMessage({ type: 'newLineage' }));
+lineageSelect.addEventListener('change', () => {
+  vscode.postMessage({ type: 'selectLineage', lineageName: lineageSelect.value });
+});
+vscode.postMessage({ type: 'ready' });
+
+function populateLineageSelect(opts: LineageOption[], current: string): void {
+  while (lineageSelect!.firstChild) lineageSelect!.removeChild(lineageSelect!.firstChild);
+  for (const o of opts) {
+    const opt = document.createElement('option');
+    opt.value = o.name;
+    opt.textContent = o.label;
+    if (o.name === current) opt.selected = true;
+    lineageSelect!.append(opt);
+  }
+}
+
+/**
+ * Show / hide context-menu items based on the current lineage mode.
+ *   - All Runs (`!inCuratedLineage`): "Add to lineage…" so the user
+ *     can curate a named subset.
+ *   - Curated lineage: "Remove from this lineage" so the user can
+ *     prune the curated set in place.
+ */
+function updateCtxMenuVisibility(): void {
+  const addBtn = ctxMenuEl!.querySelector<HTMLButtonElement>('[data-action="addToLineage"]');
+  const removeBtn = ctxMenuEl!.querySelector<HTMLButtonElement>('[data-action="removeFromLineage"]');
+  if (addBtn) addBtn.hidden = inCuratedLineage;
+  if (removeBtn) removeBtn.hidden = !inCuratedLineage;
+}
+
+// ---- Context menu helpers ------------------------------------------
+
+function showCtxMenu(clientX: number, clientY: number, s: CtxMenuState): void {
+  ctxMenuState = s;
   ctxMenuEl!.hidden = false;
-  // Position. Clamp inside viewport so the menu doesn't get clipped
-  // when right-clicking near the right/bottom edge.
+  // Clamp so the menu doesn't spill past the viewport edges.
   const rect = ctxMenuEl!.getBoundingClientRect();
   const maxX = window.innerWidth - rect.width - 4;
   const maxY = window.innerHeight - rect.height - 4;
@@ -118,7 +337,14 @@ ctxMenuEl.addEventListener('click', (ev) => {
   const target = ev.target;
   if (!(target instanceof HTMLButtonElement) || !ctxMenuState) return;
   const action = target.dataset.action;
-  if (action === 'open' || action === 'promote') {
+  if (
+    action === 'open' ||
+    action === 'promote' ||
+    action === 'setParent' ||
+    action === 'createRelation' ||
+    action === 'addToLineage' ||
+    action === 'removeFromLineage'
+  ) {
     vscode.postMessage({
       type: 'nodeAction',
       action,
@@ -129,237 +355,620 @@ ctxMenuEl.addEventListener('click', (ev) => {
   hideCtxMenu();
 });
 
-// Dismiss on outside click / Escape / scroll. Without this the menu
-// can hang around after the user navigates elsewhere.
 document.addEventListener('click', (ev) => {
   if (!ctxMenuEl!.hidden && !ctxMenuEl!.contains(ev.target as Node)) hideCtxMenu();
 });
 document.addEventListener('keydown', (ev) => {
-  if (ev.key === 'Escape') hideCtxMenu();
-});
-wrapEl.addEventListener('scroll', hideCtxMenu);
-// Block the browser's native context menu so our custom one is the
-// only thing that appears on right-click within the canvas.
-wrapEl.addEventListener('contextmenu', (ev) => ev.preventDefault());
-
-let cy: cytoscape.Core | null = null;
-
-window.addEventListener('message', (ev: MessageEvent) => {
-  const msg = ev.data as { type?: string; graph?: LineageGraph } | undefined;
-  if (!msg || msg.type !== 'graph' || !msg.graph) return;
-  try {
-    render(msg.graph);
-  } catch (e) {
-    vscode.postMessage({
-      type: 'renderError',
-      message: e instanceof Error ? (e.stack ?? e.message) : String(e),
-    });
+  if (ev.key === 'Escape') {
+    hideCtxMenu();
+    cancelDrag();
   }
 });
 
-refreshBtn.addEventListener('click', () => vscode.postMessage({ type: 'refresh' }));
+// ---- Drag-to-parent --------------------------------------------------
 
-vscode.postMessage({ type: 'ready' });
+document.addEventListener('mousemove', onDragMove);
+document.addEventListener('mouseup', onDragEnd);
+
+function onDragMove(ev: MouseEvent): void {
+  if (!drag || !state) return;
+  if (!drag.started) {
+    const dx = ev.clientX - drag.downClientX;
+    const dy = ev.clientY - drag.downClientY;
+    if (Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
+    // Promote to a real drag: visual cues + ghost line.
+    drag.started = true;
+    drag.source.el.classList.add('dragging');
+    drag.ghostLine = makeGhostLine();
+    state.svg.appendChild(drag.ghostLine);
+  }
+  const pt = clientToSvgPoint(ev.clientX, ev.clientY);
+  if (drag.ghostLine) {
+    drag.ghostLine.setAttribute('x1', String(drag.source.cx));
+    drag.ghostLine.setAttribute('y1', String(drag.source.cy));
+    drag.ghostLine.setAttribute('x2', String(pt.x));
+    drag.ghostLine.setAttribute('y2', String(pt.y));
+  }
+  // Update drop target highlight.
+  const candidate = findNodeAt(ev.clientX, ev.clientY);
+  const newTarget = candidate && candidate !== drag.source.el ? candidate : null;
+  if (newTarget !== drag.dropTarget) {
+    drag.dropTarget?.classList.remove('drop-target');
+    newTarget?.classList.add('drop-target');
+    drag.dropTarget = newTarget;
+  }
+}
+
+function onDragEnd(ev: MouseEvent): void {
+  if (!drag) return;
+  const wasReal = drag.started;
+  const target = drag.dropTarget;
+  const sourcePath = drag.source.modelPath;
+  const sourceBasename = drag.source.basename;
+  cleanupDrag();
+  if (!wasReal) return; // pure click, let click handler fire normally
+  suppressNextClick = true;
+  // Reset shortly after — the click event fires synchronously after
+  // mouseup so a microtask delay is enough.
+  setTimeout(() => {
+    suppressNextClick = false;
+  }, 0);
+  if (!target) return;
+  const targetPath = target.dataset.modelPath;
+  if (!targetPath || targetPath === sourcePath) return;
+  vscode.postMessage({
+    type: 'nodeAction',
+    action: 'setParentDirect',
+    modelPath: sourcePath,
+    parentModelPath: targetPath,
+    basename: sourceBasename,
+  });
+}
+
+function cancelDrag(): void {
+  if (!drag) return;
+  cleanupDrag();
+}
+
+function cleanupDrag(): void {
+  if (!drag) return;
+  drag.source.el.classList.remove('dragging');
+  drag.dropTarget?.classList.remove('drop-target');
+  drag.ghostLine?.remove();
+  drag = null;
+}
+
+function makeGhostLine(): SVGLineElement {
+  const ns = 'http://www.w3.org/2000/svg';
+  const line = document.createElementNS(ns, 'line');
+  line.setAttribute('class', 'drag-ghost');
+  return line;
+}
+
+/**
+ * Convert a client-coords point to SVG model coords. Uses the SVG's
+ * screen CTM so it works regardless of zoom (SVG width != viewBox
+ * width when zoomed) and scroll offset.
+ */
+function clientToSvgPoint(clientX: number, clientY: number): { x: number; y: number } {
+  if (!state) return { x: 0, y: 0 };
+  const pt = state.svg.createSVGPoint();
+  pt.x = clientX;
+  pt.y = clientY;
+  const ctm = state.svg.getScreenCTM();
+  if (!ctm) return { x: 0, y: 0 };
+  const out = pt.matrixTransform(ctm.inverse());
+  return { x: out.x, y: out.y };
+}
+
+/**
+ * Find the `<g class="node">` element at the given client coordinates,
+ * if any. Walks up from `elementFromPoint` since the cursor may be
+ * over a child of the group (rect, text, tspan).
+ */
+function findNodeAt(clientX: number, clientY: number): SVGGElement | null {
+  const el = document.elementFromPoint(clientX, clientY);
+  if (!el) return null;
+  let cur: Element | null = el;
+  while (cur) {
+    if (cur instanceof SVGGElement && cur.classList.contains('node')) return cur;
+    cur = cur.parentElement;
+  }
+  return null;
+}
+wrapEl.addEventListener('scroll', hideCtxMenu);
+// Block native context menu inside the canvas so our custom one is
+// the only thing that appears on right-click.
+wrapEl.addEventListener('contextmenu', (ev) => ev.preventDefault());
+
+// ---- Wheel handling ------------------------------------------------
+
+// Capture-phase wheel handler so we run BEFORE any handlers attached
+// inside the SVG. ctrl/⌘ + wheel zooms; plain wheel scrolls the wrap.
+wrapEl.addEventListener(
+  'wheel',
+  (ev) => {
+    ev.preventDefault();
+    if (ev.ctrlKey || ev.metaKey) {
+      if (!state) return;
+      const factor = ev.deltaY > 0 ? 1 / ZOOM_FACTOR : ZOOM_FACTOR;
+      const next = clamp(state.zoom * factor, MIN_ZOOM, MAX_ZOOM);
+      // Pivot zoom around the cursor: keep the model coord under the
+      // cursor stationary so the user feels like they're zooming in
+      // on what they're hovering.
+      const wrapRect = wrapEl!.getBoundingClientRect();
+      const mouseInWrapX = ev.clientX - wrapRect.left;
+      const mouseInWrapY = ev.clientY - wrapRect.top;
+      const modelX = (wrapEl!.scrollLeft + mouseInWrapX) / state.zoom;
+      const modelY = (wrapEl!.scrollTop + mouseInWrapY) / state.zoom;
+      applyZoom(next);
+      wrapEl!.scrollLeft = modelX * next - mouseInWrapX;
+      wrapEl!.scrollTop = modelY * next - mouseInWrapY;
+      return;
+    }
+    // shift + wheel → horizontal scroll. Some browsers auto-route
+    // deltaY into deltaX when shift is held; others leave the value
+    // in deltaY and use shift purely as an intent signal. Handle both
+    // by folding both deltas into the horizontal axis on shift.
+    if (ev.shiftKey) {
+      wrapEl!.scrollBy({ left: ev.deltaX + ev.deltaY, top: 0 });
+    } else {
+      wrapEl!.scrollBy({ left: ev.deltaX, top: ev.deltaY });
+    }
+  },
+  { passive: false, capture: true },
+);
+
+function applyZoom(z: number): void {
+  if (!state) return;
+  state.zoom = z;
+  state.svg.setAttribute('width', String(state.naturalW * z));
+  state.svg.setAttribute('height', String(state.naturalH * z));
+}
+
+// ---- Render --------------------------------------------------------
 
 function render(graph: LineageGraph): void {
   hideCtxMenu();
-  if (cy) {
-    cy.destroy();
-    cy = null;
-  }
+  // Clear prior SVG.
+  while (containerEl!.firstChild) containerEl!.removeChild(containerEl!.firstChild);
+
   if (graph.nodes.length === 0) {
     emptyEl!.style.display = 'block';
     wrapEl!.style.display = 'none';
+    state = null;
     return;
   }
   emptyEl!.style.display = 'none';
   wrapEl!.style.display = 'block';
 
-  const colors = resolveColors();
+  // Section partitioning: in "All Runs" mode, group root subtrees by
+  // their root's dataFile so each `$DATA` source becomes its own
+  // visually-banded section. Curated mode renders the user's set as
+  // a single section (they've already chosen the runs; further
+  // grouping would split their narrative).
+  const sections: SectionInput[] = inCuratedLineage
+    ? [{ title: '', graph }]
+    : partitionByDataset(graph);
 
-  // Per-node lookups derived from edges: which colour classifies the
-  // inbound edge (used for node border) and which ΔOFV to surface in
-  // the node label. Roots have neither.
-  const nodeKind = new Map<string, EdgeColor | 'root'>();
-  const nodeDelta = new Map<string, number | null>();
-  for (const r of graph.roots) nodeKind.set(r, 'root');
-  for (const e of graph.edges) {
-    nodeKind.set(e.childModelPath, e.color);
-    nodeDelta.set(e.childModelPath, e.deltaOfv);
+  // Lay out each section independently, gather positioned nodes/links + height.
+  const laidOut = sections.map((s) => layoutSection(s));
+
+  // Stack sections vertically. Canvas width = max of section widths;
+  // section i starts at y = sum of (section heights + SECTION_GAP) above.
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('xmlns', ns);
+  svg.style.display = 'block';
+
+  let cursorY = PADDING;
+  let canvasW = 0;
+  for (const s of laidOut) {
+    if (s.title) {
+      const header = document.createElementNS(ns, 'text');
+      header.setAttribute('class', 'section-header');
+      header.setAttribute('x', String(PADDING));
+      header.setAttribute('y', String(cursorY + SECTION_HEADER_H * 0.7));
+      header.textContent = `${s.title} · ${s.nodeCount} run${s.nodeCount === 1 ? '' : 's'}`;
+      svg.appendChild(header);
+      // Thin separator line below the header text.
+      const rule = document.createElementNS(ns, 'line');
+      rule.setAttribute('class', 'section-rule');
+      rule.setAttribute('x1', String(PADDING));
+      rule.setAttribute('x2', String(s.width - PADDING));
+      rule.setAttribute('y1', String(cursorY + SECTION_HEADER_H));
+      rule.setAttribute('y2', String(cursorY + SECTION_HEADER_H));
+      svg.appendChild(rule);
+      cursorY += SECTION_HEADER_H + 8;
+    }
+    // Translate the section's content by (0, cursorY); also offset the
+    // x-axis so each section's leftmost node sits at PADDING.
+    const sectionOffsetX = -s.minX + PADDING + NODE_W / 2;
+    const sectionOffsetY = cursorY - s.minY + NODE_H / 2;
+    drawSection(svg, s, sectionOffsetX, sectionOffsetY);
+    canvasW = Math.max(canvasW, s.width);
+    cursorY += s.height + SECTION_GAP;
   }
+  const canvasH = cursorY - SECTION_GAP + PADDING; // trim the trailing gap
+  svg.setAttribute('viewBox', `0 0 ${canvasW} ${canvasH}`);
+  svg.setAttribute('width', String(canvasW));
+  svg.setAttribute('height', String(canvasH));
 
-  // Stable node IDs come from a path → id table so cytoscape's
-  // string-only ID space works with our absolute paths.
-  const nodeIdByPath = new Map<string, string>();
-  graph.nodes.forEach((n, i) => nodeIdByPath.set(n.modelPath, `n${i}`));
+  containerEl!.appendChild(svg);
+  state = { naturalW: canvasW, naturalH: canvasH, zoom: 1, svg };
+}
 
-  const elements: cytoscape.ElementDefinition[] = [
-    ...graph.nodes.map((n) => {
-      const kind = nodeKind.get(n.modelPath) ?? 'gray';
-      const inboundDelta = nodeDelta.get(n.modelPath) ?? null;
-      return {
-        group: 'nodes' as const,
-        data: {
-          id: nodeIdByPath.get(n.modelPath)!,
-          label: nodeLabel(n, inboundDelta),
-          basename: n.basename, // single-line, used by tooltip / context menu
-          modelPath: n.modelPath,
-          ofv: n.ofv,
-          description: n.description,
-          runLabel: n.label,
-          borderColor: colors[kind],
-        },
-      };
-    }),
-    ...graph.edges.flatMap((e) => {
-      const sourceId = nodeIdByPath.get(e.parentModelPath);
-      const targetId = nodeIdByPath.get(e.childModelPath);
-      if (!sourceId || !targetId) return [];
-      return [
-        {
-          group: 'edges' as const,
-          data: {
-            id: `e_${sourceId}_${targetId}`,
-            source: sourceId,
-            target: targetId,
-            edgeColor: colors[e.color],
-            deltaOfv: e.deltaOfv,
-            // ΔOFV moved onto the child node label; keep edge labels
-            // empty so the canvas stays uncluttered when zoomed out.
-            deltaLabel: '',
-          },
-        },
-      ];
-    }),
-  ];
+interface SectionInput {
+  /** Empty string = no header (curated single-section mode). */
+  title: string;
+  graph: LineageGraph;
+}
 
-  cy = cytoscape({
-    container: containerEl!,
-    elements,
-    style: stylesheet(colors),
-    minZoom: 0.3,
-    maxZoom: 3,
-    // Disable cytoscape's built-in pan + zoom interactions — the
-    // canvas-wrap's native browser scrollbars handle pan, and a
-    // custom wheel handler below routes ctrl/⌘-scroll into cy.zoom.
-    userPanningEnabled: false,
-    userZoomingEnabled: false,
-    boxSelectionEnabled: false,
-    layout: {
-      name: 'dagre',
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...({ rankDir: 'TB', nodeSep: 60, rankSep: 100 } as any),
-    },
+interface LaidOutSection {
+  title: string;
+  nodeCount: number;
+  realNodes: HierarchyPointNode<TreeDatum>[];
+  realLinks: {
+    source: HierarchyPointNode<TreeDatum>;
+    target: HierarchyPointNode<TreeDatum>;
+  }[];
+  /** Pre-translation min/max in d3-tree coords. */
+  minX: number;
+  minY: number;
+  /** Post-translation footprint (header excluded). */
+  width: number;
+  height: number;
+}
+
+const SECTION_HEADER_H = 22;
+const SECTION_GAP = 32;
+
+/**
+ * Run d3.tree() + singleton wrap-grid for a section's graph. Returns
+ * the positioned nodes/links plus its bounding box so the caller can
+ * stack sections vertically.
+ */
+function layoutSection(input: SectionInput): LaidOutSection {
+  const root = buildHierarchy(input.graph);
+  const layout = tree<TreeDatum>().nodeSize([NODE_W + NODE_GAP_X, NODE_H + NODE_GAP_Y]);
+  layout(root);
+  const realNodes: HierarchyPointNode<TreeDatum>[] = [];
+  root.each((d) => {
+    if (!d.data.isSyntheticRoot) realNodes.push(d as HierarchyPointNode<TreeDatum>);
   });
+  const realLinks = root
+    .links()
+    .filter((l) => !l.source.data.isSyntheticRoot && !l.target.data.isSyntheticRoot) as Array<{
+    source: HierarchyPointNode<TreeDatum>;
+    target: HierarchyPointNode<TreeDatum>;
+  }>;
+  // Wrap-grid for singleton roots in any non-curated section (which
+  // is, when grouped-by-dataset, every section).
+  if (!inCuratedLineage) repositionSingletonsAsGrid(root, realNodes);
 
-  cy.on('tap', 'node', (evt) => {
-    const modelPath = evt.target.data('modelPath') as string;
-    if (modelPath) vscode.postMessage({ type: 'open', modelPath });
-  });
-
-  // Right-click → custom HTML context menu at the cursor (replaces
-  // the prior QuickPick which surfaced at the command palette). Reads
-  // the original mouse coords from the DOM event so the menu lands
-  // at the click point regardless of cytoscape's internal coords.
-  cy.on('cxttap', 'node', (evt) => {
-    const data = evt.target.data();
-    const orig = evt.originalEvent as MouseEvent | undefined;
-    if (!orig) return;
-    showCtxMenu(orig.clientX, orig.clientY, {
-      modelPath: data.modelPath as string,
-      basename: data.basename as string,
-    });
-  });
-
-  // Lay out → size canvas to fit graph extent so the scroll wrapper
-  // shows scrollbars when the graph is bigger than the visible area.
-  // `layoutstop` fires once dagre finishes positioning.
-  cy.one('layoutstop', () => sizeCanvasToGraph());
-
-  // Wheel: ctrl/⌘-scroll = zoom (and recompute canvas size so
-  // scrollbars track), plain scroll = let the browser pan natively.
-  // Bound on wrapEl rather than containerEl so the wrap's overflow
-  // sees the un-prevented wheel events.
-  wrapEl!.addEventListener(
-    'wheel',
-    (ev) => {
-      if (!cy) return;
-      if (!ev.ctrlKey && !ev.metaKey) return; // browser handles pan-scroll
-      ev.preventDefault();
-      const factor = ev.deltaY > 0 ? 0.9 : 1 / 0.9;
-      const next = clamp(cy.zoom() * factor, 0.3, 3);
-      // Zoom around the cursor position (cytoscape's renderedPosition
-      // is relative to the cy container).
-      const rect = containerEl!.getBoundingClientRect();
-      cy.zoom({
-        level: next,
-        renderedPosition: { x: ev.clientX - rect.left, y: ev.clientY - rect.top },
-      });
-      sizeCanvasToGraph();
-    },
-    { passive: false },
-  );
-
-  // Native browser tooltip: cheap, no extra dep. Updates on mousemove.
-  containerEl!.title = '';
-  containerEl!.addEventListener('mousemove', (ev) => {
-    if (!cy) return;
-    let found = '';
-    cy.nodes().forEach((el) => {
-      const bb = el.renderedBoundingBox();
-      if (
-        ev.offsetX >= bb.x1 &&
-        ev.offsetX <= bb.x2 &&
-        ev.offsetY >= bb.y1 &&
-        ev.offsetY <= bb.y2
-      ) {
-        found = nodeTooltip(el.data());
-      }
-    });
-    containerEl!.title = found;
-  });
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const n of realNodes) {
+    minX = Math.min(minX, n.x);
+    maxX = Math.max(maxX, n.x);
+    minY = Math.min(minY, n.y);
+    maxY = Math.max(maxY, n.y);
+  }
+  return {
+    title: input.title,
+    nodeCount: realNodes.length,
+    realNodes,
+    realLinks,
+    minX,
+    minY,
+    width: maxX - minX + NODE_W + PADDING * 2,
+    height: maxY - minY + NODE_H + PADDING,
+  };
 }
 
 /**
- * Resize the cytoscape container to the graph's bounding box at the
- * current zoom level (or to the wrap's visible size, whichever is
- * larger). When the graph is bigger, the wrap shows native browser
- * scrollbars; when it fits, no scrollbars and the canvas just fills
- * the wrap.
- *
- * Re-pans cytoscape to the top-left so scroll(0,0) shows the graph
- * origin — keeps the user's scroll position aligned with what they
- * see on the canvas.
+ * Emit a section's edges + nodes into the parent SVG with an
+ * (offsetX, offsetY) translation so multiple sections stack cleanly.
  */
-function sizeCanvasToGraph(): void {
-  if (!cy || !containerEl || !wrapEl) return;
-  const bb = cy.elements().boundingBox();
-  const padding = 40;
-  const z = cy.zoom();
-  const graphW = Math.ceil(bb.w * z + padding * 2);
-  const graphH = Math.ceil(bb.h * z + padding * 2);
-  const w = Math.max(wrapEl.clientWidth, graphW);
-  const h = Math.max(wrapEl.clientHeight, graphH);
-  containerEl.style.width = `${w}px`;
-  containerEl.style.height = `${h}px`;
-  cy.resize();
-  // Anchor the graph at (padding, padding) inside the canvas so
-  // scrollLeft/scrollTop=0 shows the top-left of the graph.
-  cy.pan({ x: -bb.x1 * z + padding, y: -bb.y1 * z + padding });
+function drawSection(
+  svg: SVGSVGElement,
+  s: LaidOutSection,
+  offsetX: number,
+  offsetY: number,
+): void {
+  const ns = 'http://www.w3.org/2000/svg';
+  const linkGen = linkVertical<
+    { source: HierarchyPointNode<TreeDatum>; target: HierarchyPointNode<TreeDatum> },
+    HierarchyPointNode<TreeDatum>
+  >()
+    .source((d) => d.source)
+    .target((d) => d.target)
+    .x((d) => d.x + offsetX)
+    .y((d) => d.y + offsetY);
+  for (const link of s.realLinks) {
+    const path = document.createElementNS(ns, 'path');
+    const dAttr = linkGen(link);
+    if (dAttr) path.setAttribute('d', dAttr);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke-width', '2');
+    const overrideCls = link.target.data.inboundViaOverride ? ' via-override' : '';
+    path.setAttribute(
+      'class',
+      `edge edge-${link.target.data.inboundColor ?? 'gray'}${overrideCls}`,
+    );
+    const parentNode = link.source.data.node;
+    const childNode = link.target.data.node;
+    if (parentNode && childNode) {
+      path.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        onEdgeClick(parentNode, childNode, link.target.data.inboundDelta);
+      });
+    }
+    svg.appendChild(path);
+  }
+  for (const n of s.realNodes) {
+    svg.appendChild(makeNodeGroup(n, offsetX, offsetY));
+  }
 }
 
-function clamp(v: number, lo: number, hi: number): number {
-  return Math.max(lo, Math.min(hi, v));
+/**
+ * Group root subtrees by their root's dataFile. Each unique dataFile
+ * becomes its own section. Roots whose `dataFile` is null are
+ * collected under `(no dataset)`. Children of a root inherit their
+ * parent's section regardless of their own dataFile — keeps the tree
+ * visually intact when a child changes datasets (such a change is a
+ * meaningful annotation but the tree topology shouldn't fragment).
+ */
+function partitionByDataset(graph: LineageGraph): SectionInput[] {
+  const byPath = new Map(graph.nodes.map((n) => [n.modelPath, n]));
+  const childrenOf = new Map<string, string[]>();
+  for (const e of graph.edges) {
+    const list = childrenOf.get(e.parentModelPath) ?? [];
+    list.push(e.childModelPath);
+    childrenOf.set(e.parentModelPath, list);
+  }
+  const collectSubtree = (rootPath: string): Set<string> => {
+    const seen = new Set<string>([rootPath]);
+    const queue = [rootPath];
+    while (queue.length) {
+      const p = queue.shift()!;
+      const kids = childrenOf.get(p);
+      if (!kids) continue;
+      for (const k of kids) if (!seen.has(k)) {
+        seen.add(k);
+        queue.push(k);
+      }
+    }
+    return seen;
+  };
+
+  // datasetName → { roots[], paths }
+  const groups = new Map<string, { roots: string[]; paths: Set<string> }>();
+  for (const rp of graph.roots) {
+    const root = byPath.get(rp);
+    const ds = root?.dataFile ?? '(no dataset)';
+    let g = groups.get(ds);
+    if (!g) {
+      g = { roots: [], paths: new Set() };
+      groups.set(ds, g);
+    }
+    g.roots.push(rp);
+    for (const p of collectSubtree(rp)) g.paths.add(p);
+  }
+
+  const sections: SectionInput[] = [];
+  // Sort sections so the largest dataset (most runs) comes first; ties
+  // broken alphabetically for stable rendering.
+  const entries = [...groups.entries()].sort(
+    (a, b) => b[1].paths.size - a[1].paths.size || a[0].localeCompare(b[0]),
+  );
+  for (const [dataset, g] of entries) {
+    sections.push({
+      title: `data: ${dataset}`,
+      graph: {
+        nodes: graph.nodes.filter((n) => g.paths.has(n.modelPath)),
+        edges: graph.edges.filter((e) => g.paths.has(e.childModelPath)),
+        roots: g.roots,
+      },
+    });
+  }
+  return sections;
 }
 
-function nodeTooltip(d: cytoscape.NodeDataDefinition): string {
-  // Tooltip surfaces the long-form metadata that doesn't fit on the
-  // node label: run label, description, full path. OFV is on the node
-  // itself, not duplicated here.
-  const lines: string[] = [d.basename as string];
-  if (d.runLabel) lines.push(`label: ${d.runLabel as string}`);
-  if (d.description) lines.push(d.description as string);
-  if (d.modelPath) lines.push(d.modelPath as string);
+function makeNodeGroup(
+  n: HierarchyPointNode<TreeDatum>,
+  offsetX: number,
+  offsetY: number,
+): SVGGElement {
+  const ns = 'http://www.w3.org/2000/svg';
+  const node = n.data.node!;
+  // Border colour mirrors the inbound edge's ΔOFV class so the node
+  // itself signals its relationship to its parent:
+  //   green  = ΔOFV improvement   yellow = indifferent
+  //   red    = worsening          gray   = noncomparable / no fit
+  //   root   = blue (no parent)
+  // Termination status surfaces in the hover tooltip — separate
+  // signal, not on the node border.
+  const colorClass = n.data.inboundColor ?? 'gray';
+  const x = n.x + offsetX - NODE_W / 2;
+  const y = n.y + offsetY - NODE_H / 2;
+
+  const g = document.createElementNS(ns, 'g');
+  g.setAttribute('transform', `translate(${x}, ${y})`);
+  g.setAttribute('class', 'node');
+  g.dataset.modelPath = node.modelPath;
+  g.dataset.basename = node.basename;
+  g.style.cursor = 'pointer';
+
+  const rect = document.createElementNS(ns, 'rect');
+  rect.setAttribute('width', String(NODE_W));
+  rect.setAttribute('height', String(NODE_H));
+  rect.setAttribute('rx', '6');
+  rect.setAttribute('ry', '6');
+  rect.setAttribute('class', `node-rect node-${colorClass}`);
+  g.appendChild(rect);
+
+  const text = document.createElementNS(ns, 'text');
+  text.setAttribute('class', 'node-text');
+  text.setAttribute('x', String(NODE_W / 2));
+  text.setAttribute('y', '0');
+  text.setAttribute('text-anchor', 'middle');
+
+  const lines = nodeLabelLines(n.data);
+  // First tspan needs an explicit y so the line stack starts at the
+  // right vertical position; subsequent lines use dy for relative spacing.
+  // We center the block vertically in the node by computing the offset
+  // from the top of the rect (NODE_H) given the line count and line height.
+  const lineHeight = 14;
+  const blockHeight = lines.length * lineHeight;
+  const firstY = (NODE_H - blockHeight) / 2 + lineHeight - 3; // -3 = baseline fudge
+  lines.forEach((line, i) => {
+    const tspan = document.createElementNS(ns, 'tspan');
+    tspan.setAttribute('x', String(NODE_W / 2));
+    if (i === 0) tspan.setAttribute('y', String(firstY));
+    else tspan.setAttribute('dy', String(lineHeight));
+    tspan.textContent = line;
+    text.appendChild(tspan);
+  });
+  g.appendChild(text);
+
+  // Native title for hover tooltip.
+  const title = document.createElementNS(ns, 'title');
+  title.textContent = nodeTooltip(n.data);
+  g.appendChild(title);
+
+  g.addEventListener('click', () => {
+    if (suppressNextClick) return; // pending drag-end suppression
+    // Click → activate the Fit Inspector for this run, but keep focus
+    // in the lineage view. The extension opens the .lst (Fit Inspector
+    // listens to the active editor) with `preserveFocus: true` so the
+    // user stays here. .lst is preferred; falls back to .mod when the
+    // run hasn't produced a .lst yet.
+    vscode.postMessage({
+      type: 'open',
+      modelPath: node.modelPath,
+      lstPath: node.lstPath,
+    });
+  });
+  g.addEventListener('contextmenu', (ev) => {
+    ev.preventDefault();
+    showCtxMenu(ev.clientX, ev.clientY, {
+      modelPath: node.modelPath,
+      basename: node.basename,
+    });
+  });
+  // Drag-to-parent: mousedown starts a candidate drag. Real drag kicks
+  // in only past the threshold (so single clicks aren't mistaken for
+  // tiny drags). Source is captured here; the document-level mousemove
+  // and mouseup handlers progress it.
+  g.addEventListener('mousedown', (ev) => {
+    if (ev.button !== 0) return; // left-click only
+    drag = {
+      source: {
+        modelPath: node.modelPath,
+        basename: node.basename,
+        el: g,
+        cx: n.x + offsetX,
+        cy: n.y + offsetY,
+      },
+      downClientX: ev.clientX,
+      downClientY: ev.clientY,
+      started: false,
+      ghostLine: null,
+      dropTarget: null,
+    };
+  });
+
+  return g;
+}
+
+// ---- Hierarchy build ----------------------------------------------
+
+function buildHierarchy(graph: LineageGraph): HierarchyPointNode<TreeDatum> {
+  const byPath = new Map(graph.nodes.map((n) => [n.modelPath, n]));
+  const inboundEdge = new Map<string, LineageEdge>();
+  for (const e of graph.edges) inboundEdge.set(e.childModelPath, e);
+  const childrenByParent = new Map<string, string[]>();
+  for (const e of graph.edges) {
+    const list = childrenByParent.get(e.parentModelPath) ?? [];
+    list.push(e.childModelPath);
+    childrenByParent.set(e.parentModelPath, list);
+  }
+  for (const list of childrenByParent.values()) list.sort();
+
+  function build(modelPath: string): TreeDatum {
+    const lineageNode = byPath.get(modelPath)!;
+    const edge = inboundEdge.get(modelPath);
+    const childPaths = childrenByParent.get(modelPath) ?? [];
+    return {
+      node: lineageNode,
+      inboundColor: edge ? edge.color : 'root',
+      inboundDelta: edge?.deltaOfv ?? null,
+      inboundViaOverride: edge?.viaOverride ?? false,
+      isSyntheticRoot: false,
+      children: childPaths.length > 0 ? childPaths.map((p) => build(p)) : undefined,
+    };
+  }
+
+  // Sort top-level roots by descendant count descending — branchy
+  // trees go leftmost, single-node "scratch" roots fall to the right.
+  // d3.tree() preserves child order at each level, so children of
+  // non-root nodes stay in their `;; Based on:` / path-override
+  // declaration order; only the synthetic-root layer reshuffles.
+  // Without this, a branched lineage centred among many singletons
+  // ends up visually in the middle of the canvas (user's complaint:
+  // "I want it to end up at the very left").
+  const rootChildren = graph.roots.map((r) => build(r));
+  rootChildren.sort((a, b) => countSubtree(b) - countSubtree(a));
+
+  // Synthetic root holds all real roots as children. Keeps d3.tree()
+  // happy with a single hierarchy and stays out of the rendered output
+  // (filtered via `isSyntheticRoot`).
+  const synthetic: TreeDatum = {
+    node: null,
+    inboundColor: null,
+    inboundDelta: null,
+    inboundViaOverride: false,
+    isSyntheticRoot: true,
+    children: rootChildren,
+  };
+
+  // d3.hierarchy needs the children accessor; default reads `children`.
+  return hierarchy(synthetic) as unknown as HierarchyPointNode<TreeDatum>;
+}
+
+// ---- Label / tooltip composition ----------------------------------
+
+function nodeLabelLines(d: TreeDatum): string[] {
+  const lines: string[] = [];
+  if (d.node) lines.push(d.node.basename);
+  // Dataset filename — surfaced inline so the user sees at a glance
+  // which `$DATA` each model points at (often the disambiguator
+  // between candidate-equivalent runs).
+  if (d.node?.dataFile) lines.push(`data: ${d.node.dataFile}`);
+  if (d.node && d.node.ofv !== null) lines.push(`OFV = ${formatOfv(d.node.ofv)}`);
+  else if (d.node) lines.push('no fit');
+  if (d.inboundDelta !== null) {
+    const sign = d.inboundDelta > 0 ? '+' : '';
+    lines.push(`Δ ${sign}${d.inboundDelta.toFixed(2)}`);
+  }
+  return lines;
+}
+
+function nodeTooltip(d: TreeDatum): string {
+  const lines: string[] = [];
+  if (!d.node) return '';
+  lines.push(d.node.basename);
+  // Termination signal appears here (it doesn't drive border colour
+  // anymore but it's still useful at-a-glance via hover).
+  if (d.node.termination === 'SUCCESSFUL') lines.push('✓ minimization successful');
+  else if (d.node.termination === 'TERMINATED') lines.push('✗ minimization terminated');
+  else lines.push('· not run / status unknown');
+  if (d.node.label) lines.push(`label: ${d.node.label}`);
+  if (d.node.description) lines.push(d.node.description);
+  lines.push(d.node.modelPath);
   return lines.join('\n');
 }
 
@@ -367,75 +976,306 @@ function formatOfv(n: number): string {
   return Number.isFinite(n) ? n.toFixed(3) : String(n);
 }
 
-/**
- * Compose the node's display label across (up to) three lines:
- *   line 1 — basename (run001 / m / colistin / …)
- *   line 2 — `OFV = <n>` or `no fit`
- *   line 3 — `Δ <signed n>` (only when this node has a parent edge
- *            with a computed ΔOFV; suppressed for roots and gray edges)
- *
- * Cytoscape's canvas renderer reads `\n` as a hard line break when
- * `text-wrap: 'wrap'` is set on the stylesheet.
- */
-function nodeLabel(n: LineageNode, inboundDelta: number | null): string {
-  const lines: string[] = [n.basename];
-  lines.push(n.ofv !== null ? `OFV = ${formatOfv(n.ofv)}` : 'no fit');
-  if (inboundDelta !== null) {
-    const sign = inboundDelta > 0 ? '+' : '';
-    lines.push(`Δ ${sign}${inboundDelta.toFixed(2)}`);
-  }
-  return lines.join('\n');
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
 }
 
-// Build the cytoscape stylesheet with resolved colours. Cytoscape's
-// canvas renderer doesn't read CSS vars, so the colours come from
-// `resolveColors()` and are baked into the stylesheet at render time.
-function stylesheet(colors: Record<keyof typeof PROBE_VARS, string>): cytoscape.StylesheetCSS[] {
-  return [
-    {
-      selector: 'node',
-      css: {
-        label: 'data(label)',
-        'text-valign': 'center',
-        'text-halign': 'center',
-        'text-wrap': 'wrap',
-        'text-max-width': '120px',
-        'line-height': 1.3,
-        'font-size': '11px',
-        color: colors.fg,
-        'background-color': colors.bg,
-        'border-width': 2,
-        'border-color': 'data(borderColor)',
-        // Explicit sizes — `width: 'label'` was deprecated in
-        // cytoscape 3.30. Tuned for the 3-line label
-        // ("basename / OFV = N / Δ ±N").
-        width: 130,
-        height: 60,
-        shape: 'round-rectangle',
-      } as unknown as cytoscape.Css.Node,
-    },
-    {
-      selector: 'node:selected',
-      css: {
-        'overlay-color': colors.root,
-        'overlay-opacity': 0.15,
-      } as unknown as cytoscape.Css.Node,
-    },
-    {
-      selector: 'edge',
-      css: {
-        width: 2,
-        'curve-style': 'bezier',
-        'target-arrow-shape': 'triangle',
-        'target-arrow-color': 'data(edgeColor)',
-        'line-color': 'data(edgeColor)',
-        label: 'data(deltaLabel)',
-        'font-size': '9px',
-        color: colors.gray,
-        'text-background-color': colors.bg,
-        'text-background-opacity': 0.8,
-        'text-background-padding': '2px',
-      } as unknown as cytoscape.Css.Edge,
-    },
-  ];
+/**
+ * Diagnostics banner above the legend. Shown only when the workspace
+ * has actionable issues — stale `lineageOverrides` entries (path no
+ * longer in workspace) or runs whose `;; Based on:` parent ref doesn't
+ * resolve in the current view. Hidden when both counts are zero so a
+ * clean workspace stays uncluttered. The "Clean N stale" button only
+ * surfaces when there's something to clean; unresolved parent links
+ * are informational only (the user has to fix them by import or
+ * runrecord edit, not a one-click action).
+ */
+function renderDiagnosticsBanner(
+  unresolvedParentCount: number,
+  staleOverrides: StaleOverride[],
+): void {
+  const banner = diagnosticsBannerEl!;
+  banner.replaceChildren();
+  if (unresolvedParentCount === 0 && staleOverrides.length === 0) {
+    banner.hidden = true;
+    return;
+  }
+  banner.hidden = false;
+  const parts: string[] = [];
+  if (staleOverrides.length > 0) {
+    parts.push(
+      `${staleOverrides.length} stale override${staleOverrides.length === 1 ? '' : 's'}`,
+    );
+  }
+  if (unresolvedParentCount > 0) {
+    parts.push(
+      `${unresolvedParentCount} unresolved parent link${unresolvedParentCount === 1 ? '' : 's'}`,
+    );
+  }
+  const text = document.createElement('span');
+  text.className = 'diagnostics-text';
+  text.textContent = `⚠ ${parts.join(' · ')}`;
+  banner.appendChild(text);
+  if (staleOverrides.length > 0) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'diagnostics-clean';
+    btn.textContent = `Clean ${staleOverrides.length} stale`;
+    btn.title = 'Remove lineageOverrides entries pointing at runs no longer in this workspace';
+    btn.addEventListener('click', () => {
+      vscode.postMessage({ type: 'cleanStaleOverrides' });
+    });
+    banner.appendChild(btn);
+  }
+}
+
+// ---- ΔiOFV side-panel rendering -----------------------------------
+
+function onEdgeClick(
+  parent: LineageNode,
+  child: LineageNode,
+  deltaOfv: number | null,
+): void {
+  selectedEdge = {
+    parentModelPath: parent.modelPath,
+    childModelPath: child.modelPath,
+    parentBasename: parent.basename,
+    childBasename: child.basename,
+    deltaOfv,
+  };
+  showIOfvPanelLoading(selectedEdge);
+  vscode.postMessage({
+    type: 'requestEdgeIOfv',
+    parentModelPath: parent.modelPath,
+    childModelPath: child.modelPath,
+  });
+}
+
+function showIOfvPanelLoading(edge: SelectedEdgeState): void {
+  iofvPanelEl!.hidden = false;
+  iofvBodyEl!.replaceChildren();
+  const heading = document.createElement('div');
+  heading.className = 'iofv-summary-line';
+  heading.textContent = `${edge.parentBasename} → ${edge.childBasename}`;
+  iofvBodyEl!.appendChild(heading);
+  if (edge.deltaOfv !== null) {
+    const total = document.createElement('div');
+    total.className = 'iofv-summary-line';
+    const sign = edge.deltaOfv > 0 ? '+' : '';
+    total.textContent = `Total ΔOFV (.ext): ${sign}${edge.deltaOfv.toFixed(3)}`;
+    iofvBodyEl!.appendChild(total);
+  }
+  const hint = document.createElement('p');
+  hint.className = 'iofv-hint';
+  hint.textContent = 'Loading per-subject ΔiOFV…';
+  iofvBodyEl!.appendChild(hint);
+}
+
+function hideIOfvPanel(): void {
+  iofvPanelEl!.hidden = true;
+  iofvBodyEl!.replaceChildren();
+}
+
+function renderIOfvSummary(
+  edge: SelectedEdgeState,
+  threshold: number,
+  summary: EdgeIOfvSummary | null,
+  incomparableReason: string | null,
+  warning: string | null,
+): void {
+  iofvBodyEl!.replaceChildren();
+
+  const heading = document.createElement('div');
+  heading.className = 'iofv-summary-line';
+  heading.textContent = `${edge.parentBasename} → ${edge.childBasename}`;
+  iofvBodyEl!.appendChild(heading);
+
+  if (edge.deltaOfv !== null) {
+    const total = document.createElement('div');
+    total.className = 'iofv-summary-line';
+    const sign = edge.deltaOfv > 0 ? '+' : '';
+    total.textContent = `Total ΔOFV (.ext): ${sign}${edge.deltaOfv.toFixed(3)}`;
+    iofvBodyEl!.appendChild(total);
+  }
+
+  // Incomparable: surface the specific reason as a warning, and a
+  // caveat that the .ext ΔOFV above is also not directly interpretable
+  // (different mathematical objects on each side).
+  if (incomparableReason) {
+    const warn = document.createElement('p');
+    warn.className = 'iofv-warning';
+    warn.textContent = `⚠ Not comparable: ${incomparableReason}`;
+    iofvBodyEl!.appendChild(warn);
+    const caveat = document.createElement('p');
+    caveat.className = 'iofv-hint';
+    caveat.textContent =
+      'The .ext ΔOFV above is the difference between two different ' +
+      'quantities (e.g. fit OFV vs D-optimality criterion) and is not ' +
+      'a meaningful improvement / worsening signal here.';
+    iofvBodyEl!.appendChild(caveat);
+    return;
+  }
+
+  if (!summary) {
+    const err = document.createElement('p');
+    err.className = 'iofv-hint';
+    err.textContent =
+      'No per-subject ΔiOFV available — .phi missing on one side, ' +
+      'or the runs use disjoint subject IDs (different dataset).';
+    iofvBodyEl!.appendChild(err);
+    return;
+  }
+
+  // Soft warning (e.g. method mismatch). Rendered above the tables; the
+  // summary is still shown below since the comparison is numerically
+  // valid, just methodologically caveated.
+  if (warning) {
+    const warn = document.createElement('p');
+    warn.className = 'iofv-warning iofv-warning-soft';
+    warn.textContent = `⚠ ${warning}`;
+    iofvBodyEl!.appendChild(warn);
+  }
+
+  // Sum-of-iOFV ΔOFV. Should approximate the total .ext ΔOFV when the
+  // estimation method's additive constant cancels (same method, same
+  // OMEGA structure). When it doesn't cancel, the gap is informative.
+  const phiTotal = document.createElement('div');
+  phiTotal.className = 'iofv-summary-line';
+  const sign = summary.totalDelta > 0 ? '+' : '';
+  phiTotal.textContent = `Σ ΔiOFV: ${sign}${summary.totalDelta.toFixed(3)} (n=${summary.n})`;
+  iofvBodyEl!.appendChild(phiTotal);
+
+  const counts = document.createElement('div');
+  counts.className = 'iofv-counts';
+  counts.append(
+    badge(`${summary.nImproved} improved`, 'improved'),
+    badge(`${summary.nWorsened} worsened`, 'worsened'),
+    badge(`${summary.nIndifferent} indifferent`),
+  );
+  iofvBodyEl!.appendChild(counts);
+
+  const note = document.createElement('p');
+  note.className = 'iofv-hint';
+  note.textContent =
+    `Significance cutoff |ΔiOFV| ≥ ${threshold.toFixed(2)} ` +
+    `(χ²₁,0.05; LRT-equivalent per subject).`;
+  iofvBodyEl!.appendChild(note);
+
+  if (summary.topImproved.length > 0) {
+    iofvBodyEl!.appendChild(sectionTitle('Top improved'));
+    iofvBodyEl!.appendChild(buildIOfvTable(summary.topImproved, 'improved'));
+  }
+  if (summary.topWorsened.length > 0) {
+    iofvBodyEl!.appendChild(sectionTitle('Top worsened'));
+    iofvBodyEl!.appendChild(buildIOfvTable(summary.topWorsened, 'worsened'));
+  }
+}
+
+function badge(text: string, kind?: 'improved' | 'worsened'): HTMLElement {
+  const el = document.createElement('span');
+  el.className = 'iofv-count-badge' + (kind ? ` ${kind}` : '');
+  el.textContent = text;
+  return el;
+}
+
+function sectionTitle(text: string): HTMLElement {
+  const el = document.createElement('div');
+  el.className = 'iofv-section-title';
+  el.textContent = text;
+  return el;
+}
+
+function buildIOfvTable(
+  rows: EdgeIOfvRow[],
+  kind: 'improved' | 'worsened',
+): HTMLTableElement {
+  const table = document.createElement('table');
+  table.className = 'iofv-table';
+  const thead = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  for (const h of ['ID', 'parent', 'child', 'Δ']) {
+    const th = document.createElement('th');
+    th.textContent = h;
+    headRow.appendChild(th);
+  }
+  thead.appendChild(headRow);
+  table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  for (const r of rows) {
+    const tr = document.createElement('tr');
+    tr.appendChild(td(String(r.id)));
+    tr.appendChild(td(formatOfv(r.parentIOfv)));
+    tr.appendChild(td(formatOfv(r.childIOfv)));
+    const deltaCell = td((r.deltaIOfv > 0 ? '+' : '') + r.deltaIOfv.toFixed(3));
+    deltaCell.classList.add(kind === 'improved' ? 'delta-improved' : 'delta-worsened');
+    tr.appendChild(deltaCell);
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  return table;
+}
+
+function td(text: string): HTMLTableCellElement {
+  const el = document.createElement('td');
+  el.textContent = text;
+  return el;
+}
+
+/**
+ * Total node count in a subtree rooted at `d` (1 + every descendant).
+ * Used to sort the synthetic-root's top-level children by tree size
+ * so branchy lineages anchor at the left of the canvas.
+ */
+function countSubtree(d: TreeDatum): number {
+  if (!d.children || d.children.length === 0) return 1;
+  let n = 1;
+  for (const c of d.children) n += countSubtree(c);
+  return n;
+}
+
+const GRID_COLS = 10;
+
+/**
+ * Override d3.tree()-assigned positions for singleton top-level roots
+ * (children of the synthetic root that have no descendants of their
+ * own). Layout: a wrap-grid below the branchy trees.
+ *
+ *   ┌─────────┐  ┌─────────┐
+ *   │run001 ──┼──┤run002   │   <- branchy trees still placed by d3.tree()
+ *   └─────────┘  └─────────┘
+ *
+ *   ┌──┐ ┌──┐ ┌──┐ ┌──┐ ┌──┐    <- singleton grid; up to GRID_COLS
+ *   │m1│ │m2│ │m3│ │m4│ │m5│       per row, wraps thereafter
+ *   └──┘ └──┘ └──┘ └──┘ └──┘
+ *
+ * No-op when there are no singletons or no synthetic-root children.
+ */
+function repositionSingletonsAsGrid(
+  root: HierarchyPointNode<TreeDatum>,
+  realNodes: HierarchyPointNode<TreeDatum>[],
+): void {
+  const topRoots = (root.children ?? []) as HierarchyPointNode<TreeDatum>[];
+  const singletons = topRoots.filter((r) => !r.children || r.children.length === 0);
+  if (singletons.length === 0) return;
+
+  // Find the branchy region's bounding box so the grid sits below it
+  // and aligned with its left edge. Branchy descendants are everything
+  // in `realNodes` that's NOT one of the singletons.
+  const singletonSet = new Set(singletons);
+  let branchyBottomY = -Infinity;
+  let branchyLeftX = Infinity;
+  for (const n of realNodes) {
+    if (singletonSet.has(n)) continue;
+    branchyBottomY = Math.max(branchyBottomY, n.y);
+    branchyLeftX = Math.min(branchyLeftX, n.x);
+  }
+  const hasBranchy = isFinite(branchyBottomY);
+  const startX = hasBranchy ? branchyLeftX : 0;
+  const startY = hasBranchy ? branchyBottomY + NODE_H + NODE_GAP_Y * 2 : 0;
+  const cellW = NODE_W + NODE_GAP_X;
+  const cellH = NODE_H + NODE_GAP_Y;
+  singletons.forEach((s, i) => {
+    s.x = startX + (i % GRID_COLS) * cellW;
+    s.y = startY + Math.floor(i / GRID_COLS) * cellH;
+  });
 }

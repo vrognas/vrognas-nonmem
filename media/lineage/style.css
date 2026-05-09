@@ -31,6 +31,27 @@ body {
   font-size: 0.85em;
 }
 #refresh:hover { background: var(--vscode-button-secondaryHoverBackground); }
+#new-lineage {
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  border: 1px solid var(--vscode-button-border, transparent);
+  padding: 2px 8px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 0.85em;
+}
+#new-lineage:hover { background: var(--vscode-button-secondaryHoverBackground); }
+#lineage-select {
+  background: var(--vscode-dropdown-background, var(--vscode-editor-background));
+  color: var(--vscode-dropdown-foreground, var(--vscode-foreground));
+  border: 1px solid var(--vscode-dropdown-border, var(--vscode-panel-border));
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 0.9em;
+  min-width: 220px;
+}
 .nav-hint {
   margin-left: auto;
   color: var(--vscode-descriptionForeground);
@@ -58,23 +79,251 @@ body {
 .dot.red    { background: var(--vscode-charts-red); }
 .dot.gray   { background: var(--vscode-descriptionForeground); }
 .dot.root   { background: var(--vscode-charts-blue); }
+/* Diagnostics banner — surfaces stale-override count + unresolved
+   parent-link count above the legend. Hidden when both counts are
+   zero so a clean workspace stays uncluttered. */
+.diagnostics-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 16px 6px 16px;
+  font-size: 0.85em;
+  color: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow));
+  background: var(--vscode-inputValidation-warningBackground, transparent);
+  border-bottom: 1px solid var(--vscode-panel-border);
+  flex: 0 0 auto;
+}
+.diagnostics-banner[hidden] { display: none; }
+.diagnostics-text { font-weight: 500; }
+.diagnostics-clean {
+  background: var(--vscode-button-secondaryBackground);
+  color: var(--vscode-button-secondaryForeground);
+  border: 1px solid var(--vscode-button-border, transparent);
+  padding: 1px 8px;
+  cursor: pointer;
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 0.95em;
+}
+.diagnostics-clean:hover { background: var(--vscode-button-secondaryHoverBackground); }
+/* Horizontal split — graph on the left, optional ΔiOFV side panel on
+   the right. Side panel is `hidden` by default; CSS `display: flex` on
+   .canvas-row keeps the graph at flex:1 so it always fills the
+   remaining width when the panel hides. */
+.canvas-row {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
 /* Scroll wrapper — owns the native scrollbars. Cytoscape's drag-pan
    is disabled (see client.ts); browser scroll moves the canvas. */
 #canvas-wrap {
   flex: 1 1 auto;
+  min-width: 0;
   min-height: 0;
-  overflow: auto;
+  overflow: scroll; /* always show scrollbars; `auto` flashes as content overflows */
+  /* Reserve scrollbar gutter even when content fits — prevents the
+     "scrollbar appears, layout shifts, scrollbar disappears" oscillation
+     that cytoscape's resize triggers. */
+  scrollbar-gutter: stable;
   position: relative;
   display: none;
 }
-/* Cytoscape canvas — sized from JS to the graph's bounding box (or
-   the wrap dimensions, whichever is bigger) so scrollbars appear when
-   the graph exceeds the visible area. `position: relative` is required
-   by cytoscape's UI extensions for correct hit-testing. */
-#cy {
+/* ΔiOFV side panel. Lazy-populated when the user clicks an edge. */
+.iofv-panel {
+  flex: 0 0 320px;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  overflow: hidden;
+}
+.iofv-panel[hidden] { display: none; }
+.iofv-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+.iofv-title { font-weight: 600; font-size: 0.95em; }
+.iofv-close {
+  background: transparent;
+  border: none;
+  color: var(--vscode-foreground);
+  cursor: pointer;
+  font-size: 1.1em;
+  line-height: 1;
+  padding: 0 4px;
+}
+.iofv-close:hover { color: var(--vscode-errorForeground); }
+.iofv-body {
+  padding: 8px 10px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  font-size: 0.9em;
+}
+.iofv-hint { color: var(--vscode-descriptionForeground); margin: 4px 0 0; }
+.iofv-summary-line {
+  margin: 2px 0;
+  font-variant-numeric: tabular-nums;
+}
+.iofv-counts {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 6px 0 10px;
+}
+.iofv-count-badge {
+  padding: 2px 6px;
+  border-radius: 8px;
+  font-size: 0.85em;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+}
+.iofv-count-badge.improved { background: var(--vscode-charts-green); color: var(--vscode-editor-background); }
+.iofv-count-badge.worsened { background: var(--vscode-charts-red); color: var(--vscode-editor-background); }
+.iofv-section-title {
+  margin: 10px 0 4px;
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--vscode-descriptionForeground);
+}
+.iofv-table {
   width: 100%;
-  height: 100%;
-  position: relative;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9em;
+}
+.iofv-table th, .iofv-table td {
+  text-align: right;
+  padding: 2px 6px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+.iofv-table th:first-child, .iofv-table td:first-child { text-align: left; }
+.iofv-table th { color: var(--vscode-descriptionForeground); font-weight: 500; }
+.iofv-table td.delta-improved { color: var(--vscode-charts-green); }
+.iofv-table td.delta-worsened { color: var(--vscode-charts-red); }
+.iofv-error { color: var(--vscode-errorForeground); margin: 6px 0 0; }
+.iofv-warning {
+  color: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow));
+  background: var(--vscode-inputValidation-warningBackground, transparent);
+  border-left: 3px solid var(--vscode-charts-yellow);
+  padding: 6px 8px;
+  margin: 8px 0 4px;
+  font-size: 0.9em;
+  font-weight: 500;
+}
+/* Soft variant: same colour cue, lighter weight; sits above the
+   summary tables when the comparison is numerically valid but
+   methodologically caveated (e.g. method mismatch). */
+.iofv-warning-soft {
+  font-weight: 400;
+  font-size: 0.85em;
+  margin: 6px 0;
+}
+/* Edge interactivity — keep the visible stroke 2px but expand the
+   click target via stroke-width on hover; cursor signal so users
+   discover the click affordance. */
+.edge { cursor: pointer; pointer-events: stroke; }
+.edge:hover { stroke-width: 4; }
+/* SVG host — `#cy` retained as the id for backward-compat with the
+   shell HTML. The rendered SVG inside takes its own width/height
+   attributes (set from JS to layout extent × zoom), so this
+   container itself just provides a stable parent. */
+#cy {
+  display: inline-block;
+  vertical-align: top;
+  line-height: 0;
+}
+/* SVG node + edge styling. Theme colours via CSS vars work directly
+   on SVG presentation properties when set via `class` selectors
+   (the prior cytoscape canvas couldn't read CSS vars at all — one of
+   the reasons we left it). */
+.node-rect {
+  fill: var(--vscode-editor-background);
+  stroke-width: 2;
+}
+/* Node border = ΔOFV class of the inbound edge (the run's
+   relationship to its parent):
+     green  = improvement   yellow = indifferent
+     red    = worsening     gray   = noncomparable / no fit
+     root   = blue (no parent edge in the graph)
+   All theme-aware via VS Code chart variables. */
+.node-green  { stroke: var(--vscode-charts-green); }
+.node-yellow { stroke: var(--vscode-charts-yellow); }
+.node-red    { stroke: var(--vscode-charts-red); }
+.node-gray   { stroke: var(--vscode-descriptionForeground); }
+.node-root   { stroke: var(--vscode-charts-blue); }
+.node:hover .node-rect {
+  filter: brightness(1.1);
+  stroke-width: 3;
+}
+/* Source node during drag — dimmed so the user can see the ghost line
+   pointing at the target. */
+.node.dragging .node-rect {
+  opacity: 0.45;
+}
+/* Drop-target highlight while a drag is hovering this node — blue
+   outline + dashed pattern + grow stroke so it's unmistakable. */
+.node.drop-target .node-rect {
+  stroke: var(--vscode-charts-blue);
+  stroke-width: 3;
+  stroke-dasharray: 6 3;
+}
+/* Ghost line connecting the drag source to the cursor while dragging. */
+.drag-ghost {
+  fill: none;
+  stroke: var(--vscode-charts-blue);
+  stroke-width: 2;
+  stroke-dasharray: 4 4;
+  pointer-events: none;
+}
+.node-text {
+  fill: var(--vscode-editor-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: 11px;
+  pointer-events: none; /* clicks pass through to the rect/group */
+  user-select: none;
+}
+.edge {
+  fill: none;
+  stroke-width: 2;
+}
+/* Per-section header text + thin separator line. Only visible in
+   "All Runs" mode where the lineage is grouped by dataset. */
+.section-header {
+  fill: var(--vscode-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: 12px;
+  font-weight: 600;
+}
+.section-rule {
+  stroke: var(--vscode-panel-border);
+  stroke-width: 1;
+}
+.edge-green  { stroke: var(--vscode-charts-green); }
+.edge-red    { stroke: var(--vscode-charts-red); }
+.edge-yellow { stroke: var(--vscode-charts-yellow); }
+.edge-gray   { stroke: var(--vscode-descriptionForeground); }
+.edge-root   { stroke: var(--vscode-charts-blue); }
+/* Workspace-override edge — dashed stroke distinguishes a parent set
+   via `lineageOverrides` (right-click → Set parent…, drag-to-parent,
+   Create relation…) from a file-canonical `;; Based on:` runrecord
+   marker. Keeps the same colour signal (improvement / worsening /…)
+   so the user reads ΔOFV class first, provenance second. */
+.edge.via-override { stroke-dasharray: 5 4; }
+/* Tiny dashed-line legend swatch matching `.dot` dimensions so the
+   legend row reads at the same baseline. */
+.dash {
+  display: inline-block;
+  width: 18px;
+  border-bottom: 2px dashed var(--vscode-foreground);
+  vertical-align: middle;
+  margin-right: 4px;
+  margin-bottom: 4px;
 }
 #empty {
   flex: 1 1 auto;

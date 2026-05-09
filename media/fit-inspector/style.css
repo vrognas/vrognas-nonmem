@@ -6,6 +6,12 @@ body {
   background-color: var(--vscode-sideBar-background);
   padding: 8px;
   margin: 0;
+  /* Allow horizontal scroll when the inspector pane is narrower than
+     the param tables' min-width. Without this, the fixed-layout
+     percentage columns compress below readable widths and cells
+     visibly overlap (numbers like `1e+06` collide with their
+     neighbours). Vertical scroll stays auto via VS Code default. */
+  overflow-x: auto;
 }
 .empty {
   color: var(--vscode-descriptionForeground);
@@ -20,9 +26,303 @@ body {
   border-left: 3px solid var(--vscode-textLink-foreground);
   font-family: var(--vscode-editor-font-family, monospace);
 }
+/* OFV line above the THETA table — slightly emphasised, not a banner.
+ * Kept on its own line for primacy but at body-text size; just a label
+ * + bold value separated by a thin column rule. */
+.ofv-headline {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 4px 0 8px 0;
+  font-family: var(--vscode-editor-font-family, monospace);
+}
+.ofv-headline .ofv-label {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  font-weight: 600;
+}
+.ofv-headline .ofv-value {
+  font-weight: 600;
+  color: var(--vscode-foreground);
+}
+/* sig-digits annotation — small, muted, sits adjacent to the OFV value.
+   Same colour vocabulary as `.meta` for warn/bad threshold colouring. */
+.ofv-headline .ofv-sep {
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.92em;
+}
+.ofv-headline .ofv-sigdigits {
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.92em;
+}
 .summary .title { font-weight: 600; }
 .summary .ofv { color: var(--vscode-descriptionForeground); margin-left: 8px; }
 .summary .meta { color: var(--vscode-descriptionForeground); margin-left: 8px; font-size: 0.92em; }
+/* Semantic threshold-colour classes (warn = yellow, bad = red, good = green).
+   Same colour vocabulary as the inspector tables. Theme-aware via
+   `--vscode-charts-*`. Apply globally so the same span renders correctly
+   regardless of parent — used in `.meta`, `.convergence-step-meta`,
+   `.diag-line` (for cond), and `.ofv-headline` (for sig-digits). */
+.meta-warn { color: var(--vscode-charts-yellow); font-weight: 600; }
+.meta-bad  { color: var(--vscode-charts-red); font-weight: 600; }
+.meta-good { color: var(--vscode-charts-green); font-weight: 600; }
+
+/* Convergence trajectory section — collapsible <details>; one block
+   per chained $EST. SAEM models can have hundreds of iterations so
+   we keep the per-param sparklines small (~110×32 px) and lay them
+   out in a flex grid that wraps. The OFV plot gets a dedicated
+   full-width line above the param grid. */
+.convergence {
+  margin-top: 14px;
+  border-top: 1px solid var(--vscode-panel-border);
+  padding-top: 8px;
+}
+.convergence > summary {
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--vscode-descriptionForeground);
+  outline: none;
+  user-select: none;
+}
+.convergence-step { margin: 8px 0; }
+.convergence-step-heading {
+  font-size: 0.92em;
+  color: var(--vscode-descriptionForeground);
+  margin: 6px 0 4px;
+}
+/* XML-derived per-step results line (termination + timing) under the
+   heading. Same `·`-separated style as the inspector's meta-line. */
+.convergence-step-meta {
+  font-size: 0.85em;
+  color: var(--vscode-descriptionForeground);
+  margin: -2px 0 4px;
+}
+/* Grid layout — fixed 110px columns force every cell to align across
+   rows regardless of how wide its `range` text (final value + Δ) is.
+   `auto-fill` packs as many columns as fit the inspector pane. */
+.convergence-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 110px);
+  gap: 8px 12px;
+  align-items: flex-start;
+  justify-content: start;
+}
+.convergence-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.85em;
+  width: 110px;
+  /* Long range strings (e.g. "-40992.071 (Δ -1060.189)") were
+     stretching the cell — and therefore the row's wrap point — so
+     allow the text to wrap inside the fixed-width cell instead. */
+  overflow-wrap: anywhere;
+}
+/* OFV cell sits OUTSIDE the grid (rendered separately above it) so
+   it gets full width without having to span columns. */
+.convergence-cell-ofv {
+  width: 100%;
+  margin-bottom: 6px;
+}
+.convergence-label {
+  color: var(--vscode-foreground);
+  font-weight: 500;
+}
+.convergence-cell-ofv .convergence-label {
+  font-weight: 600;
+  font-size: 0.95em;
+}
+.convergence-range {
+  color: var(--vscode-descriptionForeground);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.92em;
+  /* Belt-and-braces: tuneGridColumns measures the widest range and
+     locks every column to it, so range strings should fit by
+     construction. But sub-pixel font-hinting differences across
+     platforms can still shave a pixel; ellipsis prevents an ugly
+     overflow rather than catastrophic spill. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.convergence-svg {
+  /* SVG fills its cell so when JS widens columns to fit the longest
+     range string, the sparkline scales with the cell instead of
+     leaving an indent on the right. preserveAspectRatio="none" on
+     the element lets the polyline stretch horizontally without
+     distorting the vertical scale (which uses a fixed 32px viewBox). */
+  width: 100%;
+  height: 32px;
+  background: var(--vscode-textBlockQuote-background, transparent);
+  border: 1px solid var(--vscode-editorIndentGuide-background);
+  border-radius: 2px;
+}
+.convergence-svg-ofv {
+  width: 100%;
+  height: 80px;
+}
+.convergence-svg-line {
+  fill: none;
+  stroke: var(--vscode-textLink-foreground);
+  stroke-width: 1.2;
+  vector-effect: non-scaling-stroke;
+}
+.convergence-svg-ofv .convergence-svg-line {
+  stroke-width: 1.6;
+}
+.convergence-svg-flat {
+  stroke: var(--vscode-descriptionForeground);
+  stroke-width: 0.8;
+  stroke-dasharray: 2 2;
+  vector-effect: non-scaling-stroke;
+}
+/* Burn-in -> accumulation transition marker (vertical line at iter=0
+   for SAEM/IMP trajectories that include burn-in). */
+.convergence-svg-zero {
+  stroke: var(--vscode-charts-yellow);
+  stroke-width: 0.7;
+  stroke-dasharray: 1 2;
+  opacity: 0.55;
+  vector-effect: non-scaling-stroke;
+}
+.convergence-eonly-note {
+  color: var(--vscode-descriptionForeground);
+  font-style: italic;
+  font-size: 0.9em;
+  margin: 4px 0 8px 4px;
+}
+/* Per-block slider for skipping early high-magnitude iterations
+   (SAEM/IMP OFV typically drops 10^5 in the first 1-2 iters). Native
+   <input type="range"> styled minimally; relies on the user-agent
+   accent color for the thumb so it tracks the VS Code theme. */
+.convergence-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 6px;
+  font-size: 0.9em;
+  color: var(--vscode-descriptionForeground);
+}
+.convergence-slider-label { white-space: nowrap; }
+.convergence-slider {
+  flex: 0 0 220px;
+  accent-color: var(--vscode-textLink-foreground);
+  cursor: pointer;
+}
+.convergence-slider-val {
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-variant-numeric: tabular-nums;
+  color: var(--vscode-foreground);
+  min-width: 5ch;
+}
+/* Pairwise-correlation red-flag table inside the diagnostics block.
+   Surfaces facts; the user combines with `cond` and per-row RSE for
+   the full overparameterization read. */
+.diag-correlations {
+  margin: 6px 0 4px;
+}
+.diag-correlations-heading {
+  font-size: 0.92em;
+  color: var(--vscode-descriptionForeground);
+  margin-bottom: 3px;
+}
+.diag-corr-table {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9em;
+}
+.diag-corr-table th,
+.diag-corr-table td {
+  text-align: left;
+  padding: 1px 10px 1px 0;
+}
+.diag-corr-table th {
+  color: var(--vscode-descriptionForeground);
+  font-weight: 500;
+}
+.diag-corr-r {
+  text-align: right !important;
+  font-weight: 600;
+}
+.diag-corr-r-header { text-align: right !important; }
+.diag-corr-r-warn { color: var(--vscode-charts-yellow); }
+.diag-corr-r-bad  { color: var(--vscode-charts-red); }
+
+/* XML estimation_options dump — one outer <details> wrapping
+   per-step inner <details>, each containing a 2-col attribute
+   table. Default closed (verbose; the user opens to look up a
+   specific knob). */
+.xml-options {
+  margin-top: 8px;
+}
+.xml-options > summary,
+.xml-options-step > summary {
+  cursor: pointer;
+  font-size: 0.92em;
+  color: var(--vscode-descriptionForeground);
+  outline: none;
+  user-select: none;
+  padding: 2px 0;
+}
+.xml-options-step {
+  margin: 4px 0 4px 12px;
+}
+.xml-options-table {
+  border-collapse: collapse;
+  width: auto;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 0.88em;
+  margin: 4px 0 4px 16px;
+}
+.xml-options-table td {
+  padding: 1px 12px 1px 0;
+  border-bottom: 1px solid var(--vscode-editorIndentGuide-background);
+  vertical-align: top;
+}
+.xml-options-key {
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+  text-align: left !important;
+  /* NONMEM attr names emit lowercase (`isample_m1a`) but the NM-TRAN
+     keyword convention is uppercase (`ISAMPLE_M1A`). Display-only —
+     copy-paste preserves the actual lowercase from the XML. */
+  text-transform: uppercase;
+}
+.xml-options-val {
+  color: var(--vscode-foreground);
+  font-variant-numeric: tabular-nums;
+  text-align: left !important;
+}
+/* Non-default values: differ from the method's empirically-probed
+   baseline (see runtime/xml-est-defaults.ts). Blue tint matches the
+   FIXED-row convention used elsewhere in the inspector for
+   "user-customised" attributes. */
+.xml-options-val--non-default {
+  color: var(--vscode-charts-blue);
+  font-weight: 600;
+}
+/* User-driven values: NM requires user to supply (niter, nburn,
+   isample) or per-run identity (seed, clockseed, file,
+   estimation_method). Distinct visual tier from non-default —
+   "you typed this" not "you customised away from method default." */
+.xml-options-val--user-driven {
+  color: var(--vscode-charts-green);
+  font-weight: 600;
+}
+/* Propagated values ($COV-specific): `-1` value means "inherits from
+   $EST / $SUBS / method default" (atol, tol, siglcov, siglocov,
+   knuthsumoff, posdef). Yellow because the actual effective value
+   isn't here — user should look at $EST. Distinct from blue
+   non-default ("user-customised") and green user-driven ("user-set"). */
+.xml-options-val--propagated {
+  color: var(--vscode-charts-yellow);
+  font-weight: 600;
+}
 .summary .method {
   display: inline-block;
   margin-left: 8px;
@@ -31,6 +331,14 @@ body {
   font-size: 0.8em;
   background: var(--vscode-badge-background);
   color: var(--vscode-badge-foreground);
+}
+/* EVAL-ONLY badge for MAXEVAL=0 runs — yellow tint to differentiate
+ * from the method badge (default badge background) and to signal the
+ * "this isn't a fitted result" caveat at a glance. */
+.summary .method.method-eval {
+  background: var(--vscode-charts-yellow);
+  color: var(--vscode-editor-background);
+  font-weight: 600;
 }
 .notes {
   margin-bottom: 14px;
@@ -99,6 +407,18 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--vscode-descriptionForeground);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+/* Inline toggle next to a section title (Theta / Omega) — visually
+   subordinate to the heading text, aligned by flex baseline. */
+.section h3 .toggle {
+  font-size: 11px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--vscode-descriptionForeground);
 }
 table {
   width: 100%;
@@ -129,29 +449,59 @@ tr.clickable:hover { background: var(--vscode-list-hoverBackground); }
 tr.fixed-row td { color: var(--vscode-charts-blue); }
 .dim { color: var(--vscode-descriptionForeground); }
 .fix { color: var(--vscode-charts-yellow); }
-/* Threshold warning: RSE > 100%, Shrinkage > configurable %. */
+/* Threshold tiers: `.warn` = borderline (orange), `.bad` = critical (red).
+   Used by RSE / shrinkage / p-value cells. `--vscode-editorWarning-foreground`
+   (squiggly-underline color) is consistently saturated across themes;
+   `--vscode-charts-orange` rendered too dim in some peach/amber palettes
+   to be a useful warning indicator. */
+.warn { color: var(--vscode-editorWarning-foreground); font-weight: 600; }
 .bad { color: var(--vscode-charts-red); font-weight: 600; }
 /* At-boundary highlight: estimator hit the (lb, ie, ub) bound rather
    than converging freely. Distinct from `.bad` (red, hard error) and
    `.fix` (yellow, intentional). */
 .boundary { color: var(--vscode-charts-orange); font-weight: 600; }
-/* Parameter sections (Theta / Omega / Sigma) keep `#` AND `Label`
-   left-aligned; numeric value/RSE/shrinkage columns stay right-aligned.
-   Other tables (shrinkage, ETA/EPS) only get the default `td:first-child`
-   rule, so their 2nd column (numeric ETABAR) stays right-aligned. */
-table.param-table td:nth-child(2),
-table.param-table th:nth-child(2) { text-align: left; }
-/* Pirana inline-stat wrappers: `(RSE%)` and `[Shrinkage%]` are dimmed
-   so the eye snaps to the central Value column first. */
-.inline-stat { color: var(--vscode-descriptionForeground); }
-/* Display-preference toggles (√Ω, exp(θ)) above the parameter tables. */
-.toggles {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 8px;
-  padding: 4px 0;
-  font-size: 0.92em;
+/* Parameter sections (Theta / Omega / Sigma): `#` and `Label` columns
+   are left-aligned; numeric value/RSE/shrinkage columns stay right-
+   aligned via the global `td` rule. Class-based selectors so dropping
+   the Label column (when no `;<comment>` exists in any row) doesn't
+   shift nth-child positions and break alignment. */
+table.param-table td.col-label,
+table.param-table th.col-label { text-align: left; }
+/* Fluid table layout: fill the inspector pane (no fixed pixel width
+   wastes pane width) but keep `table-layout: fixed` so per-column
+   widths are honoured. Class-based widths (.col-*) sum to ~100% across
+   the 9 possible columns so alignment is preserved across THETA /
+   OMEGA / SIGMA tables. When Label is dropped (most models lack
+   inline comments), other columns proportionally absorb the freed
+   space. */
+table.param-table {
+  table-layout: fixed;
+  width: 100%;
+  /* Floor below which columns can't compress without overlap.
+     Empirically: `1e+06` lower-bound + `1e+06` upper-bound + 9 columns
+     × ~50 px each ≈ 450 px. Below this, the body scrolls horizontally
+     (see `body { overflow-x: auto }`); above it, the percentage
+     widths distribute the extra space proportionally. */
+  min-width: 460px;
 }
+table.param-table .col-num    { width: 5%; }
+table.param-table .col-label  { width: 16%; }
+table.param-table .col-lb,
+table.param-table .col-ie,
+table.param-table .col-ub     { width: 10%; }
+table.param-table .col-fe     { width: 13%; }
+table.param-table .col-rse    { width: 14%; }
+table.param-table .col-nsd    { width: 6%; }
+table.param-table .col-shrink { width: 16%; }
+/* Secondary-stat dimming for RSE / NSD / Shrinkage cells (eye snaps
+   to FE first). Threshold-warn classes (`.warn` / `.bad`) on inner
+   spans override this with their own color, preserving the orange/red
+   highlight. */
+table.param-table td.col-rse,
+table.param-table td.col-nsd,
+table.param-table td.col-shrink { color: var(--vscode-descriptionForeground); }
+/* Display-preference toggles (√Ω/ρ, exp(θ)) live inline next to
+   their relevant section title (see `.section h3 .toggle` rule). */
 .toggle {
   display: inline-flex;
   align-items: center;

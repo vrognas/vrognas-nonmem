@@ -28,14 +28,33 @@ import {
 import type { Runner } from '../runner';
 import { errMsg, tryLoad } from '../log-utils';
 import { extractControlStream } from '../runtime/extract-control-stream';
-import { findExtFile } from '../runtime/find-ext-file';
-import { loadExtFitForLst } from '../runtime/load-ext-fit';
+import { findArtifactFile, findExtFile } from '../runtime/find-ext-file';
+import { readExtText } from '../runtime/load-ext-text';
+import { readXmlText } from '../runtime/load-xml-text';
+import { lastCnvTable, type CnvTable } from '../runtime/parse-cnv';
+import { lastCorTable, type CorTable } from '../runtime/parse-cor';
+import { parseExtFit } from '../runtime/parse-ext-fit';
+import { parseExtTrajectory, type ExtTrajectory } from '../runtime/parse-ext-trajectory';
+import {
+  parseEstimationOptions,
+  type EstimationOptionsStep,
+} from '../runtime/parse-xml-options';
+import {
+  parseCovarianceOptions,
+  type CovarianceOptions,
+} from '../runtime/parse-xml-problem-options';
+import {
+  parseEstimationResults,
+  type EstimationStepResult,
+} from '../runtime/parse-xml-results';
 import type { ExtEstimates } from '../runtime/parse-ext-fit';
 import { parseLst, type LstSummary } from '../runtime/parse-lst';
 import { parseRunrecord, type RunrecordTags } from '../runtime/parse-runrecord';
 import type { SumoSummary } from '../runtime/parse-sumo';
+import { readFmsg, type FmsgContent } from '../runtime/read-fmsg';
 import { readPrderr, type PrderrContent } from '../runtime/read-prderr';
 import { runSumo } from '../runtime/run-sumo';
+import { quote } from '../shell';
 
 export interface VariablesContext {
   /** Parsed-model snapshot pulled from vscode-nmtran for the .mod file. */
@@ -60,6 +79,55 @@ export interface VariablesContext {
   runrecord: RunrecordTags | null;
   /** PRDERR file contents (NONMEM warnings); null when none was emitted / not extractable. */
   prderr: PrderrContent | null;
+  /** FMSG file contents (NMTRAN parser messages / errors); null when empty or not located. */
+  fmsg: FmsgContent | null;
+  /**
+   * Correlation matrix of estimates from sibling `.cor` (last $EST step).
+   * Null when no `.cor` was emitted / read failed / parse returned no
+   * tables. Drives the inspector's pairwise-correlation red-flag list.
+   */
+  cor: CorTable | null;
+  /**
+   * Convergence-test table from sibling `.cnv` (last $EST step).
+   * NM 7.2+, written only when `$EST CTYPE > 0` (EM/MCMC methods).
+   * Null when no `.cnv` was emitted (FOCE without CTYPE, parse failed,
+   * etc.). Drives the inspector's "EM converged / NOT converged"
+   * meta-line verdict.
+   */
+  cnv: CnvTable | null;
+  /**
+   * Per-iteration trajectories from sibling `.ext`, one entry per
+   * `TABLE NO.` block (chained $EST). Empty when no .ext was found
+   * / parse failed. Drives the inspector's convergence-plot section
+   * (sparklines per parameter + OFV).
+   */
+  trajectories: ExtTrajectory[];
+  /**
+   * Per-`$EST`-step option dictionaries from the sibling `.xml`'s
+   * `<nm:estimation_options ... />` elements. The XML is the
+   * exhaustive surface for `$EST` settings (the `.lst` echo is a
+   * human-readable subset). NM 7.2+ writes `.xml` automatically
+   * unless `nmfe76 -xmloff` was used. Empty when no `.xml` was
+   * found / parse failed.
+   */
+  xmlEstimationOptions: EstimationOptionsStep[];
+  /**
+   * Per-`$EST`-step result fields from `<nm:estimation>` blocks:
+   * termination_status (numeric code), burnin_time, elapsed_time.
+   * Empty when no `.xml` was found. The `.lst` only echoes per-step
+   * timing for the LAST step; XML carries it for every step in the
+   * chain.
+   */
+  xmlEstimationResults: EstimationStepResult[];
+  /**
+   * `$COVARIANCE` option dictionary from the sibling `.xml`'s
+   * `<nm:problem_options>` element's `cov_*` attrs. NM 7.6.0 does NOT
+   * emit a dedicated `<nm:covariance_options>` element — empirically
+   * confirmed via probes at `~/positron-nonmem/probe-cov*` on the host.
+   * Null when no `.xml` was found, no `cov_*` attrs were present
+   * (model has no `$COV` record), or parse failed.
+   */
+  xmlCovarianceOptions: CovarianceOptions | null;
 }
 
 /** Logger contract — every diagnostic line about the resolution path goes here. */
@@ -102,7 +170,21 @@ async function resolveModMode(
   }
   log(`mod-mode: parsedModel ok — ${parsedModelStatsLine(model)}`);
   const runrecord = await loadRunrecord(uri.fsPath, log);
-  return { model, modUri: uri, fit: null, sumo: null, lst: null, runrecord, prderr: null };
+  return { model, modUri: uri, fit: null, sumo: null, lst: null, runrecord, prderr: null, fmsg: null, cor: null, cnv: null, trajectories: [], xmlEstimationOptions: [], xmlEstimationResults: [], xmlCovarianceOptions: null };
+}
+
+/**
+ * Public entry point used by surfaces other than the active-editor
+ * watcher — e.g. clicking a node in the lineage panel triggers
+ * Fit Inspector update WITHOUT opening the .lst as an editor (no tab,
+ * focus stays on the lineage view). Mirrors the .lst path of
+ * `resolveVariablesContext` but takes the URI directly.
+ */
+export async function resolveContextForLstUri(
+  lstUri: vscode.Uri,
+  deps: ResolveDeps = {},
+): Promise<VariablesContext | null> {
+  return resolveLstMode(lstUri, deps.log ?? NOOP_LOGGER, deps.runner);
 }
 
 async function resolveLstMode(
@@ -144,13 +226,41 @@ async function resolveLstMode(
   if (modUri) log(`lst-mode: sibling .mod for navigation = ${modUri.fsPath}`);
   else log(`lst-mode: no sibling .mod found — click-to-source disabled`);
 
-  const [fit, sumo, lst, runrecord, prderr] = await Promise.all([
-    loadFit(fsPath, log),
+  // Resolve the modelfit_dir once and share it with every aux-file
+  // reader. Previously `loadPrderr` and `loadFmsg` each called
+  // `findExtFile(fsPath)` independently — two disk walks per active-
+  // editor change for the same answer. Now we walk once.
+  const extPath = await findExtFile(fsPath);
+  const modelfitDir = extPath ? path.dirname(extPath) : null;
+
+  // Read .ext text once and feed both parsers to avoid two disk
+  // roundtrips for the same file (matters on slow remote-mounted FS).
+  // Same one-read pattern for `.xml` -- inspector currently only
+  // reads `<nm:estimation_options>`, but later parsers will share
+  // the text.
+  const [extText, xmlText, sumo, lst, runrecord, prderr, fmsg, cor, cnv] = await Promise.all([
+    readExtText(fsPath, log),
+    readXmlText(fsPath, log, runner),
     loadSumo(fsPath, runner, log),
     loadLstSummaryFromText(lstText, log),
     modUri ? loadRunrecord(modUri.fsPath, log) : loadRunrecordFromText(lstText, log),
-    loadPrderr(fsPath, runner, log),
+    modelfitDir ? loadPrderr(modelfitDir, runner, log) : Promise.resolve(null),
+    modelfitDir ? loadFmsg(modelfitDir, runner, log) : Promise.resolve(null),
+    loadCor(fsPath, log, runner),
+    loadCnv(fsPath, log, runner),
   ]);
+  const fit = extText ? parseExtFit(extText) : null;
+  const trajectories = extText ? parseExtTrajectory(extText) : [];
+  const xmlEstimationOptions = xmlText ? parseEstimationOptions(xmlText) : [];
+  const xmlEstimationResults = xmlText ? parseEstimationResults(xmlText) : [];
+  const xmlCovarianceOptions = xmlText ? parseCovarianceOptions(xmlText) : null;
+  if (!fit) {
+    log(`lst-mode: no .ext / unparseable / no final row — pushing init-only`);
+  } else {
+    log(
+      `lst-mode: fit parsed — finals=${fit.finals.size} ses=${fit.standardErrors.size} ofv=${fit.ofv}`,
+    );
+  }
   return {
     model,
     // No-sibling-mod case: leave `modUri` undefined so the inspector's
@@ -163,7 +273,115 @@ async function resolveLstMode(
     lst,
     runrecord,
     prderr,
+    fmsg,
+    cor,
+    cnv,
+    trajectories,
+    xmlEstimationOptions,
+    xmlEstimationResults,
+    xmlCovarianceOptions,
   };
+}
+
+/**
+ * Locate the sibling `.cor` and parse its final $EST step's correlation
+ * matrix. Two source layouts handled:
+ *   - **Plain** `<basename>.cor` (Pirana-flat or PsN-modelfit_dir).
+ *   - **Per-file 7z archive** `<basename>.cor.7z` (PsN's default for
+ *     COV-step matrices when `-clean` ≥ default — `.cor`, `.cov`, `.coi`
+ *     get individually compressed into `<file>.7z` next to plain
+ *     `.ext` / `.lst` / `.phi`. Distinct from the `NM_run1.7z` directory
+ *     archive that holds PRDERR / FMSG; here it's a single-member
+ *     archive with the file at the root.
+ *
+ * Returns null when the file genuinely isn't there, can't be extracted
+ * (no runner), or the parsed text has no `TABLE NO.` block — same
+ * degrade-to-null pattern as `loadFit`. NONMEM 7.2+ stores parameter
+ * SEs on the matrix diagonal (not 1.0); we preserve verbatim because
+ * the red-flag scan is upper-triangle off-diagonal so the diagonal
+ * value doesn't matter.
+ */
+async function loadCor(
+  lstPath: string,
+  log: VariablesLogger,
+  runner: Runner | undefined,
+): Promise<CorTable | null> {
+  return tryLoad('lst-mode: cor read failed', log, async () => {
+    const text = await readArtifactText(lstPath, '.cor', log, runner);
+    if (text === null) return null;
+    const table = lastCorTable(text);
+    if (!table) {
+      log(`lst-mode: .cor parsed but no TABLE NO. block recognised`);
+      return null;
+    }
+    log(`lst-mode: cor parsed — ${table.paramNames.length} params, method=${table.method}`);
+    return table;
+  });
+}
+
+/**
+ * Convergence-test table loader. NM 7.2+ writes `.cnv` whenever an
+ * EM/MCMC `$EST` had `CTYPE > 0`; FOCE-only / CTYPE=0 runs produce
+ * none and we degrade to null silently. Mirrors `loadCor` for the
+ * plain-vs-`.cnv.7z` fallback (PsN compresses these per-file the
+ * same way it does `.cor`).
+ */
+async function loadCnv(
+  lstPath: string,
+  log: VariablesLogger,
+  runner: Runner | undefined,
+): Promise<CnvTable | null> {
+  return tryLoad('lst-mode: cnv read failed', log, async () => {
+    const text = await readArtifactText(lstPath, '.cnv', log, runner);
+    if (text === null) return null;
+    const table = lastCnvTable(text);
+    if (!table) {
+      log(`lst-mode: .cnv parsed but no marker rows recognised`);
+      return null;
+    }
+    log(`lst-mode: cnv parsed — ${table.paramNames.length} cols, method=${table.method}`);
+    return table;
+  });
+}
+
+/**
+ * Generic plain-or-7z artifact reader. Used by `.cor` and `.cnv` —
+ * both follow the PsN per-file 7z convention (`<basename>.<ext>.7z`,
+ * single-member archive with the file at root). Returns null when
+ * neither layout has anything readable.
+ */
+async function readArtifactText(
+  lstPath: string,
+  extension: `.${string}`,
+  log: VariablesLogger,
+  runner: Runner | undefined,
+): Promise<string | null> {
+  const plainPath = await findArtifactFile(lstPath, extension);
+  if (plainPath) return fs.readFile(plainPath, 'utf8');
+
+  const archiveExt: `.${string}` = `${extension}.7z`;
+  const archivePath = await findArtifactFile(lstPath, archiveExt);
+  if (!archivePath) {
+    log(`lst-mode: no ${extension} / ${extension}.7z sibling found`);
+    return null;
+  }
+  if (!runner) {
+    log(`lst-mode: ${extension}.7z found but no runner — skipping extraction`);
+    return null;
+  }
+  const memberName = path.basename(archivePath, '.7z');
+  const cmd = `7z e -so -y ${quote(archivePath)} ${memberName} 2>/dev/null`;
+  try {
+    const result = await runner.run(cmd, path.dirname(archivePath));
+    if (result.code !== 0) {
+      log(`lst-mode: 7z extraction returned ${result.code} for ${archivePath}`);
+      return null;
+    }
+    return result.stdout;
+  } catch (e) {
+    log(`lst-mode: 7z extraction threw for ${archivePath}: ${errMsg(e)}`);
+    return null;
+  }
 }
 
 /**
@@ -221,20 +439,28 @@ async function loadRunrecordFromText(
 }
 
 async function loadPrderr(
-  lstPath: string,
+  modelfitDir: string,
   runner: Runner | undefined,
   log: VariablesLogger,
 ): Promise<PrderrContent | null> {
-  // PRDERR lives at <modelfitDir>/NM_run1/PRDERR (plain) or inside
-  // <modelfitDir>/NM_run1.7z (PsN's default archive). Locate the
-  // modelfit_dir via the same cascade we use for .ext.
-  const extPath = await findExtFile(lstPath);
-  if (!extPath) return null;
-  const modelfitDir = path.dirname(extPath);
   return tryLoad('lst-mode: prderr read failed', log, async () => {
     const result = await readPrderr({ modelfitDir, runner });
     log(
       `lst-mode: prderr ${result ? `found (${result.source}, ${result.content.length} chars)` : '— none'}`,
+    );
+    return result;
+  });
+}
+
+async function loadFmsg(
+  modelfitDir: string,
+  runner: Runner | undefined,
+  log: VariablesLogger,
+): Promise<FmsgContent | null> {
+  return tryLoad('lst-mode: fmsg read failed', log, async () => {
+    const result = await readFmsg({ modelfitDir, runner });
+    log(
+      `lst-mode: fmsg ${result ? `found (${result.source}, ${result.content.length} chars, hasErrors=${result.hasErrors})` : '— none'}`,
     );
     return result;
   });
@@ -264,18 +490,6 @@ async function loadSumo(
     log(`lst-mode: sumo parsed — statuses=${summary.statuses.length} ofv=${summary.ofv}`);
     return summary;
   });
-}
-
-async function loadFit(lstPath: string, log: VariablesLogger): Promise<ExtEstimates | null> {
-  const fit = await loadExtFitForLst(lstPath, log);
-  if (!fit) {
-    log(`lst-mode: no .ext / unparseable / no final row — pushing init-only`);
-  } else {
-    log(
-      `lst-mode: fit parsed — finals=${fit.finals.size} ses=${fit.standardErrors.size} ofv=${fit.ofv}`,
-    );
-  }
-  return fit;
 }
 
 /**

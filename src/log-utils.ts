@@ -10,6 +10,10 @@
 
 export type Logger = (message: string) => void;
 
+/** Drop-in `Logger` that swallows all messages. Default for code paths
+ *  where logging is optional (unit tests / library callers). */
+export const NOOP_LOGGER: Logger = () => undefined;
+
 /** Stringify any thrown value as a single line. */
 export function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);

@@ -28,31 +28,18 @@ export interface ActiveRunsWatcherDeps {
   tracker: ActiveRunsTracker;
   /** Output channel for diagnostic logging. Optional so unit tests can omit it. */
   log?: (message: string) => void;
-  /**
-   * Auto-fail running entries after this many ms with no `.lst`. Guards
-   * against runs that crash silently or whose `.lst` event the watcher
-   * misses (out-of-workspace path, weird FS layout). Default 24 h.
-   * Pass 0 to disable.
-   */
-  staleTimeoutMs?: number;
 }
-
-const DEFAULT_STALE_TIMEOUT_MS = 24 * 60 * 60 * 1000; // 24 h
 
 export class ActiveRunsWatcher implements vscode.Disposable {
   /** Live pollers, keyed by runId. Stopped on completion or dispose. */
   private readonly pollers = new Map<string, ProgressPoller>();
-  /** Per-run stale-timeout cancellers, keyed by runId. Cancelled on completion or dispose. */
-  private readonly staleCancellers = new Map<string, () => void>();
   private readonly disposables: vscode.Disposable[] = [];
   private readonly tracker: ActiveRunsTracker;
   private readonly log: (message: string) => void;
-  private readonly staleTimeoutMs: number;
 
   constructor(deps: ActiveRunsWatcherDeps) {
     this.tracker = deps.tracker;
     this.log = deps.log ?? ((): void => undefined);
-    this.staleTimeoutMs = deps.staleTimeoutMs ?? DEFAULT_STALE_TIMEOUT_MS;
     const psnModWatcher = vscode.workspace.createFileSystemWatcher('**/NM_run1/psn.mod');
     const lstWatcher = vscode.workspace.createFileSystemWatcher('**/*.lst');
     // .lst handler must listen to BOTH create AND change: when the user
@@ -71,7 +58,7 @@ export class ActiveRunsWatcher implements vscode.Disposable {
   }
 
   dispose(): void {
-    for (const id of [...this.pollers.keys(), ...this.staleCancellers.keys()]) {
+    for (const id of [...this.pollers.keys()]) {
       this.stopRunSideEffects(id);
     }
     for (const d of this.disposables) d.dispose();
@@ -88,11 +75,6 @@ export class ActiveRunsWatcher implements vscode.Disposable {
     if (poller) {
       poller.stop();
       this.pollers.delete(runId);
-    }
-    const cancelStale = this.staleCancellers.get(runId);
-    if (cancelStale) {
-      cancelStale();
-      this.staleCancellers.delete(runId);
     }
   }
 
@@ -147,12 +129,6 @@ export class ActiveRunsWatcher implements vscode.Disposable {
         findModelfitDir: async () => modelfitDir,
       }),
     );
-    if (this.staleTimeoutMs > 0) {
-      this.staleCancellers.set(
-        runId,
-        scheduleStaleTimeout(this.tracker, runId, this.staleTimeoutMs, this.log),
-      );
-    }
   }
 
   /**
@@ -295,36 +271,6 @@ export function parseCommandTxtWithHint(text: string): ModelMetadata | null {
     };
   }
   return null;
-}
-
-/**
- * Schedule a stale-timeout for a tracker entry. After `timeoutMs` we
- * check whether the run is still in `running`; if so, mark it failed
- * with a "no .lst after Nm" message. Returns a cancel fn the caller
- * MUST call on legitimate completion / failure / dispose so the
- * timeout doesn't fire on a terminal entry.
- *
- * Pure-ish: depends only on `setTimeout`/`clearTimeout` and the
- * tracker's mutation API. Tested with `vi.useFakeTimers()`.
- */
-export function scheduleStaleTimeout(
-  tracker: ActiveRunsTracker,
-  runId: string,
-  timeoutMs: number,
-  log: (message: string) => void = (): void => undefined,
-): () => void {
-  const timer = setTimeout(() => {
-    const run = tracker.get(runId);
-    if (run?.state !== 'running') return;
-    const minutes = Math.round(timeoutMs / 60_000);
-    const unit = minutes === 1 ? 'minute' : 'minutes';
-    tracker.markFailed(
-      runId,
-      `no .lst after ${minutes} ${unit} — run may have crashed silently or .lst path is outside the workspace`,
-    );
-    log(`watcher: stale-timeout fired for ${runId} after ${minutes} ${unit}`);
-  }, timeoutMs);
-  return () => clearTimeout(timer);
 }
 
 /**

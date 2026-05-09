@@ -6,21 +6,25 @@ import {
 } from '../../src/views/lst-decoration-provider';
 import type { LstSummary } from '../../src/runtime/parse-lst';
 import type { SumoSummary } from '../../src/runtime/parse-sumo';
+import { mockLst } from '../__helpers__/mock-lst';
 
-const FULL_LST: LstSummary = {
+const FULL_LST: LstSummary = mockLst({
   method: 'First Order Conditional Estimation with Interaction',
   methodShort: 'FOCE-INTER',
+  objv: -638.795,
   sigDigits: 3.4,
+  nsigRequired: 3,
   termination: 'SUCCESSFUL',
   terminationPhrase: 'MINIMIZATION SUCCESSFUL',
-  terminationReason: null,
   etabar: [-0.012, 0.045],
   etaShrinkSd: [2.3, 4.7],
+  etaShrinkVr: [4.5, 9.2],
+  ebvShrinkSd: [1.2, 2.4],
+  ebvShrinkVr: [2.4, 4.8],
   epsShrinkSd: [3.5],
+  epsShrinkVr: [6.9],
   eigenvalues: [0.9, 1.0, 1.1],
-  acceptanceRate: null,
-  numSigDigPerParam: [],
-};
+});
 
 const FULL_SUMO: SumoSummary = {
   statuses: [
@@ -36,20 +40,7 @@ const FULL_SUMO: SumoSummary = {
   conditionNumber: 324.5,
 };
 
-const BARE_LST: LstSummary = {
-  method: null,
-  methodShort: null,
-  sigDigits: null,
-  termination: null,
-  terminationPhrase: null,
-  terminationReason: null,
-  etabar: [],
-  etaShrinkSd: [],
-  epsShrinkSd: [],
-  eigenvalues: [],
-  acceptanceRate: null,
-  numSigDigPerParam: [],
-};
+const BARE_LST: LstSummary = mockLst();
 
 describe('buildLstTooltip', () => {
   it('combines method+OFV on the head line, drops sumo OK statuses', () => {

@@ -100,7 +100,18 @@ export class FitInspectorProvider implements vscode.WebviewViewProvider {
     const styleUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.extensionUri, 'media', 'fit-inspector', 'style.css'),
     );
-    const scriptUri = webview.asWebviewUri(
+    // Order matters: `formatters.js` and `transforms.js` define helper
+    // functions that `client.js` calls at top level. Loading them first
+    // guarantees the globals exist when client.js runs. All three are
+    // plain scripts (no module loaders, no CSP gymnastics) — same model
+    // as the lineage panel's bundled IIFE output.
+    const formattersUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'media', 'fit-inspector', 'formatters.js'),
+    );
+    const transformsUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, 'media', 'fit-inspector', 'transforms.js'),
+    );
+    const clientUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.extensionUri, 'media', 'fit-inspector', 'client.js'),
     );
     return `<!DOCTYPE html>
@@ -112,7 +123,9 @@ export class FitInspectorProvider implements vscode.WebviewViewProvider {
 </head>
 <body>
 <div id="root"></div>
-<script src="${scriptUri}"></script>
+<script src="${formattersUri}"></script>
+<script src="${transformsUri}"></script>
+<script src="${clientUri}"></script>
 </body>
 </html>`;
   }

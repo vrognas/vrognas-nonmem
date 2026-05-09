@@ -15,8 +15,7 @@ workbench here.
 
 ## Status / milestones
 
-The full design lives in
-[`docs/design.md`](docs/design.md) (mirrored from the project plan). Current milestone:
+The full design lives in `docs/design.md` (private — mirrored from the project plan). Current milestone:
 
 - ✅ **M0** — Repo scaffold, build pipeline, lint/test/format toolchain.
 - 🟡 **M1** — `Positron NONMEM: Test Connection` command. SSH transport reads the

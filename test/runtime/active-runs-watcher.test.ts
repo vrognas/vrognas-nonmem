@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -7,9 +7,7 @@ import {
   parseCommandTxt,
   parseCommandTxtWithHint,
   findCallingCwd,
-  scheduleStaleTimeout,
 } from '../../src/runtime/active-runs-watcher';
-import { ActiveRunsTracker } from '../../src/runtime/active-runs-tracker';
 
 describe('parseTranslationFile', () => {
   it('parses the canonical `<modelfile>   NM_run1` line', () => {
@@ -111,38 +109,3 @@ describe('findCallingCwd', () => {
   });
 });
 
-describe('scheduleStaleTimeout', () => {
-  beforeEach(() => vi.useFakeTimers());
-  afterEach(() => vi.useRealTimers());
-
-  it('marks a still-running run as failed once the timeout elapses', () => {
-    const tracker = new ActiveRunsTracker();
-    const id = tracker.start('/m.mod');
-    scheduleStaleTimeout(tracker, id, 60_000);
-
-    vi.advanceTimersByTime(59_000);
-    expect(tracker.get(id)!.state).toBe('running'); // not yet
-    vi.advanceTimersByTime(2_000);
-    expect(tracker.get(id)!.state).toBe('failed');
-    expect(tracker.get(id)!.errorMessage).toMatch(/no \.lst after 1 minute/);
-  });
-
-  it('cancel() returned by scheduleStaleTimeout prevents the markFailed', () => {
-    const tracker = new ActiveRunsTracker();
-    const id = tracker.start('/m.mod');
-    const cancel = scheduleStaleTimeout(tracker, id, 60_000);
-    cancel();
-    vi.advanceTimersByTime(120_000);
-    expect(tracker.get(id)!.state).toBe('running');
-  });
-
-  it('no-op when run already transitioned to terminal before timeout fires', () => {
-    const tracker = new ActiveRunsTracker();
-    const id = tracker.start('/m.mod');
-    scheduleStaleTimeout(tracker, id, 60_000);
-    tracker.markCompleted(id, 4.5, '/m/modelfit_dir1', '/m.lst');
-    vi.advanceTimersByTime(120_000);
-    expect(tracker.get(id)!.state).toBe('done'); // not flipped to failed
-    expect(tracker.get(id)!.finalOfv).toBe(4.5);
-  });
-});

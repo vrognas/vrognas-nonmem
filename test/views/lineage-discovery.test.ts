@@ -2,7 +2,10 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { loadLineageNodeInput } from '../../src/views/lineage-discovery';
+import {
+  findStaleOverrides,
+  loadLineageNodeInput,
+} from '../../src/views/lineage-discovery';
 
 async function workdir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), `${prefix}-`));
@@ -28,7 +31,9 @@ describe('loadLineageNodeInput', () => {
     const input = await loadLineageNodeInput(modelPath);
     expect(input).not.toBeNull();
     expect(input!.runNumber).toBeNull();
-    expect(input!.basename).toBe('m');
+    // Display basename includes the parent dir (`<dir>/m`) so same-
+    // named models in different folders disambiguate visually.
+    expect(input!.basename).toMatch(/\/m$/);
     expect(input!.basedOn).toBeNull();
   });
 
@@ -53,7 +58,7 @@ describe('loadLineageNodeInput', () => {
     const input = await loadLineageNodeInput(modelPath);
     expect(input).not.toBeNull();
     expect(input!.runNumber).toBe(2);
-    expect(input!.basename).toBe('run002');
+    expect(input!.basename).toMatch(/\/run002$/); // `<parent-dir>/run002`
     expect(input!.basedOn).toBe(1);
     expect(input!.computeDeltaOfv).toBe(true);
     expect(input!.description).toBe('Add CL ~ WT');
@@ -90,5 +95,49 @@ describe('loadLineageNodeInput', () => {
     const input = await loadLineageNodeInput(modelPath);
     expect(input!.basedOn).toBe(4);
     expect(input!.computeDeltaOfv).toBe(false);
+  });
+});
+
+describe('findStaleOverrides', () => {
+  // Stale = the workspace `lineageOverrides` setting points at a
+  // child or parent path no longer present in the discovered set.
+  // Used by the panel banner to GC the setting on user request.
+
+  it('returns empty when every override path is in knownPaths', () => {
+    const overrides = new Map<string, string | null>([['/a.mod', '/b.mod']]);
+    const known = new Set(['/a.mod', '/b.mod']);
+    expect(findStaleOverrides(overrides, known)).toEqual([]);
+  });
+
+  it('flags override whose child path is missing (entry can never apply)', () => {
+    const overrides = new Map<string, string | null>([['/gone.mod', '/a.mod']]);
+    const known = new Set(['/a.mod']);
+    const stale = findStaleOverrides(overrides, known);
+    expect(stale).toHaveLength(1);
+    expect(stale[0]).toEqual({
+      childPath: '/gone.mod',
+      parentPath: '/a.mod',
+      reason: 'child-missing',
+    });
+  });
+
+  it('flags override whose parent path is missing (override resolves to no edge)', () => {
+    const overrides = new Map<string, string | null>([['/a.mod', '/gone.mod']]);
+    const known = new Set(['/a.mod']);
+    const stale = findStaleOverrides(overrides, known);
+    expect(stale).toHaveLength(1);
+    expect(stale[0]).toEqual({
+      childPath: '/a.mod',
+      parentPath: '/gone.mod',
+      reason: 'parent-missing',
+    });
+  });
+
+  it('parent === null (force-root override) with child present is NOT stale', () => {
+    // The user explicitly pinned this child as a root — entry is
+    // still actively suppressing any `;; Based on:` marker.
+    const overrides = new Map<string, string | null>([['/a.mod', null]]);
+    const known = new Set(['/a.mod']);
+    expect(findStaleOverrides(overrides, known)).toEqual([]);
   });
 });

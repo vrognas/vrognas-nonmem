@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { buildLineageGraph, type LineageNodeInput } from '../../src/views/lineage-graph';
+import {
+  buildLineageGraph,
+  wouldOverrideCreateCycle,
+  type LineageEdge,
+  type LineageNodeInput,
+} from '../../src/views/lineage-graph';
 
 function input(
   runNumber: number,
@@ -12,10 +17,13 @@ function input(
     runNumber,
     modelPath: `/tmp/run${padded}.mod`,
     lstPath: `/tmp/run${padded}.lst`,
+    phiPath: null,
     basename: `run${padded}`,
     description: null,
     label: null,
     ofv,
+    termination: null,
+    dataFile: null,
     basedOn,
     computeDeltaOfv,
   };
@@ -138,10 +146,13 @@ describe('buildLineageGraph', () => {
       runNumber: null,
       modelPath: '/work/colistin.mod',
       lstPath: '/work/colistin.lst',
+      phiPath: null,
       basename: 'colistin',
       description: null,
       label: null,
       ofv: 4500,
+      termination: null,
+      dataFile: null,
       basedOn: null,
       computeDeltaOfv: true,
     };
@@ -157,5 +168,161 @@ describe('buildLineageGraph', () => {
     const g = buildLineageGraph([input(1, 100, null), input(2, 95, 1)]);
     expect(g.edges).toHaveLength(1);
     expect(g.edges[0].parentModelPath).toBe(pathOf(1));
+  });
+
+  it('basedOnPath override wires any-to-any runs (Pirana m.mod → run<NNN>, etc.)', () => {
+    // Pirana-style child references a numbered parent via path override.
+    // Without this, `;; Based on:` is integer-only and m.mod can't have
+    // a runrecord-compatible parent declaration.
+    const orphanChild: LineageNodeInput = {
+      runNumber: null,
+      modelPath: '/work/colistin.mod',
+      lstPath: '/work/colistin.lst',
+      phiPath: null,
+      basename: 'colistin',
+      description: null,
+      label: null,
+      ofv: 4500,
+      termination: null,
+      dataFile: null,
+      basedOn: null,
+      computeDeltaOfv: true,
+      basedOnPath: pathOf(1),
+    };
+    const g = buildLineageGraph([input(1, 4612, null), orphanChild]);
+    expect(g.edges).toHaveLength(1);
+    expect(g.edges[0].parentModelPath).toBe(pathOf(1));
+    expect(g.edges[0].childModelPath).toBe('/work/colistin.mod');
+  });
+
+  it('basedOnPath: null forces root status (overrides any `;; Based on:` marker)', () => {
+    // run002 has `;; Based on: 1` from the .mod runrecord, but the
+    // workspace override pinned it as a root. Override wins.
+    const child = { ...input(2, 95, 1), basedOnPath: null as string | null };
+    const g = buildLineageGraph([input(1, 100, null), child]);
+    expect(g.edges).toEqual([]);
+    expect(new Set(g.roots)).toEqual(new Set([pathOf(1), pathOf(2)]));
+  });
+
+  it('same basename in different folders are distinct nodes (Improve-style step1/run1.mod, step2/run1.mod)', () => {
+    const a: LineageNodeInput = {
+      runNumber: 1,
+      modelPath: '/proj/step1/run1.mod',
+      lstPath: '/proj/step1/run1.lst',
+      phiPath: null,
+      basename: 'run1',
+      description: null,
+      label: null,
+      ofv: 100,
+      termination: null,
+      dataFile: null,
+      basedOn: null,
+      computeDeltaOfv: true,
+    };
+    const b: LineageNodeInput = {
+      ...a,
+      modelPath: '/proj/step2/run1.mod',
+      lstPath: '/proj/step2/run1.lst',
+      ofv: 95,
+      // Step2's run1 is wired as a child of step1's run1 via path override.
+      basedOnPath: '/proj/step1/run1.mod',
+    };
+    const g = buildLineageGraph([a, b]);
+    expect(g.nodes).toHaveLength(2);
+    expect(g.edges).toHaveLength(1);
+    expect(g.edges[0].parentModelPath).toBe('/proj/step1/run1.mod');
+    expect(g.edges[0].childModelPath).toBe('/proj/step2/run1.mod');
+  });
+
+  it('basedOnPath cycle detection (A → B → A via overrides) — both become roots', () => {
+    const a: LineageNodeInput = {
+      ...input(1, 100, null),
+      modelPath: '/a.mod',
+      basename: 'a',
+      basedOnPath: '/b.mod',
+    };
+    const b: LineageNodeInput = {
+      ...input(2, 95, null),
+      modelPath: '/b.mod',
+      basename: 'b',
+      basedOnPath: '/a.mod',
+    };
+    const g = buildLineageGraph([a, b]);
+    expect(g.edges).toEqual([]);
+    expect(new Set(g.roots)).toEqual(new Set(['/a.mod', '/b.mod']));
+  });
+
+  it('edge from numeric basedOn marks viaOverride=false', () => {
+    const g = buildLineageGraph([input(1, 100, null), input(2, 95, 1)]);
+    expect(g.edges).toHaveLength(1);
+    expect(g.edges[0].viaOverride).toBe(false);
+  });
+
+  it('edge from basedOnPath string override marks viaOverride=true', () => {
+    const child: LineageNodeInput = {
+      ...input(2, 95, null),
+      basedOnPath: pathOf(1),
+    };
+    const g = buildLineageGraph([input(1, 100, null), child]);
+    expect(g.edges).toHaveLength(1);
+    expect(g.edges[0].viaOverride).toBe(true);
+  });
+});
+
+describe('LineageGraph.unresolvedParentCount', () => {
+  // The view-side diagnostic that surfaces "N runs reference a parent
+  // that's not in this view" — typically a Pirana / hand-rolled run
+  // referencing a numbered parent that hasn't been imported, or a
+  // workspace override pointing at a path the user later renamed.
+  // Cycle nodes are NOT counted here (they have a different cause and
+  // are surfaced separately).
+
+  it('unresolvedParentCount: 0 when every parent ref resolves', () => {
+    const g = buildLineageGraph([input(1, 100, null), input(2, 95, 1)]);
+    expect(g.unresolvedParentCount).toBe(0);
+  });
+
+  it('unresolvedParentCount: numeric `;; Based on: N` referencing a missing run counts as unresolved', () => {
+    const g = buildLineageGraph([input(1, 100, null), input(2, 95, 99)]);
+    expect(g.unresolvedParentCount).toBe(1);
+  });
+
+  it('unresolvedParentCount: basedOnPath pointing at a path not in inputs counts as unresolved', () => {
+    const child: LineageNodeInput = {
+      ...input(2, 95, null),
+      basedOnPath: '/never/existed.mod',
+    };
+    const g = buildLineageGraph([input(1, 100, null), child]);
+    expect(g.unresolvedParentCount).toBe(1);
+  });
+});
+
+describe('wouldOverrideCreateCycle', () => {
+  // Predicate used by the panel before persisting a parent override.
+  // Walks UP from `parentPath` via current edges; cycle iff it reaches
+  // `childPath` (i.e. the proposed parent has the proposed child as an
+  // ancestor, so wiring child→parent would close a loop).
+  const edge = (parent: string, child: string): LineageEdge => ({
+    parentModelPath: parent,
+    childModelPath: child,
+    deltaOfv: null,
+    color: 'gray',
+    viaOverride: false,
+  });
+
+  it('self-reference (childPath === parentPath) is a cycle', () => {
+    expect(wouldOverrideCreateCycle([], '/a.mod', '/a.mod')).toBe(true);
+  });
+
+  it('chain A→B→C, setting A.parent = C creates cycle (C is descendant of A)', () => {
+    const edges = [edge('/a.mod', '/b.mod'), edge('/b.mod', '/c.mod')];
+    expect(wouldOverrideCreateCycle(edges, '/a.mod', '/c.mod')).toBe(true);
+  });
+
+  it('chain A→B→C, setting C.parent = A is a re-tree, not a cycle', () => {
+    // C's existing parent (B) gets replaced by A. A has no ancestor that
+    // is C, so no cycle. Walking up from A: A has no parent → false.
+    const edges = [edge('/a.mod', '/b.mod'), edge('/b.mod', '/c.mod')];
+    expect(wouldOverrideCreateCycle(edges, '/c.mod', '/a.mod')).toBe(false);
   });
 });

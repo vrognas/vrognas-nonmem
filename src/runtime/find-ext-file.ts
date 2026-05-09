@@ -54,17 +54,29 @@ export async function listModelfitDirs(
  * stays init-only, etc.).
  */
 export async function findExtFile(lstPath: string): Promise<string | null> {
+  return findArtifactFile(lstPath, '.ext');
+}
+
+/**
+ * Same Pirana-flat / PsN-modelfit_dir cascade as `findExtFile`, but for
+ * an arbitrary NONMEM artifact extension (`.phi`, `.cov`, `.shk`, …).
+ * Returns null when neither layout has a `<basename><ext>` file.
+ */
+export async function findArtifactFile(
+  lstPath: string,
+  ext: `.${string}`,
+): Promise<string | null> {
   const dir = path.dirname(lstPath);
   const base = path.basename(lstPath, path.extname(lstPath));
-  const extName = `${base}.ext`;
+  const fileName = `${base}${ext}`;
 
   // Tier 1: top-level sibling.
-  const topLevel = path.join(dir, extName);
+  const topLevel = path.join(dir, fileName);
   if (await pathExists(topLevel)) return topLevel;
 
-  // Tier 2: highest-N modelfit_dir<N> with a matching .ext inside.
+  // Tier 2: highest-N modelfit_dir<N> with a matching file inside.
   for (const dirInfo of await listModelfitDirs(dir)) {
-    const candidate = path.join(dirInfo.path, extName);
+    const candidate = path.join(dirInfo.path, fileName);
     if (await pathExists(candidate)) return candidate;
   }
   return null;
