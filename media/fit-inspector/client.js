@@ -134,8 +134,12 @@ function render(payload) {
   if (payload.trajectories && payload.trajectories.length) {
     // xmlEstimationResults (term status + per-step timing) carried on
     // diagnostics; index-aligned with trajectories (both 1:1 with $EST).
+    // xmlEstimationOptions also passed so termination-code labels can
+    // be method-aware (EM codes 0/8 = completed differs from classical
+    // FOCE which uses arbitrary FORTRAN error numbers).
     const xmlResults = (payload.diagnostics && payload.diagnostics.xmlEstimationResults) || [];
-    root.append(renderTrajectories(payload.trajectories, xmlResults));
+    const xmlOpts = (payload.diagnostics && payload.diagnostics.xmlEstimationOptions) || [];
+    root.append(renderTrajectories(payload.trajectories, xmlResults, xmlOpts));
   }
   if (
     payload.diagnostics &&
@@ -150,8 +154,9 @@ function render(payload) {
     const d = payload.diagnostics;
     const nonDefaults = d.xmlEstimationNonDefaults || [];
     const userDriven = d.xmlEstimationUserDriven || [];
+    const propagated = d.xmlEstimationPropagated || [];
     const lstRecords = d.lstEstRecords || [];
-    root.append(renderEstimationOptions(d.xmlEstimationOptions, nonDefaults, userDriven, lstRecords));
+    root.append(renderEstimationOptions(d.xmlEstimationOptions, nonDefaults, userDriven, propagated, lstRecords, d.lstTolerances));
   }
   if (payload.diagnostics && payload.diagnostics.xmlCovarianceOptions) {
     // $COV options from `<nm:problem_options>`'s `cov_*` attrs. Single
@@ -161,7 +166,7 @@ function render(payload) {
     // doesn't emit a dedicated covariance_options element — empirically
     // confirmed.
     const d = payload.diagnostics;
-    root.append(renderCovarianceOptions(d.xmlCovarianceOptions, d.xmlCovarianceTiers || {}));
+    root.append(renderCovarianceOptions(d.xmlCovarianceOptions, d.xmlCovarianceTiers || {}, d.lstTolerances));
   }
   if (payload.diagnostics && payload.diagnostics.etabar.length) {
     // Per-ETA ETABAR / SE / N / P VAL table. Shrinkage already lives in
@@ -251,23 +256,22 @@ function renderRunNotes(notes) {
  * full SVG up-front (no on-demand expansion) — payloads are small
  * (a few hundred points × ~20 params).
  */
-function renderTrajectories(trajectories, xmlResults) {
+function renderTrajectories(trajectories, xmlResults, xmlOpts) {
   const wrap = document.createElement('details');
   wrap.className = 'convergence';
-  // Open by default for a single-$EST trajectory; closed for chains
-  // so the inspector doesn't scroll past the parameters.
   wrap.open = trajectories.length === 1;
   const summaryEl = document.createElement('summary');
   summaryEl.textContent = 'Convergence trajectory (' + trajectories.length
     + (trajectories.length === 1 ? ' $EST step)' : ' $EST steps)');
   wrap.append(summaryEl);
   for (let i = 0; i < trajectories.length; i++) {
-    wrap.append(renderTrajectoryStep(trajectories[i], xmlResults[i] || null));
+    const stepOpts = (xmlOpts && xmlOpts[i]) || null;
+    wrap.append(renderTrajectoryStep(trajectories[i], xmlResults[i] || null, stepOpts));
   }
   return wrap;
 }
 
-function renderTrajectoryStep(t, xmlResult) {
+function renderTrajectoryStep(t, xmlResult, stepOpts) {
   const block = document.createElement('div');
   block.className = 'convergence-step';
   const heading = document.createElement('div');
@@ -285,12 +289,19 @@ function renderTrajectoryStep(t, xmlResult) {
     meta.className = 'convergence-step-meta';
     const parts = [];
     if (xmlResult.terminationStatus !== null) {
-      // Reuse `terminationCodeLabel` from formatters.js — single source
-      // of truth for NM7 code → label across all inspector surfaces.
-      // Loaded before client.js (see fit-inspector-provider.ts script
-      // order), so the function is in scope here.
-      const ok = xmlResult.terminationStatus === 0;
-      const label = terminationCodeLabel(xmlResult.terminationStatus);
+      // Method-aware termination labels: EM uses NM73+ documented
+      // codes (0/8 = completed, 1/9 = ran out of iters, ...);
+      // classical methods use arbitrary FORTRAN error numbers.
+      // `classifyEstimationMethodKind` from formatters.js routes by
+      // the XML estimation_method attr.
+      const methodKind = stepOpts
+        ? classifyEstimationMethodKind(stepOpts.estimation_method)
+        : null;
+      const code = xmlResult.terminationStatus;
+      // EM: codes 0 and 8 are both "completed" (success). Classical:
+      // anything but 0 + non-negative is a failure of some kind.
+      const ok = methodKind === 'em' ? (code === 0 || code === 8) : code === 0;
+      const label = terminationCodeLabel(code, methodKind);
       const span = document.createElement('span');
       span.className = ok ? 'meta-good' : 'meta-bad';
       span.textContent = 'termination: ' + label;
@@ -829,7 +840,7 @@ function renderPrderr(prderr) {
  * NONMEM emitted them — no type coercion, so the user sees the
  * verbatim wire format.
  */
-function renderEstimationOptions(steps, nonDefaultsPerStep, userDrivenPerStep, lstEstRecords) {
+function renderEstimationOptions(steps, nonDefaultsPerStep, userDrivenPerStep, propagatedPerStep, lstEstRecords, lstTolerances) {
   const outer = document.createElement('details');
   outer.className = 'xml-options';
   const sumOuter = document.createElement('summary');
@@ -839,8 +850,9 @@ function renderEstimationOptions(steps, nonDefaultsPerStep, userDrivenPerStep, l
   for (let i = 0; i < steps.length; i++) {
     const nonDefaults = (nonDefaultsPerStep && nonDefaultsPerStep[i]) || [];
     const userDriven = (userDrivenPerStep && userDrivenPerStep[i]) || [];
+    const propagated = (propagatedPerStep && propagatedPerStep[i]) || [];
     const lstRecord = (lstEstRecords && lstEstRecords[i]) || null;
-    outer.append(renderEstimationOptionsStep(steps[i], i + 1, nonDefaults, userDriven, lstRecord));
+    outer.append(renderEstimationOptionsStep(steps[i], i + 1, nonDefaults, userDriven, propagated, lstRecord, lstTolerances));
   }
   return outer;
 }
@@ -861,7 +873,38 @@ function isInvisibleToken(token) {
   return INVISIBLE_TOKEN_PATTERNS.some((re) => re.test(token));
 }
 
-function renderEstimationOptionsStep(step, stepNum, nonDefaultKeys, userDrivenKeys, lstRecord) {
+/**
+ * Map a `<nm:estimation_options>` attr to its runtime-resolved value
+ * via the `.lst` trace, when applicable. Currently only `atol`/`tol`
+ * have empirical evidence of being sentinels (`atol='0'` resolves to
+ * runtime ANRD=12 per `~/positron-nonmem/probe-resolved/`'s BASE
+ * TOLERANCE block). Returns null when no translation applies.
+ */
+function resolveEstAttrFromLst(key, value, tolerances) {
+  if (!tolerances) return null;
+  // atol='0' is the wire sentinel for "user didn't set" — runtime
+  // value is the EST step's resolved ANRD (or BASE if EST not emitted).
+  if (key === 'atol' && value === '0') {
+    return tolerances.estAnrd || tolerances.baseAnrd;
+  }
+  return null;
+}
+
+/**
+ * Map a `<nm:problem_options>` cov_* attr to its runtime-resolved
+ * value via the `.lst` trace. `cov_atol='-1'` and `cov_tol='-1'`
+ * inherit from $EST (or $SUBROUTINES); the .lst's "TOLERANCES FOR
+ * COVARIANCE STEP" block gives the actually-used value. Returns null
+ * when no translation applies.
+ */
+function resolveCovAttrFromLst(key, value, tolerances) {
+  if (!tolerances) return null;
+  if (key === 'atol' && value === '-1') return tolerances.covAnrd;
+  if (key === 'tol' && value === '-1') return tolerances.covNrd;
+  return null;
+}
+
+function renderEstimationOptionsStep(step, stepNum, nonDefaultKeys, userDrivenKeys, propagatedKeys, lstRecord, lstTolerances) {
   const inner = document.createElement('details');
   inner.className = 'xml-options-step';
   const sumInner = document.createElement('summary');
@@ -879,6 +922,7 @@ function renderEstimationOptionsStep(step, stepNum, nonDefaultKeys, userDrivenKe
   const userTokens = lstRecord && lstRecord.tokens ? lstRecord.tokens : [];
   const userWroteNoabort = userTokens.some((t) => /^NOABORT$/i.test(t));
   const userWroteNohabort = userTokens.some((t) => /^NOHABORT$/i.test(t));
+  const tolerances = lstTolerances || null;
 
   const table = document.createElement('table');
   table.className = 'xml-options-table';
@@ -891,9 +935,19 @@ function renderEstimationOptionsStep(step, stepNum, nonDefaultKeys, userDrivenKe
     const tdV = document.createElement('td');
     let cls = 'xml-options-val';
     let tip;
+    // Tier resolution order, most specific first:
+    //   user-driven → propagated → non-default → default.
+    // Propagated tier: value matches PREVIOUS step's value AND user
+    // didn't write the attr on THIS step's $EST line. Empirically
+    // (NM 7.6.0): explicit user options carry forward across steps;
+    // AUTO-implicit values reset. So a "value match without user typing"
+    // strongly indicates carry-over from the prior step.
     if (userDrivenKeys.includes(k)) {
       cls += ' xml-options-val--user-driven';
       tip = 'User-driven: NONMEM requires this to be set, or it\'s a per-run identity (seed, file, method). Not compared against defaults.';
+    } else if (propagatedKeys.includes(k)) {
+      cls += ' xml-options-val--propagated-est';
+      tip = 'Propagated from previous $EST step. Empirically: NONMEM carries explicit user options forward across chained $EST records (AUTO-implicit values do NOT propagate). User did not type this on the current step\'s $EST line.';
     } else if (nonDefaultKeys.includes(k)) {
       cls += ' xml-options-val--non-default';
       tip = 'Non-default: differs from this method\'s empirical baseline (probed against NM 7.6.0).';
@@ -909,6 +963,15 @@ function renderEstimationOptionsStep(step, stepNum, nonDefaultKeys, userDrivenKe
       } else {
         tip = (tip || '') + ' (XML wire abort=\'no\' is shared by NOABORT and NOHABORT; .lst echo absent — can\'t disambiguate.)';
       }
+    }
+    // Wire-vs-runtime annotation for sentinel-style attrs whose .lst
+    // trace gives the resolved value. Empirically (NM 7.6.0): atol='0'
+    // is a sentinel and the runtime ANRD value lives in
+    // .lst's "TOLERANCES FOR ESTIMATION" block.
+    const resolved = resolveEstAttrFromLst(k, step[k], tolerances);
+    if (resolved && resolved !== step[k]) {
+      const note = ' (runtime: ' + resolved + ' — from .lst trace; XML wire \'' + step[k] + '\' is a sentinel)';
+      tip = (tip || '') + note;
     }
     tdV.className = cls;
     tdV.textContent = fmtXmlOptionValue(step[k]);
@@ -964,7 +1027,7 @@ const COV_TIER_TIPS = {
   nonDefault: 'Non-default: differs from the empirical baseline (probed against NM 7.6.0).',
 };
 
-function renderCovarianceOptions(opts, tierMap) {
+function renderCovarianceOptions(opts, tierMap, lstTolerances) {
   const outer = document.createElement('details');
   outer.className = 'xml-options';
   const sumOuter = document.createElement('summary');
@@ -981,8 +1044,6 @@ function renderCovarianceOptions(opts, tierMap) {
     tdK.className = 'xml-options-key';
     tdK.textContent = k;
     const tdV = document.createElement('td');
-    // Single tier-map lookup — tier resolution already encoded
-    // payload-side. Disjoint by construction; absent → default class.
     const tier = tierMap[k];
     let cls = 'xml-options-val';
     let tip;
@@ -995,6 +1056,14 @@ function renderCovarianceOptions(opts, tierMap) {
     } else if (tier === 'nonDefault') {
       cls += ' xml-options-val--non-default';
       tip = COV_TIER_TIPS.nonDefault;
+    }
+    // Wire-vs-runtime annotation. cov_atol='-1' inherits from $EST or
+    // $SUBROUTINES; the runtime ANRD lives in the .lst's "TOLERANCES
+    // FOR COVARIANCE STEP" block.
+    const resolved = resolveCovAttrFromLst(k, opts[k], lstTolerances);
+    if (resolved && resolved !== opts[k]) {
+      const note = ' (runtime: ' + resolved + ' — from .lst trace; XML wire \'' + opts[k] + '\' is a sentinel that inherits)';
+      tip = (tip || '') + note;
     }
     tdV.className = cls;
     tdV.textContent = fmtXmlOptionValue(opts[k]);

@@ -40,6 +40,10 @@ import {
   type RawEstRecord,
 } from '../runtime/parse-lst-est-records';
 import {
+  parseLstTolerances,
+  type LstTolerances,
+} from '../runtime/parse-lst-tolerances';
+import {
   parseEstimationOptions,
   type EstimationOptionsStep,
 } from '../runtime/parse-xml-options';
@@ -141,6 +145,15 @@ export interface VariablesContext {
    * mod-mode (no .lst) or .lst echo couldn't be extracted.
    */
   lstEstRecords: RawEstRecord[];
+  /**
+   * Runtime-resolved tolerance + sig-digits values from the `.lst`
+   * trace blocks (BASE / EST / COV TOLERANCE + SIGL/SIGLO). Used to
+   * surface "wire vs runtime" annotations on $EST/$COV options whose
+   * XML emit is a sentinel (e.g. `atol='0'` resolves to base ANRD=12).
+   * All fields null in mod-mode or for non-ODE models that don't get
+   * the trace blocks.
+   */
+  lstTolerances: LstTolerances;
 }
 
 /** Logger contract — every diagnostic line about the resolution path goes here. */
@@ -183,7 +196,7 @@ async function resolveModMode(
   }
   log(`mod-mode: parsedModel ok — ${parsedModelStatsLine(model)}`);
   const runrecord = await loadRunrecord(uri.fsPath, log);
-  return { model, modUri: uri, fit: null, sumo: null, lst: null, runrecord, prderr: null, fmsg: null, cor: null, cnv: null, trajectories: [], xmlEstimationOptions: [], xmlEstimationResults: [], xmlCovarianceOptions: null, lstEstRecords: [] };
+  return { model, modUri: uri, fit: null, sumo: null, lst: null, runrecord, prderr: null, fmsg: null, cor: null, cnv: null, trajectories: [], xmlEstimationOptions: [], xmlEstimationResults: [], xmlCovarianceOptions: null, lstEstRecords: [], lstTolerances: { baseNrd: null, baseAnrd: null, estNrd: null, estAnrd: null, covNrd: null, covAnrd: null, siglo: null, sigl: null } };
 }
 
 /**
@@ -273,6 +286,10 @@ async function resolveLstMode(
   // is malformed or truncated; degrade to empty array.
   const ctrlStream = extractControlStream(lstText);
   const lstEstRecords = ctrlStream ? parseLstEstRecords(ctrlStream) : [];
+  // Runtime-resolved tolerance trace from the .lst's BASE/EST/COV
+  // TOLERANCE + SIGL/SIGLO blocks. Sparse — fields are null when the
+  // corresponding block wasn't emitted (non-ODE model, no $COV, etc.).
+  const lstTolerances = parseLstTolerances(lstText);
   if (!fit) {
     log(`lst-mode: no .ext / unparseable / no final row — pushing init-only`);
   } else {
@@ -300,6 +317,7 @@ async function resolveLstMode(
     xmlEstimationResults,
     xmlCovarianceOptions,
     lstEstRecords,
+    lstTolerances,
   };
 }
 

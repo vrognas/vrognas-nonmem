@@ -144,28 +144,86 @@ function badge(text, className) {
 }
 
 /**
- * XML `<nm:termination_status>` mapping — single status code per $EST step.
- * 0..5 are the documented termination statuses (Bauer NM7 manual). Higher
- * values originate from the FORTRAN runtime (textmsgs.f90 ERROR=N codes)
- * and don't have a clean status label, so we fall back to a bare code.
+ * XML `<nm:termination_status>` → human-readable label. The semantics
+ * differ by method per nmguides (§3.11 root.xml, NM73+):
+ *
+ *   EM/MCMC methods (IMP, IMPMAP, SAEM, ITS, DIRECT, BAYES, NUTS):
+ *     0, 8   → optimization completed
+ *     1, 9   → not completed (ran out of iterations)
+ *     2, 10  → not tested for convergence
+ *     3, 11  → not tested for convergence + user interrupted
+ *     4, 12  → not completed + user interrupted
+ *     16, 24 → OBJF infinite or all individual OBJFs zero (problem ended)
+ *     32, 40 → all individual OBJFs zero (problem ended)
+ *     The high-bit codes (8/9/10/11/12/24/40) additionally signal that
+ *     the reduced stochastic/stationary portion was not completed prior
+ *     to user interrupt.
+ *
+ *   Classical methods (FOCE/FOCEI/FO/LAPLACE):
+ *     The status is an arbitrary FORTRAN error number (e.g. 132, 134).
+ *     Bauer doesn't document a stable mapping; codes index into
+ *     `textmsgs.f90` (use `textmsgsCodeLabel` for known values).
+ *     Negative values indicate user-interrupt.
+ *
+ * `methodKind` discriminates: 'em' for EM/MCMC, 'classical' for the
+ * deterministic family. Pass null when method is unknown — the
+ * function falls back to a bare-code rendering.
  */
-function terminationCodeLabel(c) {
-  switch (c) {
-    case 0:
-      return 'success';
-    case 1:
-      return 'rounding';
-    case 2:
-      return 'max evals';
-    case 3:
-      return 'near boundary';
-    case 4:
-      return 'NaN/overflow';
-    case 5:
-      return 'user interrupt';
-    default:
-      return 'code ' + c;
+function terminationCodeLabel(c, methodKind) {
+  if (methodKind === 'em') {
+    switch (c) {
+      case 0:
+      case 8:
+        return 'completed';
+      case 1:
+      case 9:
+        return 'ran out of iterations';
+      case 2:
+      case 10:
+        return 'not tested for convergence';
+      case 3:
+      case 11:
+        return 'not tested + user interrupted';
+      case 4:
+      case 12:
+        return 'not completed + user interrupted';
+      case 16:
+      case 24:
+        return 'OBJF infinite (problem ended)';
+      case 32:
+      case 40:
+        return 'all individual OBJFs zero (problem ended)';
+      default:
+        return 'code ' + c;
+    }
   }
+  if (methodKind === 'classical') {
+    if (c < 0) return 'user interrupted (code ' + c + ')';
+    // FORTRAN error codes — try the textmsgs.f90 mapping.
+    const label = textmsgsCodeLabel(c);
+    return label ? c + ' (' + label + ')' : 'code ' + c;
+  }
+  // Unknown method — render the code as-is. The caller usually has
+  // method context but defensive when it's missing.
+  return 'code ' + c;
+}
+
+/**
+ * Classify an XML `estimation_method` attr value as 'em' or 'classical'.
+ * Empty string / `'cond'` / unknown → 'classical' (FOCE family is the
+ * baseline for absent methods). Returns null when the method should
+ * be treated as fully unknown (e.g., undefined input).
+ */
+function classifyEstimationMethodKind(method) {
+  if (method === undefined || method === null) return null;
+  const m = String(method).toLowerCase();
+  if (m === 'imp' || m === 'impmap' || m === 'saem' || m === 'its'
+      || m === 'direct' || m === 'bayes' || m === 'nuts'
+      || m === 'mcmc' || m === 'chain' || m === 'sir') {
+    return 'em';
+  }
+  // '' (FOCE classical), 'cond', and anything else default to classical.
+  return 'classical';
 }
 
 /**

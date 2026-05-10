@@ -343,3 +343,92 @@ export function findUserDrivenKeys(step: EstimationOptionsStep): string[] {
   }
   return out.sort();
 }
+
+/**
+ * Map of XML attr name → patterns matching `$EST` tokens that, if
+ * present in the user's verbatim line, indicate the user explicitly
+ * set this attr. Most attrs use the trivial `KEY=` token form (handled
+ * via fallback regex); this map covers attrs whose user-token form
+ * differs (e.g. `INTERACTION` flag → `epseta_interaction='yes'`).
+ *
+ * Empirically validated against probes at
+ * `~/positron-nonmem/probe-attrs-survey/` (NM 7.6.0).
+ */
+const ATTR_TO_USER_TOKENS: Readonly<Record<string, ReadonlyArray<RegExp>>> = {
+  epseta_interaction: [/^INTER(ACTION)?$/i, /^NOINTER(ACTION)?$/i],
+  laplace: [/^LAPLAC(IAN|E)$/i, /^NOLAPLAC(IAN|E)$/i],
+  centered_eta: [/^CENTERING$/i, /^NOCENTERING$/i],
+  abort: [/^NOABORT$/i, /^NOHABORT$/i, /^ABORT$/i],
+  objsort: [/^N?O?SORT$/i],
+  slow_gradient: [/^SLOW$/i, /^NOSLOW$/i, /^FAST$/i],
+  // METHOD on $EST sets cond_estim, fo_model_app, and the
+  // estimation_method attr value. Any METHOD= token counts as the user
+  // having set those attrs explicitly.
+  cond_estim: [/^METHOD=/i],
+  fo_model_app: [/^METHOD=/i, /^N?O?FO$/i],
+  estimation_method: [/^METHOD=/i],
+  // SIGDIGITS is an NMTRAN alias for NSIG.
+  nsig: [/^N?SIG(DIGITS)?=/i],
+};
+
+/**
+ * True when the user's $EST tokens indicate an explicit setting of the
+ * given XML attr. Combines the alias-aware `ATTR_TO_USER_TOKENS` map
+ * with a generic `^attr=` fallback. Empty `tokens` → always false.
+ */
+function userWroteAttr(attr: string, tokens: readonly string[]): boolean {
+  if (tokens.length === 0) return false;
+  const aliases = ATTR_TO_USER_TOKENS[attr] ?? [];
+  for (const re of aliases) {
+    if (tokens.some((t) => re.test(t))) return true;
+  }
+  // Generic fallback: `attr=value` token where the lower-cased KEY
+  // matches the XML attr name. Most attrs follow this convention.
+  const lowerAttr = attr.toLowerCase();
+  return tokens.some((t) => {
+    const eq = t.indexOf('=');
+    if (eq <= 0) return false;
+    return t.slice(0, eq).toLowerCase() === lowerAttr;
+  });
+}
+
+/**
+ * Sorted list of attribute keys at `currentStep` whose values match
+ * `prevStep`'s same-key value AND were NOT explicitly written by the
+ * user on `currentStep`'s $EST line. These are the values that "carried
+ * over" from the prior step rather than being typed (or AUTO-set) on
+ * this step.
+ *
+ * Empirically (NM 7.6.0): explicit user options propagate forward;
+ * AUTO-implicit values reset on AUTO=0 cancellation; the `auto`
+ * setting itself propagates and re-fires per step's method (so
+ * AUTO=1's per-method overrides reapply). This function flags only
+ * the values that survived because of explicit-propagation, not because
+ * of AUTO re-application.
+ *
+ * Pre-conditions:
+ *   - `prevStep` null → returns `[]` (nothing to propagate from)
+ *   - `tokens` from the user's verbatim $EST line for THIS step
+ *
+ * Excludes `USER_DRIVEN_KEYS` and any key not in `findNonDefaultKeys`
+ * (defaults stay default; no propagation tier needed).
+ */
+export function findPropagatedKeys(
+  currentStep: EstimationOptionsStep,
+  prevStep: EstimationOptionsStep | null,
+  tokens: readonly string[],
+): string[] {
+  if (!prevStep) return [];
+  const nonDefault = new Set(findNonDefaultKeys(currentStep));
+  const out: string[] = [];
+  for (const k of nonDefault) {
+    // User explicitly typed it on THIS step's $EST line → not propagated.
+    if (userWroteAttr(k, tokens)) continue;
+    // Same value as prev step → propagated (NM carried it forward as
+    // an explicit setting, since AUTO-implicit values reset on AUTO=0).
+    if (prevStep[k] !== undefined && prevStep[k] === currentStep[k]) {
+      out.push(k);
+    }
+  }
+  return out.sort();
+}

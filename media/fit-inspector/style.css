@@ -323,6 +323,18 @@ body {
   color: var(--vscode-charts-yellow);
   font-weight: 600;
 }
+/* Propagated-from-previous-$EST tier (chained $EST records). Muted
+   blue-grey — visible enough to register as "this isn't default" but
+   distinct from the brighter blue (user-customised on this step) and
+   the yellow (cov_*='-1' inheriting from $EST). Empirical basis:
+   NM 7.6.0 carries explicit user options across $EST steps; AUTO-set
+   values reset on AUTO=0 cancellation. */
+.xml-options-val--propagated-est {
+  color: var(--vscode-charts-blue);
+  opacity: 0.6;
+  font-weight: 500;
+  font-style: italic;
+}
 /* Invisible-to-XML user-typed tokens (PRINT, POSTHOC, etc.) surfaced
    from the .lst echo. Small caption-style row under each step's table. */
 .xml-options-invisible {

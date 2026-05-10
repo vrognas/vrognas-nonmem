@@ -17,11 +17,16 @@ import type { CorTable } from '../runtime/parse-cor';
 import type { ExtEstimates } from '../runtime/parse-ext-fit';
 import type { ExtTrajectory } from '../runtime/parse-ext-trajectory';
 import type { EstimationOptionsStep } from '../runtime/parse-xml-options';
-import { findNonDefaultKeys, findUserDrivenKeys } from '../runtime/xml-est-defaults';
+import {
+  findNonDefaultKeys,
+  findPropagatedKeys,
+  findUserDrivenKeys,
+} from '../runtime/xml-est-defaults';
 import type { CovarianceOptions } from '../runtime/parse-xml-problem-options';
 import { classifyCovKeys, type CovKeyTier } from '../runtime/xml-cov-defaults';
 import type { EstimationStepResult } from '../runtime/parse-xml-results';
 import type { RawEstRecord } from '../runtime/parse-lst-est-records';
+import type { LstTolerances } from '../runtime/parse-lst-tolerances';
 import type { LstSummary } from '../runtime/parse-lst';
 import type { RunrecordTags } from '../runtime/parse-runrecord';
 import type { SumoSummary } from '../runtime/parse-sumo';
@@ -340,6 +345,19 @@ export interface InspectorDiagnostics {
    */
   xmlEstimationUserDriven: string[][];
   /**
+   * Per-step list of attribute keys that match the PREVIOUS step's
+   * value and were NOT explicitly written on THIS step's $EST line.
+   * These "carried over" from a prior chained $EST. Empirically (NM
+   * 7.6.0): explicit user options propagate forward; AUTO-implicit
+   * values reset on AUTO=0 cancellation. So matching prev-step value
+   * + not-on-current-line is a strong propagation signal.
+   *
+   * Renders muted/grey (4th tier). Step 0's array is always `[]`
+   * since nothing precedes it. Disjoint from `xmlEstimationNonDefaults`
+   * (propagation steals from the non-default pool).
+   */
+  xmlEstimationPropagated: string[][];
+  /**
    * Per-`$EST`-step result fields from `<nm:estimation>` blocks.
    * Empty when no `.xml` was loaded. Surfaces termination_status +
    * per-step timing in the inspector (the `.lst` only carries
@@ -367,6 +385,13 @@ export interface InspectorDiagnostics {
    * XML (PRINT, POSTHOC, AUTO, CENTERING, ETABARCHECK, NOSORT).
    */
   lstEstRecords: RawEstRecord[];
+  /**
+   * Runtime-resolved tolerance / sig-digits values from the `.lst`'s
+   * trace blocks. Used by the inspector to show "wire vs runtime"
+   * annotations (e.g. `atol='0'` → ANRD=12 from BASE TOLERANCE block).
+   * All fields null in mod-mode or for runs that don't emit the trace.
+   */
+  lstTolerances: LstTolerances;
 }
 
 export interface InspectorSummary {
@@ -414,6 +439,8 @@ export interface BuildContext {
   xmlCovarianceOptions?: CovarianceOptions | null;
   /** Verbatim user-typed `$EST` records from `.lst` echo. Carries info XML loses (NOABORT/NOHABORT, PRINT, POSTHOC, etc.). */
   lstEstRecords?: RawEstRecord[];
+  /** Runtime-resolved tolerance / sig-digits values from `.lst` trace blocks. Used for wire-vs-runtime annotations on sentinel attrs. */
+  lstTolerances?: LstTolerances;
   /** User-configurable shrinkage warn threshold (percent). Default 30 (pharmacometrics convention). */
   shrinkageWarnPct?: number;
   /** RSE% red-bad threshold (uniform across THETA / OMEGA / SIGMA). Default 100. */
@@ -548,6 +575,10 @@ export function buildInspectorPayload(
           xmlEstimationResults: ctx.xmlEstimationResults ?? [],
           xmlCovarianceOptions: ctx.xmlCovarianceOptions ?? null,
           lstEstRecords: ctx.lstEstRecords ?? [],
+          lstTolerances: ctx.lstTolerances ?? {
+            baseNrd: null, baseAnrd: null, estNrd: null, estAnrd: null,
+            covNrd: null, covAnrd: null, siglo: null, sigl: null,
+          },
         })
       : null,
     thresholds: {
@@ -800,6 +831,7 @@ interface BuildDiagnosticsArgs {
   xmlEstimationResults: EstimationStepResult[];
   xmlCovarianceOptions: CovarianceOptions | null;
   lstEstRecords: RawEstRecord[];
+  lstTolerances: LstTolerances;
 }
 
 function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnostics | null {
@@ -816,6 +848,7 @@ function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnostics | nu
     xmlEstimationResults,
     xmlCovarianceOptions,
     lstEstRecords,
+    lstTolerances,
   } = args;
   const conditionNumber = sumo?.conditionNumber ?? lst.conditionNumber ?? null;
   const eigs = lst.eigenvalues;
@@ -847,11 +880,28 @@ function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnostics | nu
     xmlEstimationResults.length === 0 &&
     xmlCovarianceOptions === null;
   if (empty) return null;
-  // Compute per-step non-default + user-driven key lists here so the
-  // heavy defaults table stays in TS land. Both are sorted string[]
-  // (postMessage-compatible).
+  // Compute per-step non-default + user-driven + propagated key lists
+  // here so the heavy defaults table stays in TS land. All sorted
+  // string[][] (postMessage-compatible).
   const xmlEstimationNonDefaults = xmlEstimationOptions.map(findNonDefaultKeys);
   const xmlEstimationUserDriven = xmlEstimationOptions.map(findUserDrivenKeys);
+  // Propagation tier: needs prev step + this step's $EST tokens. Step 0
+  // has no predecessor → empty. Other steps cross-reference prev step's
+  // attrs against this step's lst tokens to distinguish "user-typed
+  // here" from "carried over from prev step".
+  const xmlEstimationPropagated = xmlEstimationOptions.map((step, i) => {
+    if (i === 0) return [];
+    const tokens = lstEstRecords[i]?.tokens ?? [];
+    return findPropagatedKeys(step, xmlEstimationOptions[i - 1], tokens);
+  });
+  // Propagated keys steal from the non-default pool — surfaced as grey,
+  // not blue, to differentiate "carried over" from "explicitly set".
+  // Subtract the propagated set so the renderer's tier check is
+  // non-overlapping when it walks `nonDefault.includes(k)`.
+  for (let i = 0; i < xmlEstimationNonDefaults.length; i++) {
+    const propSet = new Set(xmlEstimationPropagated[i]);
+    xmlEstimationNonDefaults[i] = xmlEstimationNonDefaults[i].filter((k) => !propSet.has(k));
+  }
   // $COV: single classifier returning a tier-map (key → 'nonDefault' |
   // 'propagated' | 'userDriven'). Propagation is cross-referenced
   // against the LAST $EST step's non-default attrs — `cov_atol='-1'`
@@ -898,10 +948,12 @@ function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnostics | nu
     xmlEstimationOptions,
     xmlEstimationNonDefaults,
     xmlEstimationUserDriven,
+    xmlEstimationPropagated,
     xmlEstimationResults,
     xmlCovarianceOptions,
     xmlCovarianceTiers,
     lstEstRecords,
+    lstTolerances,
   };
 }
 

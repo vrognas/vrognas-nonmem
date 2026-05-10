@@ -136,6 +136,7 @@ function pushVariables(ctx: VariablesContext | null): void {
       xmlEstimationResults: ctx?.xmlEstimationResults,
       xmlCovarianceOptions: ctx?.xmlCovarianceOptions,
       lstEstRecords: ctx?.lstEstRecords,
+      lstTolerances: ctx?.lstTolerances,
       shrinkageWarnPct: cfg.get<number>('shrinkageWarnPct', 30),
       rseWarnPct: cfg.get<number>('rseWarnPct', 100),
       rseThetaWarnPct: cfg.get<number>('rseThetaWarnPct', 30),
