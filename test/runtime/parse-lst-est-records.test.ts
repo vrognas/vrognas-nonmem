@@ -122,3 +122,38 @@ $COVARIANCE`;
     expect(records[0].tokens).toEqual([]);
   });
 });
+
+describe('parseLstCovRecord', () => {
+  it('extracts the $COV record (singular)', async () => {
+    const { parseLstCovRecord } = await import('../../src/runtime/parse-lst-est-records');
+    const stream = `$PROBLEM
+$ESTIMATION METHOD=COND
+$COVARIANCE MATRIX=R UNCONDITIONAL`;
+    const cov = parseLstCovRecord(stream);
+    expect(cov).not.toBeNull();
+    expect(cov!.keyword).toBe('$COVARIANCE');
+    expect(cov!.tokens).toEqual(['MATRIX=R', 'UNCONDITIONAL']);
+  });
+
+  it('returns null when no $COV record exists', async () => {
+    const { parseLstCovRecord } = await import('../../src/runtime/parse-lst-est-records');
+    expect(parseLstCovRecord('$PROBLEM\n$ESTIMATION METHOD=COND')).toBeNull();
+  });
+
+  it('handles $COV / $COVR keyword aliases', async () => {
+    const { parseLstCovRecord } = await import('../../src/runtime/parse-lst-est-records');
+    expect(parseLstCovRecord('$PROBLEM\n$COV PRINT=E')?.keyword).toBe('$COV');
+    expect(parseLstCovRecord('$PROBLEM\n$COVR ATOL=10 SIGL=8')?.keyword).toBe('$COVR');
+  });
+
+  it('handles continuation lines + $-record boundary', async () => {
+    const { parseLstCovRecord } = await import('../../src/runtime/parse-lst-est-records');
+    const stream = `$PROBLEM
+$COVARIANCE PRINT=E
+   ATOL=10 SIGL=8
+   THBND=0
+$TABLE ID DV`;
+    const cov = parseLstCovRecord(stream);
+    expect(cov!.tokens).toEqual(['PRINT=E', 'ATOL=10', 'SIGL=8', 'THBND=0']);
+  });
+});

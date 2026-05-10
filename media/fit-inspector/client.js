@@ -169,6 +169,8 @@ function render(payload) {
       d.xmlCovarianceTiers || {},
       d.xmlCovarianceResolved || {},
       d.lstTolerances,
+      d.lstCovRecord,
+      d.xmlCovarianceTiersV2 || {},
     ));
   }
   if (payload.diagnostics && payload.diagnostics.etabar.length) {
@@ -1114,44 +1116,112 @@ const COV_TIER_TIPS = {
   nonDefault: 'Non-default: differs from the empirical baseline (probed against NM 7.6.0).',
 };
 
-function renderCovarianceOptions(opts, tierMap, resolvedMap, lstTolerances) {
+// Doc-default values for $COV options that NM never emits to XML.
+// Boolean-toggle pairs use the NMTRAN `[FLAG|NOFLAG]` convention.
+const INVISIBLE_COV_DEFAULTS = {
+  conditional: 'yes',     // CONDITIONAL is default; UNCONDITIONAL is the toggle
+  parafile: 'OFF',        // PARAFILE=OFF default per Bauer
+  parafprint: '1',        // PARAFPRINT=1 default
+};
+
+const INVISIBLE_COV_TOKEN_PATTERNS = {
+  conditional: [
+    { re: /^CONDITIONAL$/i, value: 'yes' },
+    { re: /^UNCONDITIONAL$/i, value: 'no' },
+  ],
+  parafile: [{ re: /^PARAFILE=/i, value: null /* extract from `=` */ }],
+  parafprint: [{ re: /^PARAFPRINT=/i, value: null }],
+};
+
+/**
+ * Build synthetic-attr overlay for the $COV step. Surfaces options NM
+ * never emits to XML (CONDITIONAL, PARAFILE, PARAFPRINT) with their
+ * documented defaults or the user's value when typed.
+ */
+function synthesizeInvisibleCovAttrs(covTokens) {
+  const out = {};
+  for (const [attr, patterns] of Object.entries(INVISIBLE_COV_TOKEN_PATTERNS)) {
+    let matched = false;
+    for (const p of patterns) {
+      const match = covTokens.find((t) => p.re.test(t));
+      if (match) {
+        const value = p.value !== null
+          ? p.value
+          : (match.split('=')[1] || '');
+        out[attr] = { value, isUserSet: true };
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      out[attr] = { value: INVISIBLE_COV_DEFAULTS[attr], isUserSet: false };
+    }
+  }
+  return out;
+}
+
+function renderCovarianceOptions(opts, tierMap, resolvedMap, lstTolerances, lstCovRecord, tiersV2) {
   const outer = document.createElement('details');
   outer.className = 'xml-options';
   const sumOuter = document.createElement('summary');
-  const count = Object.keys(opts).length;
+
+  // Synthesize invisible $COV options (CONDITIONAL, PARAFILE, PARAFPRINT).
+  const covTokens = lstCovRecord && lstCovRecord.tokens ? lstCovRecord.tokens : [];
+  const synthetic = synthesizeInvisibleCovAttrs(covTokens);
+  const merged = { ...opts };
+  for (const k of Object.keys(synthetic)) {
+    merged[k] = synthetic[k].value;
+  }
+  const count = Object.keys(merged).length;
   sumOuter.textContent = '$COV options (XML, exhaustive — ' + count + ' attributes)';
   outer.append(sumOuter);
 
   const table = document.createElement('table');
   table.className = 'xml-options-table';
-  const keys = Object.keys(opts).sort();
+  const keys = Object.keys(merged).sort();
   for (const k of keys) {
     const tr = document.createElement('tr');
     const tdK = document.createElement('td');
     tdK.className = 'xml-options-key';
     tdK.textContent = k;
     const tdV = document.createElement('td');
-    const tier = tierMap[k];
     let cls = 'xml-options-val';
     let tip;
-    if (tier === 'userDriven') {
-      cls += ' xml-options-val--user-driven';
-      tip = COV_TIER_TIPS.userDriven;
-    } else if (tier === 'propagated') {
-      cls += ' xml-options-val--propagated';
-      tip = COV_TIER_TIPS.propagated;
-    } else if (tier === 'nonDefault') {
-      cls += ' xml-options-val--non-default';
-      tip = COV_TIER_TIPS.nonDefault;
+
+    // v0.0.185+ unified tier scheme (explicit/explicitDefault/implicit)
+    // mirroring $EST. Falls back to the legacy 3-tier scheme when the
+    // V2 tier-map isn't populated for this key.
+    const synthEntry = synthetic[k];
+    if (synthEntry !== undefined) {
+      if (synthEntry.isUserSet) {
+        const matchesDocDefault = synthEntry.value === INVISIBLE_COV_DEFAULTS[k];
+        cls += matchesDocDefault
+          ? ' xml-options-val--explicit-default'
+          : ' xml-options-val--explicit';
+        tip = 'User-typed on $COV (NM never emits this to XML; synthesized from .lst echo). Default per Bauer: ' + INVISIBLE_COV_DEFAULTS[k] + (matchesDocDefault ? ' — matches default.' : '.');
+      } else {
+        tip = 'Documented default per Bauer (NM never emits this to XML). Synthesized for visibility.';
+      }
+    } else {
+      const tierV2 = tiersV2 && tiersV2[k];
+      if (tierV2 === 'explicit') {
+        cls += ' xml-options-val--explicit';
+        tip = 'Explicitly set on the $COV line (.lst echo).';
+      } else if (tierV2 === 'explicitDefault') {
+        cls += ' xml-options-val--explicit-default';
+        tip = 'Explicitly set on the $COV line, but value matches the default — no effect vs. omitting it.';
+      } else if (tierV2 === 'implicit') {
+        cls += ' xml-options-val--implicit';
+        tip = 'Implicitly set — value differs from default, but the user did NOT type it on the $COV line. Likely inherited from $EST or set by method-default (e.g. cov_posdef=3 for EM).';
+      }
     }
-    // Wire→runtime translation. When the wire value is a sentinel
-    // (`-1` or `'BLANK'`) and we have a resolution, display the
-    // resolved value; tooltip preserves the wire format for transparency.
-    let displayValue = opts[k];
-    const resolved = resolvedMap[k] || resolveCovAttrFromLst(k, opts[k], lstTolerances);
-    if (resolved && resolved !== opts[k]) {
+
+    // Wire→runtime translation (sentinel values → resolved).
+    let displayValue = merged[k];
+    const resolved = resolvedMap[k] || resolveCovAttrFromLst(k, merged[k], lstTolerances);
+    if (resolved && resolved !== merged[k]) {
       displayValue = resolved;
-      const note = ' (XML wire: \'' + opts[k] + '\' — sentinel; effective runtime value ' + resolved + ' — inherited from $EST / $SUBROUTINES / method default.)';
+      const note = ' (XML wire: \'' + merged[k] + '\' — sentinel; effective runtime value ' + resolved + ' — inherited from $EST / $SUBROUTINES / method default.)';
       tip = (tip || '') + note;
     }
     tdV.className = cls;

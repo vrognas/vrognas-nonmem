@@ -31,6 +31,21 @@ import { findNonDefaultKeys } from './xml-est-defaults';
 export type CovKeyTier = 'nonDefault' | 'propagated' | 'userDriven';
 
 /**
+ * v0.0.185+ unified tier (matches `EstTier`). The user's $COV tokens
+ * (from .lst echo) are the ground truth for "explicit vs implicit":
+ *
+ *   - `explicit`        : user typed this attr on the $COV line.
+ *   - `explicitDefault` : user typed it AND value matches the baseline.
+ *   - `implicit`        : user did NOT type it AND value differs from
+ *                         baseline. Covers BOTH AUTO-style implicit
+ *                         setting and $EST inheritance (cov_atol='-1'
+ *                         when $EST has user-customized atol).
+ *
+ * Keys matching baseline AND not typed → omitted (unstyled).
+ */
+export type CovTier = 'explicit' | 'explicitDefault' | 'implicit';
+
+/**
  * Empirical bare-`$COV` baseline from NM 7.6.0. The 22 attrs always
  * emitted regardless of method or $COV options.
  */
@@ -185,6 +200,89 @@ export function classifyCovKeys(
  * (most authoritative source). Fall-through to `lastEst` attrs when
  * trace doesn't carry the value (knuthsumoff, file, format).
  */
+/**
+ * Map of $COV attr name → patterns matching user $COV tokens that, if
+ * present, indicate explicit user setting. Most attrs use the trivial
+ * `KEY=` token form (handled via fallback regex); this map covers
+ * boolean toggles and aliases.
+ */
+const COV_ATTR_TO_USER_TOKENS: Readonly<Record<string, ReadonlyArray<RegExp>>> = {
+  compressed: [/^COMPRESS$/i],
+  eigen_print: [/^PRINT=.*E/i],
+  rmatrix_print: [/^PRINT=.*R/i],
+  smatrix_print: [/^PRINT=.*S/i],
+  special: [/^SPECIAL$/i],
+  nofcov: [/^NOFCOV$/i],
+  resume: [/^RESUME$/i],
+  omitted: [/^OMITTED$/i],
+  slow_gradient: [/^SLOW$/i, /^NOSLOW$/i, /^FAST$/i],
+  // CONDITIONAL/UNCONDITIONAL — not in XML, but tokens still matter for
+  // explicit-tier detection of synthesized rows.
+  conditional: [/^N?O?CONDITIONAL$/i, /^UNCONDITIONAL$/i],
+};
+
+/**
+ * True when the user's $COV tokens indicate an explicit setting of
+ * the given $COV attr.
+ */
+function userWroteCovAttr(attr: string, tokens: readonly string[]): boolean {
+  if (tokens.length === 0) return false;
+  const aliases = COV_ATTR_TO_USER_TOKENS[attr] ?? [];
+  for (const re of aliases) {
+    if (tokens.some((t) => re.test(t))) return true;
+  }
+  const lowerAttr = attr.toLowerCase();
+  return tokens.some((t) => {
+    const eq = t.indexOf('=');
+    if (eq <= 0) return false;
+    return t.slice(0, eq).toLowerCase() === lowerAttr;
+  });
+}
+
+/**
+ * Identity-style $COV attrs that don't fit the explicit/implicit/default
+ * model. `file` is per-run-derived ($EST-inherited); `format` similarly
+ * inherits. `omitted` is the cov-step omitted flag — user types
+ * OMITTED to set it, but the wire 'no' is the default; treat normally.
+ */
+const SKIP_COV_TIER_KEYS: ReadonlySet<string> = new Set([
+  // intentionally empty for now — `file`/`format` get sentinel-based
+  // resolution via resolveCovAttrToRuntime, and the diff is still
+  // meaningful (user-typed FILE=foo.ext differs from inherited BLANK).
+]);
+
+/**
+ * Unified $COV classifier (v0.0.185+). Same explicit/implicit/
+ * explicitDefault scheme as `classifyEstStep`. `covTokens` are the
+ * user's verbatim tokens from the $COV line in the .lst echo.
+ *
+ * Differs from the legacy `classifyCovKeys` (kept for back-compat):
+ *  - drops the `propagated` yellow tier; propagation collapses into
+ *    `implicit` (orange) — value not user-typed AND differs from default
+ *  - drops the `userDriven` green tier; user-typed → blue explicit
+ */
+export function classifyCovStep(
+  cov: CovarianceOptions,
+  covTokens: readonly string[],
+): Record<string, CovTier> {
+  const defaults = findCovDefaults(cov);
+  const out: Record<string, CovTier> = {};
+  for (const k of Object.keys(cov)) {
+    if (SKIP_COV_TIER_KEYS.has(k)) continue;
+    const value = cov[k];
+    const wroteIt = userWroteCovAttr(k, covTokens);
+    const matchesDefault = defaults[k] !== undefined && defaults[k] === value;
+    if (wroteIt && matchesDefault) {
+      out[k] = 'explicitDefault';
+    } else if (wroteIt) {
+      out[k] = 'explicit';
+    } else if (!matchesDefault) {
+      out[k] = 'implicit';
+    }
+  }
+  return out;
+}
+
 export function resolveCovAttrToRuntime(
   key: string,
   value: string,

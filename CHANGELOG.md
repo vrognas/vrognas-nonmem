@@ -7,6 +7,16 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **feat: unified $COV tier scheme + invisible options + .lst $COV echo (v0.0.185).** Brings $COV options to feature-parity with the v0.0.181 $EST recoloring + the v0.0.180 PRINT synthesis. Three parts:
+
+  (1) **`.lst $COV` echo parser**: `parseLstCovRecord(stream)` extracts the user's verbatim `$COVARIANCE` line (NONMEM permits at most one $COV per problem). Reuses the generic record-extraction machinery from `parseLstEstRecords` via a new private helper. Handles `$COV` / `$COVR` / `$COVARIANCE` aliases.
+
+  (2) **Unified tier scheme**: new `classifyCovStep(opts, tokens)` returns `Record<key, 'explicit' | 'explicitDefault' | 'implicit'>` — same scheme as `classifyEstStep`. The old `propagated` (yellow) and `userDriven` (green) tiers collapse into `implicit` (orange) and `explicit` (blue) respectively, anchored on the user-typed-or-not axis. Renderer prefers `xmlCovarianceTiersV2`; legacy `xmlCovarianceTiers` kept for back-compat. Alias-aware token matching: `COMPRESS` → cov_compressed; `SLOW`/`NOSLOW`/`FAST` → cov_slow_gradient; `PRINT=E/R/S` → eigen/rmatrix/smatrix print attrs.
+
+  (3) **Invisible-options synthesis**: `synthesizeInvisibleCovAttrs(tokens)` overlays three never-emitted-to-XML $COV options as visible rows: **CONDITIONAL/UNCONDITIONAL** (boolean toggle, default `'yes'`), **PARAFILE** (default `'OFF'`), **PARAFPRINT** (default `'1'`). User toggling via NMTRAN `[FLAG|NOFLAG]` convention handled. Each row goes through the unified tier classification.
+
+  13 new tests: 4 for `parseLstCovRecord` covering all `$COV` aliases and continuation lines; 9 for `classifyCovStep` covering bare baseline, user-typed, alias detection, sentinel handling. Suite to 450/450.
+
 - **feat: $COV options wire→runtime translation (v0.0.184).** Same pattern as $EST atol but applied to all $COV sentinels. New `resolveCovAttrToRuntime(key, value, lastEst, lstTolerances, methodKind)` in xml-cov-defaults.ts resolves:
 
   - `cov_atol='-1'` → resolved `covAnrd` from `.lst` BASE TOLERANCE block (typically 12)

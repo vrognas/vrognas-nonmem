@@ -188,3 +188,70 @@ describe('resolveCovAttrToRuntime', () => {
     expect(resolveCovAttrToRuntime('hypothetical_attr', '-1', null, noTrace, 'classical')).toBeNull();
   });
 });
+
+describe('classifyCovStep (v0.0.185+ unified tier scheme)', () => {
+  const BARE = { ...BARE_BASELINE };
+
+  it('all bare-baseline + no tokens → empty result (all unstyled)', async () => {
+    const { classifyCovStep } = await import('../../src/runtime/xml-cov-defaults');
+    expect(classifyCovStep(BARE, [])).toEqual({});
+  });
+
+  it('user-typed MATRIX=R → explicit (blue)', async () => {
+    const { classifyCovStep } = await import('../../src/runtime/xml-cov-defaults');
+    const cov = { ...BARE, matrix: 'r' };
+    const tiers = classifyCovStep(cov, ['MATRIX=R']);
+    expect(tiers.matrix).toBe('explicit');
+  });
+
+  it('user-typed THBND=1 (matches default 1) → explicitDefault (italic blue)', async () => {
+    const { classifyCovStep } = await import('../../src/runtime/xml-cov-defaults');
+    const cov = { ...BARE, thbnd: '1' };
+    const tiers = classifyCovStep(cov, ['THBND=1']);
+    expect(tiers.thbnd).toBe('explicitDefault');
+  });
+
+  it('user did NOT type but value differs from default → implicit (orange)', async () => {
+    const { classifyCovStep } = await import('../../src/runtime/xml-cov-defaults');
+    // SIR active (sirsample='300') but user didn't type CAPCORR; the
+    // SIR_BLOCK has capcorr=1.0 by default. If wire shows different,
+    // implicit.
+    const cov = { ...BARE, sirsample: '300', capcorr: '0.5' };
+    const tiers = classifyCovStep(cov, ['SIRSAMPLE=300']);
+    expect(tiers.capcorr).toBe('implicit');
+  });
+
+  it('alias-aware: COMPRESS token → explicit on cov_compressed', async () => {
+    const { classifyCovStep } = await import('../../src/runtime/xml-cov-defaults');
+    const cov = { ...BARE, compressed: 'yes' };
+    const tiers = classifyCovStep(cov, ['COMPRESS']);
+    expect(tiers.compressed).toBe('explicit');
+  });
+
+  it('alias-aware: SLOW/NOSLOW/FAST tokens → explicit on cov_slow_gradient', async () => {
+    const { classifyCovStep } = await import('../../src/runtime/xml-cov-defaults');
+    expect(classifyCovStep({ ...BARE, slow_gradient: 'slow' }, ['SLOW']).slow_gradient).toBe('explicit');
+    expect(classifyCovStep({ ...BARE, slow_gradient: 'fast' }, ['FAST']).slow_gradient).toBe('explicit');
+  });
+
+  it('alias-aware: PRINT=E token → explicit on cov_eigen_print', async () => {
+    const { classifyCovStep } = await import('../../src/runtime/xml-cov-defaults');
+    const cov = { ...BARE, eigen_print: 'yes' };
+    const tiers = classifyCovStep(cov, ['PRINT=E']);
+    expect(tiers.eigen_print).toBe('explicit');
+  });
+
+  it('sentinel cov_atol=-1 (matches default) + not typed → unstyled', async () => {
+    const { classifyCovStep } = await import('../../src/runtime/xml-cov-defaults');
+    const cov = { ...BARE, atol: '-1' };
+    const tiers = classifyCovStep(cov, []);
+    expect(tiers.atol).toBeUndefined();
+  });
+
+  it('user typed ATOL=10 → explicit (overrides sentinel)', async () => {
+    const { classifyCovStep } = await import('../../src/runtime/xml-cov-defaults');
+    const cov = { ...BARE, atol: '10' };
+    const tiers = classifyCovStep(cov, ['ATOL=10']);
+    expect(tiers.atol).toBe('explicit');
+  });
+});

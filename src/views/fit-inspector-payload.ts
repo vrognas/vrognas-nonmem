@@ -27,8 +27,10 @@ import {
 import type { CovarianceOptions } from '../runtime/parse-xml-problem-options';
 import {
   classifyCovKeys,
+  classifyCovStep,
   resolveCovAttrToRuntime,
   type CovKeyTier,
+  type CovTier,
 } from '../runtime/xml-cov-defaults';
 import type { EstimationStepResult } from '../runtime/parse-xml-results';
 import type { RawEstRecord } from '../runtime/parse-lst-est-records';
@@ -397,6 +399,15 @@ export interface InspectorDiagnostics {
    */
   xmlCovarianceResolved: Record<string, string>;
   /**
+   * Unified $COV tier-map (v0.0.185+). `key → 'explicit' |
+   * 'explicitDefault' | 'implicit'`. Same scheme as `xmlEstimationTiers`
+   * — blue/italic-blue/orange. Computed via `classifyCovStep` using
+   * the user's $COV tokens from the .lst echo. Empty `{}` when no
+   * $COV record present. Supersedes `xmlCovarianceTiers` (kept for
+   * back-compat); renderer prefers this when populated.
+   */
+  xmlCovarianceTiersV2: Record<string, CovTier>;
+  /**
    * Verbatim user-typed `$EST` records from the `.lst` control-stream
    * echo. Index-aligned with `xmlEstimationOptions`. Surfaces info XML
    * loses: NOABORT/NOHABORT distinction, and tokens never emitted in
@@ -457,6 +468,8 @@ export interface BuildContext {
   xmlCovarianceOptions?: CovarianceOptions | null;
   /** Verbatim user-typed `$EST` records from `.lst` echo. Carries info XML loses (NOABORT/NOHABORT, PRINT, POSTHOC, etc.). */
   lstEstRecords?: RawEstRecord[];
+  /** Verbatim user-typed `$COV` record from `.lst` echo. Used to detect explicit-tier classification for $COV options. */
+  lstCovRecord?: RawEstRecord | null;
   /** Runtime-resolved tolerance / sig-digits values from `.lst` trace blocks. Used for wire-vs-runtime annotations on sentinel attrs. */
   lstTolerances?: LstTolerances;
   /** User-configurable shrinkage warn threshold (percent). Default 30 (pharmacometrics convention). */
@@ -593,6 +606,7 @@ export function buildInspectorPayload(
           xmlEstimationResults: ctx.xmlEstimationResults ?? [],
           xmlCovarianceOptions: ctx.xmlCovarianceOptions ?? null,
           lstEstRecords: ctx.lstEstRecords ?? [],
+          lstCovRecord: ctx.lstCovRecord ?? null,
           lstTolerances: ctx.lstTolerances ?? {
             baseNrd: null, baseAnrd: null, estNrd: null, estAnrd: null,
             covNrd: null, covAnrd: null, siglo: null, sigl: null,
@@ -857,6 +871,7 @@ interface BuildDiagnosticsArgs {
   xmlEstimationResults: EstimationStepResult[];
   xmlCovarianceOptions: CovarianceOptions | null;
   lstEstRecords: RawEstRecord[];
+  lstCovRecord: RawEstRecord | null;
   lstTolerances: LstTolerances;
   /**
    * NM's default `file` value for this run, derived as `<basename>.ext`
@@ -882,6 +897,7 @@ function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnostics | nu
     xmlEstimationResults,
     xmlCovarianceOptions,
     lstEstRecords,
+    lstCovRecord,
     lstTolerances,
     expectedDefaultFile,
   } = args;
@@ -943,6 +959,13 @@ function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnostics | nu
     : null;
   const xmlCovarianceTiers = xmlCovarianceOptions
     ? classifyCovKeys(xmlCovarianceOptions, lastEst)
+    : {};
+  // v0.0.185+ unified $COV tier-map using the same explicit/implicit/
+  // explicitDefault scheme as $EST. Drives the inspector's $COV
+  // coloring via .lst $COV tokens (user-typed vs. not).
+  const covTokens = lstCovRecord?.tokens ?? [];
+  const xmlCovarianceTiersV2: Record<string, CovTier> = xmlCovarianceOptions
+    ? classifyCovStep(xmlCovarianceOptions, covTokens)
     : {};
   // Per-key wire→runtime resolution for $COV sentinels (atol/tol/
   // siglcov/siglocov/knuthsumoff/posdef/file/format/ranmethod when
@@ -1013,6 +1036,7 @@ function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnostics | nu
     xmlEstimationResults,
     xmlCovarianceOptions,
     xmlCovarianceTiers,
+    xmlCovarianceTiersV2,
     xmlCovarianceResolved,
     lstEstRecords,
     lstTolerances,

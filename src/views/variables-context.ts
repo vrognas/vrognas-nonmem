@@ -36,6 +36,7 @@ import { lastCorTable, type CorTable } from '../runtime/parse-cor';
 import { parseExtFit } from '../runtime/parse-ext-fit';
 import { parseExtTrajectory, type ExtTrajectory } from '../runtime/parse-ext-trajectory';
 import {
+  parseLstCovRecord,
   parseLstEstRecords,
   type RawEstRecord,
 } from '../runtime/parse-lst-est-records';
@@ -154,6 +155,15 @@ export interface VariablesContext {
    * the trace blocks.
    */
   lstTolerances: LstTolerances;
+  /**
+   * Verbatim user-typed `$COV` record from the `.lst`'s embedded
+   * control-stream echo. NONMEM permits at most one $COV per problem.
+   * Used to detect which options the user explicitly typed (vs.
+   * inherited / method-default / not-set) for the unified tier
+   * classification. Null when mod-mode, no $COV record, or .lst echo
+   * couldn't be extracted.
+   */
+  lstCovRecord: RawEstRecord | null;
 }
 
 /** Logger contract — every diagnostic line about the resolution path goes here. */
@@ -196,7 +206,7 @@ async function resolveModMode(
   }
   log(`mod-mode: parsedModel ok — ${parsedModelStatsLine(model)}`);
   const runrecord = await loadRunrecord(uri.fsPath, log);
-  return { model, modUri: uri, fit: null, sumo: null, lst: null, runrecord, prderr: null, fmsg: null, cor: null, cnv: null, trajectories: [], xmlEstimationOptions: [], xmlEstimationResults: [], xmlCovarianceOptions: null, lstEstRecords: [], lstTolerances: { baseNrd: null, baseAnrd: null, estNrd: null, estAnrd: null, covNrd: null, covAnrd: null, siglo: null, sigl: null } };
+  return { model, modUri: uri, fit: null, sumo: null, lst: null, runrecord, prderr: null, fmsg: null, cor: null, cnv: null, trajectories: [], xmlEstimationOptions: [], xmlEstimationResults: [], xmlCovarianceOptions: null, lstEstRecords: [], lstTolerances: { baseNrd: null, baseAnrd: null, estNrd: null, estAnrd: null, covNrd: null, covAnrd: null, siglo: null, sigl: null }, lstCovRecord: null };
 }
 
 /**
@@ -286,6 +296,7 @@ async function resolveLstMode(
   // is malformed or truncated; degrade to empty array.
   const ctrlStream = extractControlStream(lstText);
   const lstEstRecords = ctrlStream ? parseLstEstRecords(ctrlStream) : [];
+  const lstCovRecord = ctrlStream ? parseLstCovRecord(ctrlStream) : null;
   // Runtime-resolved tolerance trace from the .lst's BASE/EST/COV
   // TOLERANCE + SIGL/SIGLO blocks. Sparse — fields are null when the
   // corresponding block wasn't emitted (non-ODE model, no $COV, etc.).
@@ -318,6 +329,7 @@ async function resolveLstMode(
     xmlCovarianceOptions,
     lstEstRecords,
     lstTolerances,
+    lstCovRecord,
   };
 }
 

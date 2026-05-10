@@ -45,15 +45,33 @@ export interface RawEstRecord {
 }
 
 const EST_KEYWORD_RE = /^\s*\$(ESTIMATION|ESTIMATE|ESTM|EST)\b/i;
+const COV_KEYWORD_RE = /^\s*\$(COVARIANCE|COVR|COV)\b/i;
 const RECORD_BOUNDARY_RE = /^\s*\$[A-Za-z]+/;
 
 /**
- * Extract all `$EST` records from an NMTRAN control-stream slice (the
- * output of `extractControlStream`). Returns `[]` when the stream has
- * no `$EST` records, e.g. mod-mode rendering or runs aborted before
- * estimation.
+ * Extract all `$EST` records from an NMTRAN control-stream slice.
+ * See `parseLstRecord` for the generic underlying parser.
  */
 export function parseLstEstRecords(controlStream: string): RawEstRecord[] {
+  return parseLstRecord(controlStream, EST_KEYWORD_RE);
+}
+
+/**
+ * Extract the single `$COV` record from a control-stream slice
+ * (NONMEM permits at most one $COV per problem). Returns `null` when
+ * no $COV record is present.
+ */
+export function parseLstCovRecord(controlStream: string): RawEstRecord | null {
+  const records = parseLstRecord(controlStream, COV_KEYWORD_RE);
+  return records[0] ?? null;
+}
+
+/**
+ * Generic `$RECORD` extractor for control-stream slices. `keywordRe`
+ * identifies the record-introducing line ($EST family vs $COV family).
+ * Returns records in the order they appear in the stream.
+ */
+function parseLstRecord(controlStream: string, keywordRe: RegExp): RawEstRecord[] {
   const lines = controlStream.split(/\r?\n/);
   const records: RawEstRecord[] = [];
   let inRecord = false;
@@ -75,20 +93,16 @@ export function parseLstEstRecords(controlStream: string): RawEstRecord[] {
   };
 
   for (const line of lines) {
-    const estMatch = line.match(EST_KEYWORD_RE);
-    if (estMatch) {
-      flush(); // close previous record (if any)
+    const kwMatch = line.match(keywordRe);
+    if (kwMatch) {
+      flush();
       inRecord = true;
-      currentKeyword = '$' + estMatch[1].toUpperCase();
-      // Body of the line excluding the keyword (and the leading `$`).
-      // `match.index` is start of whitespace; offset to the keyword's end.
-      const afterKeyword = line.slice(line.toLowerCase().indexOf(estMatch[1].toLowerCase()) + estMatch[1].length);
+      currentKeyword = '$' + kwMatch[1].toUpperCase();
+      const afterKeyword = line.slice(line.toLowerCase().indexOf(kwMatch[1].toLowerCase()) + kwMatch[1].length);
       currentLines.push(stripComment(afterKeyword));
     } else if (RECORD_BOUNDARY_RE.test(line)) {
-      // Hit a different `$RECORD` — close current $EST if any.
       flush();
     } else if (inRecord) {
-      // Continuation line within the current $EST record.
       currentLines.push(stripComment(line));
     }
   }
