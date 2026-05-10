@@ -7,6 +7,19 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **feat: method-aware $EST invisible-option synthesis (v0.0.187).** Until now `synthesizeInvisibleAttrs` added rows for PRINT, POSTHOC, ETABARCHECK, NUMERICAL, CENTERING regardless of the current step's method. Per Bauer's $EST docs and the user's "universal options" list, only a subset apply universally:
+
+  - **Universal**: PRINT, POSTHOC, ETABARCHECK, plus parallel-processing knobs PARAFILE / PARAFPRINT / FPARAFILE (newly added — never emit to XML; documented Bauer defaults `OFF` / `1` / `OFF`).
+  - **Laplacian-only**: NUMERICAL (Bauer line 2935 — "for the Laplacian method").
+  - **FOCE-only**: CENTERING (Bauer line 2380 — "May only be used with METHOD=1").
+
+  New `INVISIBLE_ATTR_DEFS` carries `{ default, applicable }` per attr. New `deriveMethodKind(step)` returns `'em' | 'laplace' | 'foce' | 'fo'` from the XML attrs (estimation_method / laplace / cond_estim). The renderer now:
+
+  - Skips inapplicable rows from synthesis when the user didn't type them (no NUMERICAL row for FOCE runs; no CENTERING row for SAEM runs).
+  - Still surfaces user-typed inapplicable options (e.g. CENTERING typed on SAEM) but appends a WARNING to the tooltip: "this option only applies to FOCE methods; the current step uses EM. NM likely ignores it silently."
+
+  Also refactored KV-style invisibles (PRINT, PARAFILE, PARAFPRINT, FPARAFILE) into a single map alongside the boolean-toggle pairs, for symmetry.
+
 - **feat: $COV quirk handling — MATRIX=R suppresses SPECIAL (v0.0.186).** Empirically probed (NM 7.6.0) to verify the two `$COV` quirks called out previously and applied tier-aware treatment:
 
   - **ATOL "only with SIGL" quirk: empirically FALSE.** Probe at `~/positron-nonmem/probe-cov-quirks/atol_alone` — `$COV ATOL=5` (no SIGL/SIGLO) emitted `cov_atol='5'` AND the `.lst` "TOLERANCES FOR COVARIANCE STEP" line shows `ANRD=5`. Bauer's doc claim "ATOL is changed for the $COV step only if SIGL and/or SIGLO are also specified" is wrong (or outdated) at NM 7.6.0. No fix needed; ATOL works as written. Documented in empirical-notes.

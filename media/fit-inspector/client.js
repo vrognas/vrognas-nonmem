@@ -876,25 +876,36 @@ function isInvisibleToken(token) {
 }
 
 /**
- * Doc-default values for $EST options that NM never emits to XML.
- * Boolean flags use the NMTRAN convention `[FLAG|NOFLAG]` — the NO-
- * prefixed variant disables. Defaults verified at
- * `~/positron-nonmem/probe-attrs-survey/` (NM 7.6.0) + nmguides.
+ * Doc-default values for $EST options that NM never emits to XML, plus
+ * their method-applicability per Bauer's $EST docs. `applicable` is a
+ * set of method-kind labels — `'all'` means universal. Empirically
+ * verified universal at probe-attrs-survey/ where probes ran with FOCE.
+ *
+ * Method-conditional applicability (per Bauer's docs):
+ *   - PRINT, POSTHOC, ETABARCHECK: universal (per user's all-methods list)
+ *   - NUMERICAL: Laplacian-only (line 2935: "for the Laplacian method")
+ *   - CENTERING: FOCE-only (line 2380: "May only be used with METHOD=1")
+ *   - PARAFILE, PARAFPRINT, FPARAFILE: universal (parallel-processing knobs)
  */
-const INVISIBLE_ATTR_DEFAULTS = {
-  print: '9999',
-  // Boolean flags: 'no'/'yes' rendered. Default per Bauer:
-  posthoc: 'no',         // line 3089: NOPOSTHOC default for METHOD=0
-  etabarcheck: 'no',     // line 2465: NOETABARCHECK is the default
-  numerical: 'no',       // line 2940: NONUMERICAL is the default
-  centering: 'no',       // line 2386: NOCENTERING is the default
+const INVISIBLE_ATTR_DEFS = {
+  print:        { default: '9999', applicable: 'all' },
+  posthoc:      { default: 'no',   applicable: 'all' },
+  etabarcheck:  { default: 'no',   applicable: 'all' },
+  numerical:    { default: 'no',   applicable: 'laplace' },
+  centering:    { default: 'no',   applicable: 'foce' },
+  parafile:     { default: 'OFF',  applicable: 'all' },
+  parafprint:   { default: '1',    applicable: 'all' },
+  fparafile:    { default: 'OFF',  applicable: 'all' },
 };
 
+// Convenience: doc defaults indexed by attr name, for tooltip lookups.
+const INVISIBLE_ATTR_DEFAULTS = Object.fromEntries(
+  Object.entries(INVISIBLE_ATTR_DEFS).map(([k, v]) => [k, v.default]),
+);
+
 /**
- * NMTRAN boolean toggle pairs — `[FLAG|NOFLAG]` syntax. Maps the synth
- * attr name to the regex matching either form. NO-prefixed token sets
- * the value to 'no'; bare token sets to 'yes'. Used by
- * `synthesizeInvisibleAttrs` to interpret user $EST tokens.
+ * NMTRAN boolean toggle pairs — `[FLAG|NOFLAG]` syntax. NO-prefixed
+ * token sets the value to 'no'; bare token sets to 'yes'.
  */
 const BOOLEAN_TOGGLE_PATTERNS = {
   posthoc: /^(NO)?POSTHOC$/i,
@@ -904,29 +915,94 @@ const BOOLEAN_TOGGLE_PATTERNS = {
 };
 
 /**
- * Build a synthetic-attr overlay for the step from the user's verbatim
- * $EST tokens. Returns {value, isUserSet} per attr. Used to inject
- * doc-defaulted invisible options into the main option table:
- *   - PRINT (numeric, default 9999)
- *   - POSTHOC, ETABARCHECK, NUMERICAL, CENTERING (boolean toggle flags)
+ * KEY=VALUE-style invisibles. Token regex matches `KEY=...`; value is
+ * the user-supplied right-hand side.
  */
-function synthesizeInvisibleAttrs(userTokens) {
-  const out = {};
-  // PRINT: numeric. Extract user's value if present; default 9999.
-  const printToken = userTokens.find((t) => /^PRINT=/i.test(t));
-  if (printToken) {
-    out.print = { value: printToken.split('=')[1] || '', isUserSet: true };
-  } else {
-    out.print = { value: INVISIBLE_ATTR_DEFAULTS.print, isUserSet: false };
+const KV_INVISIBLE_PATTERNS = {
+  print: /^PRINT=/i,
+  parafile: /^PARAFILE=/i,
+  parafprint: /^PARAFPRINT=/i,
+  fparafile: /^FPARAFILE=/i,
+};
+
+/**
+ * Derive the method-kind label for a step from its XML attrs. Used to
+ * gate method-conditional synthesised options.
+ *   - 'em'      : estimation_method is one of the EM/MCMC labels
+ *   - 'laplace' : classical with laplace='yes' (LAPLACIAN was specified)
+ *   - 'foce'    : classical with cond_estim='yes' (METHOD=1 / FOCE)
+ *   - 'fo'      : classical with no cond_estim (METHOD=0 / FO)
+ */
+function deriveMethodKind(step) {
+  const m = (step.estimation_method ?? '').toLowerCase();
+  if (m === 'imp' || m === 'impmap' || m === 'saem' || m === 'its'
+      || m === 'direct' || m === 'bayes' || m === 'nuts'
+      || m === 'mcmc' || m === 'chain' || m === 'sir') {
+    return 'em';
   }
-  // Boolean toggles: bare flag → 'yes'; NO-prefix → 'no'; absent → default.
+  if (step.laplace === 'yes') return 'laplace';
+  if (step.cond_estim === 'yes') return 'foce';
+  return 'fo';
+}
+
+/**
+ * Whether a synthesised attr applies to the given method-kind. `'all'`
+ * applies everywhere.
+ */
+function attrAppliesToMethod(attr, methodKind) {
+  const def = INVISIBLE_ATTR_DEFS[attr];
+  if (!def) return true;
+  if (def.applicable === 'all') return true;
+  return def.applicable === methodKind;
+}
+
+/**
+ * Build a synthetic-attr overlay for the step from the user's verbatim
+ * $EST tokens. Returns {value, isUserSet, inapplicable} per attr.
+ * Method-conditional attrs (NUMERICAL/CENTERING) are skipped from the
+ * overlay when inapplicable to the current method AND the user didn't
+ * type them. When inapplicable AND user typed → included with
+ * `inapplicable: true` so the renderer can flag the warning.
+ */
+function synthesizeInvisibleAttrs(userTokens, methodKind) {
+  const out = {};
+  // KV-style: PRINT, PARAFILE, PARAFPRINT, FPARAFILE.
+  for (const [attr, re] of Object.entries(KV_INVISIBLE_PATTERNS)) {
+    const match = userTokens.find((t) => re.test(t));
+    const applies = attrAppliesToMethod(attr, methodKind);
+    if (match) {
+      const inapplicable = !applies;
+      out[attr] = {
+        value: match.split('=')[1] || '',
+        isUserSet: true,
+        inapplicable,
+      };
+    } else if (applies) {
+      out[attr] = {
+        value: INVISIBLE_ATTR_DEFS[attr].default,
+        isUserSet: false,
+        inapplicable: false,
+      };
+    }
+    // else: not user-typed AND inapplicable → skip the row entirely.
+  }
+  // Boolean toggles.
   for (const [attr, re] of Object.entries(BOOLEAN_TOGGLE_PATTERNS)) {
     const match = userTokens.find((t) => re.test(t));
+    const applies = attrAppliesToMethod(attr, methodKind);
     if (match) {
       const isNegated = /^NO/i.test(match);
-      out[attr] = { value: isNegated ? 'no' : 'yes', isUserSet: true };
-    } else {
-      out[attr] = { value: INVISIBLE_ATTR_DEFAULTS[attr], isUserSet: false };
+      out[attr] = {
+        value: isNegated ? 'no' : 'yes',
+        isUserSet: true,
+        inapplicable: !applies,
+      };
+    } else if (applies) {
+      out[attr] = {
+        value: INVISIBLE_ATTR_DEFS[attr].default,
+        isUserSet: false,
+        inapplicable: false,
+      };
     }
   }
   return out;
@@ -982,9 +1058,12 @@ function renderEstimationOptionsStep(step, stepNum, tierMap, lstRecord, lstToler
   const userWroteNohabort = userTokens.some((t) => /^NOHABORT$/i.test(t));
   const tolerances = lstTolerances || null;
 
-  // Synthesize doc-defaulted invisible attrs (currently only PRINT)
-  // into the merged option set. Effective view = XML attrs ∪ synthesized.
-  const synthetic = synthesizeInvisibleAttrs(userTokens);
+  // Synthesize doc-defaulted invisible attrs into the merged option
+  // set. Method-aware: NUMERICAL/CENTERING skipped for inapplicable
+  // methods unless user explicitly typed them. Effective view =
+  // XML attrs ∪ synthesised.
+  const methodKind = deriveMethodKind(step);
+  const synthetic = synthesizeInvisibleAttrs(userTokens, methodKind);
   const merged = { ...step };
   for (const k of Object.keys(synthetic)) {
     merged[k] = synthetic[k].value;
@@ -1009,14 +1088,20 @@ function renderEstimationOptionsStep(step, stepNum, tierMap, lstRecord, lstToler
     // computed payload-side via classifyEstStep — single source of truth.
     const synthEntry = synthetic[k];
     if (synthEntry !== undefined) {
-      // Synthesized invisible attrs (PRINT) — tier based on isUserSet,
-      // doc-default match.
+      // Synthesised invisible attrs — tier based on isUserSet, doc-default
+      // match, and method-applicability.
       if (synthEntry.isUserSet) {
         const matchesDocDefault = synthEntry.value === INVISIBLE_ATTR_DEFAULTS[k];
         cls += matchesDocDefault
           ? ' xml-options-val--explicit-default'
           : ' xml-options-val--explicit';
         tip = 'User-typed (NM never emits this to XML; synthesized from .lst echo). Default per Bauer: ' + INVISIBLE_ATTR_DEFAULTS[k] + (matchesDocDefault ? ' — matches default.' : '.');
+        if (synthEntry.inapplicable) {
+          // Method-applicability warning (e.g. CENTERING typed on SAEM —
+          // doc says METHOD=1 only).
+          const applicableTo = INVISIBLE_ATTR_DEFS[k].applicable;
+          tip += ' WARNING: this option only applies to ' + applicableTo.toUpperCase() + ' methods; the current step uses ' + methodKind.toUpperCase() + '. NM likely ignores it silently.';
+        }
       } else {
         tip = 'Documented default per Bauer (NM never emits this to XML). Synthesized for visibility.';
       }
