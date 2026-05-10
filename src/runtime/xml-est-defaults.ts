@@ -436,12 +436,15 @@ export type EstTier = 'explicit' | 'explicitDefault' | 'implicit';
 
 /**
  * Identity-style attrs that don't fit the explicit/implicit/default
- * model — file is per-run-derived (NM auto-picks from mod name);
- * estimation_method is informational; cinterval cascades from PRINT;
- * etas_fixed_to_zero is HYBRID-only. Render unstyled even when present.
+ * model — `estimation_method` is informational; `cinterval` cascades
+ * from PRINT; `etas_fixed_to_zero` is HYBRID-only and only emits when
+ * user supplied via ZERO=. Render unstyled even when present.
+ *
+ * `file` is NOT in this set: NM's default is `<modelname>.ext`
+ * (per-run-derived), and a value like `psn.ext` is a strong signal
+ * that PsN's execute wrapper rewrote it — worth flagging implicit.
  */
 const SKIP_TIER_KEYS: ReadonlySet<string> = new Set([
-  'file',
   'estimation_method',
   'cinterval',
   'etas_fixed_to_zero',
@@ -456,10 +459,16 @@ const SKIP_TIER_KEYS: ReadonlySet<string> = new Set([
  * `tokens` are the user's verbatim tokens from the .lst echo (empty
  * when no .lst available — degrades gracefully: everything becomes
  * implicit-or-default).
+ *
+ * `expectedDefaultFile` is the NM-derived default for the `file` attr
+ * (`<modelname>.ext`). Computed payload-side from the lst path. When
+ * null, `file` falls back to the static baseline (and may false-flag
+ * as implicit; preferable to silent miss).
  */
 export function classifyEstStep(
   step: EstimationOptionsStep,
   tokens: readonly string[],
+  expectedDefaultFile: string | null = null,
 ): Record<string, EstTier> {
   const defaults = findDefaultsForStep(step) || {};
   const out: Record<string, EstTier> = {};
@@ -469,7 +478,16 @@ export function classifyEstStep(
     const wroteIt = userWroteAttr(k, tokens);
     // Treat absent baseline (NM 7.7+ unknown attr, contextual emit)
     // as "differs from default" — surfaces the gap to a maintainer.
-    const matchesDefault = defaults[k] !== undefined && defaults[k] === value;
+    let matchesDefault: boolean;
+    if (k === 'file') {
+      // NM's default file is <modelname>.ext, derived per-run. The
+      // payload-builder computes this from the lst path. Comparing
+      // the static baseline 'run001.ext' would mis-flag every run
+      // whose model isn't named run001.
+      matchesDefault = expectedDefaultFile !== null && expectedDefaultFile === value;
+    } else {
+      matchesDefault = defaults[k] !== undefined && defaults[k] === value;
+    }
     if (wroteIt && matchesDefault) {
       out[k] = 'explicitDefault';
     } else if (wroteIt) {

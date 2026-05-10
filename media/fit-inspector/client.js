@@ -1046,6 +1046,15 @@ function renderEstimationOptionsStep(step, stepNum, tierMap, lstRecord, lstToler
       const note = ' (XML wire: \'' + merged[k] + '\' — sentinel for the built-in default; effective runtime value ' + resolved + ' from .lst trace.)';
       tip = (tip || '') + note;
     }
+    // PsN-wrapper detection on `file` attr: PsN's execute renames the
+    // FILE= option to psn.ext in the wrapped control stream, so the
+    // user sees their model's name.lst paired with file='psn.ext' in
+    // the XML. Annotate the tier tooltip so the user knows it's not
+    // their setting.
+    if (k === 'file' && /^psn\.ext$/i.test(merged[k])) {
+      const note = ' (PsN\'s execute wrapper rewrites the FILE= option to psn.ext in the wrapped control stream — not the modeller\'s choice.)';
+      tip = (tip || '') + note;
+    }
     tdV.className = cls;
     tdV.textContent = fmtXmlOptionValue(displayValue);
     if (tip) tdV.title = tip;

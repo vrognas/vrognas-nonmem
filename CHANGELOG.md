@@ -7,6 +7,8 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **fix: dynamic FILE default + PsN-wrapper detection (v0.0.183).** The `file` $EST attr was previously in `SKIP_TIER_KEYS` (always unstyled) because my static baseline of `run001.ext` would mis-flag any model with a different base name. Now the payload-builder derives the NM-default file dynamically from the lst path (`run001.lst` → `run001.ext`) and `classifyEstStep` accepts it as an `expectedDefaultFile` parameter. PsN-wrapped runs that emit `file='psn.ext'` (PsN's `execute` rewrites FILE= in the wrapped control stream) now correctly classify as `implicit` (orange/warn) since the modeller didn't set it AND it differs from NM's auto-derived default. Tooltip annotates: "PsN's execute wrapper rewrites the FILE= option to psn.ext in the wrapped control stream — not the modeller's choice." 4 new tests.
+
 - **fix: implicit tier uses the standard warn color (v0.0.182).** Switched `.xml-options-val--implicit` from `var(--vscode-charts-orange)` to `var(--vscode-editorWarning-foreground)` — the same theme-aware color used for RSE > rseWarnPct in the parameter tables (and other "warn" surfaces across the inspector). Single visual vocabulary for "worth a glance, not bad" across the panel. CSS-only change.
 
 - **feat + refactor: $EST options re-coloring + ATOL display + boolean defaults (v0.0.181).** Three-part reorganization of the $EST options inspector:

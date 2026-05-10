@@ -583,6 +583,14 @@ export function buildInspectorPayload(
             baseNrd: null, baseAnrd: null, estNrd: null, estAnrd: null,
             covNrd: null, covAnrd: null, siglo: null, sigl: null,
           },
+          // NM's default `file` for this run is `<basename>.ext`. When
+          // PsN's execute wraps the model the lst is at <psn-dir>/run001.lst
+          // but the wrapped control stream sets FILE=psn.ext — comparing
+          // against `<basename>.ext` (e.g. `run001.ext`) flags the
+          // PsN-imposed value as implicit (not the user's choice).
+          expectedDefaultFile: ctx.lstPath
+            ? path.basename(ctx.lstPath, path.extname(ctx.lstPath)) + '.ext'
+            : null,
         })
       : null,
     thresholds: {
@@ -836,6 +844,14 @@ interface BuildDiagnosticsArgs {
   xmlCovarianceOptions: CovarianceOptions | null;
   lstEstRecords: RawEstRecord[];
   lstTolerances: LstTolerances;
+  /**
+   * NM's default `file` value for this run, derived as `<basename>.ext`
+   * from the lst path (e.g., `run001.lst` → `run001.ext`). Null when
+   * mod-mode (no lst path). Used by `classifyEstStep` to detect when
+   * a non-default file like `psn.ext` (PsN's wrapper convention) was
+   * imposed by tooling rather than the modeller.
+   */
+  expectedDefaultFile: string | null;
 }
 
 function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnostics | null {
@@ -853,6 +869,7 @@ function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnostics | nu
     xmlCovarianceOptions,
     lstEstRecords,
     lstTolerances,
+    expectedDefaultFile,
   } = args;
   const conditionNumber = sumo?.conditionNumber ?? lst.conditionNumber ?? null;
   const eigs = lst.eigenvalues;
@@ -900,7 +917,7 @@ function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnostics | nu
   // this, not the user").
   const xmlEstimationTiers = xmlEstimationOptions.map((step, i) => {
     const tokens = lstEstRecords[i]?.tokens ?? [];
-    return classifyEstStep(step, tokens);
+    return classifyEstStep(step, tokens, expectedDefaultFile);
   });
   // $COV: single classifier returning a tier-map (key → 'nonDefault' |
   // 'propagated' | 'userDriven'). Propagation is cross-referenced

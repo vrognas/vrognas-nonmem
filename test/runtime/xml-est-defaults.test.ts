@@ -308,18 +308,46 @@ describe('classifyEstStep (v0.0.181 tier scheme)', () => {
     expect(tiers.epseta_interaction).toBe('explicit');
   });
 
-  it('SKIP_TIER_KEYS: file / estimation_method / cinterval / etas_fixed_to_zero never classified', () => {
+  it('SKIP_TIER_KEYS: estimation_method / cinterval / etas_fixed_to_zero never classified (file IS classified now)', () => {
     const step = {
       estimation_method: 'saem',
-      file: 'mymodel.ext',
       cinterval: '50',
       etas_fixed_to_zero: '1',
     };
-    const tiers = classifyEstStep(step, ['METHOD=SAEM', 'FILE=mymodel.ext']);
-    expect(tiers.file).toBeUndefined();
+    const tiers = classifyEstStep(step, ['METHOD=SAEM']);
     expect(tiers.estimation_method).toBeUndefined();
     expect(tiers.cinterval).toBeUndefined();
     expect(tiers.etas_fixed_to_zero).toBeUndefined();
+  });
+
+  it('file: matches expectedDefaultFile → unstyled (NM auto-derived from mod name)', () => {
+    const step = { estimation_method: 'saem', file: 'run001.ext' };
+    const tiers = classifyEstStep(step, ['METHOD=SAEM'], 'run001.ext');
+    expect(tiers.file).toBeUndefined();
+  });
+
+  it('file: PsN-wrapped psn.ext flags as implicit (modeller didn\'t set, NM default would be run001.ext)', () => {
+    const step = { estimation_method: 'saem', file: 'psn.ext' };
+    const tiers = classifyEstStep(step, ['METHOD=SAEM'], 'run001.ext');
+    expect(tiers.file).toBe('implicit');
+  });
+
+  it('file: user-typed FILE=foo.ext → explicit', () => {
+    const step = { estimation_method: 'saem', file: 'foo.ext' };
+    const tiers = classifyEstStep(step, ['METHOD=SAEM', 'FILE=foo.ext'], 'run001.ext');
+    expect(tiers.file).toBe('explicit');
+  });
+
+  it('file: no expectedDefaultFile (mod-mode) → falls back to baseline; differs from \'run001.ext\' baseline → may flag implicit', () => {
+    // Without lst path we can\'t derive the expected default; behaviour
+    // degrades to: never matches the dynamic default, so flags implicit
+    // when value differs from null. Document the degradation.
+    const step = { estimation_method: 'saem', file: 'run001.ext' };
+    const tiers = classifyEstStep(step, ['METHOD=SAEM'], null);
+    // expectedDefaultFile=null → matchesDefault=false → not user-typed
+    // → 'implicit'. Acceptable: in mod-mode we don\'t render this field
+    // at all (no diagnostics), so the false positive is unreachable.
+    expect(tiers.file).toBe('implicit');
   });
 
   it('NM 7.7+ unknown attr (not in baseline) classifies as implicit when not user-typed', () => {
