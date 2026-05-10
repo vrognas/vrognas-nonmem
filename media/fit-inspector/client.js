@@ -164,7 +164,12 @@ function render(payload) {
     // doesn't emit a dedicated covariance_options element — empirically
     // confirmed.
     const d = payload.diagnostics;
-    root.append(renderCovarianceOptions(d.xmlCovarianceOptions, d.xmlCovarianceTiers || {}, d.lstTolerances));
+    root.append(renderCovarianceOptions(
+      d.xmlCovarianceOptions,
+      d.xmlCovarianceTiers || {},
+      d.xmlCovarianceResolved || {},
+      d.lstTolerances,
+    ));
   }
   if (payload.diagnostics && payload.diagnostics.etabar.length) {
     // Per-ETA ETABAR / SE / N / P VAL table. Shrinkage already lives in
@@ -1109,7 +1114,7 @@ const COV_TIER_TIPS = {
   nonDefault: 'Non-default: differs from the empirical baseline (probed against NM 7.6.0).',
 };
 
-function renderCovarianceOptions(opts, tierMap, lstTolerances) {
+function renderCovarianceOptions(opts, tierMap, resolvedMap, lstTolerances) {
   const outer = document.createElement('details');
   outer.className = 'xml-options';
   const sumOuter = document.createElement('summary');
@@ -1139,16 +1144,18 @@ function renderCovarianceOptions(opts, tierMap, lstTolerances) {
       cls += ' xml-options-val--non-default';
       tip = COV_TIER_TIPS.nonDefault;
     }
-    // Wire-vs-runtime annotation. cov_atol='-1' inherits from $EST or
-    // $SUBROUTINES; the runtime ANRD lives in the .lst's "TOLERANCES
-    // FOR COVARIANCE STEP" block.
-    const resolved = resolveCovAttrFromLst(k, opts[k], lstTolerances);
+    // Wire→runtime translation. When the wire value is a sentinel
+    // (`-1` or `'BLANK'`) and we have a resolution, display the
+    // resolved value; tooltip preserves the wire format for transparency.
+    let displayValue = opts[k];
+    const resolved = resolvedMap[k] || resolveCovAttrFromLst(k, opts[k], lstTolerances);
     if (resolved && resolved !== opts[k]) {
-      const note = ' (runtime: ' + resolved + ' — from .lst trace; XML wire \'' + opts[k] + '\' is a sentinel that inherits)';
+      displayValue = resolved;
+      const note = ' (XML wire: \'' + opts[k] + '\' — sentinel; effective runtime value ' + resolved + ' — inherited from $EST / $SUBROUTINES / method default.)';
       tip = (tip || '') + note;
     }
     tdV.className = cls;
-    tdV.textContent = fmtXmlOptionValue(opts[k]);
+    tdV.textContent = fmtXmlOptionValue(displayValue);
     if (tip) tdV.title = tip;
     tr.append(tdK, tdV);
     table.append(tr);

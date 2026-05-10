@@ -133,3 +133,58 @@ describe('classifyCovKeys', () => {
     expect(classifyCovKeys({}, null)).toEqual({});
   });
 });
+
+describe('resolveCovAttrToRuntime', () => {
+  const noTrace = {
+    baseNrd: null, baseAnrd: null, estNrd: null, estAnrd: null,
+    covNrd: null, covAnrd: null, siglo: null, sigl: null,
+  };
+
+  it('atol=-1: resolves via lstTolerances.covAnrd', async () => {
+    const { resolveCovAttrToRuntime } = await import('../../src/runtime/xml-cov-defaults');
+    const trace = { ...noTrace, covAnrd: '12' };
+    expect(resolveCovAttrToRuntime('atol', '-1', null, trace, 'classical')).toBe('12');
+  });
+
+  it('tol=-1: resolves via lstTolerances.covNrd', async () => {
+    const { resolveCovAttrToRuntime } = await import('../../src/runtime/xml-cov-defaults');
+    const trace = { ...noTrace, covNrd: '6' };
+    expect(resolveCovAttrToRuntime('tol', '-1', null, trace, 'classical')).toBe('6');
+  });
+
+  it('siglcov=-1: resolves via $EST sigl (or lst trace)', async () => {
+    const { resolveCovAttrToRuntime } = await import('../../src/runtime/xml-cov-defaults');
+    const lastEst = { sigl: '8', siglo: '5', estimation_method: '' };
+    expect(resolveCovAttrToRuntime('siglcov', '-1', lastEst, noTrace, 'classical')).toBe('8');
+    expect(resolveCovAttrToRuntime('siglocov', '-1', lastEst, noTrace, 'classical')).toBe('5');
+  });
+
+  it('posdef=-1: classical → 0, em → 3', async () => {
+    const { resolveCovAttrToRuntime } = await import('../../src/runtime/xml-cov-defaults');
+    expect(resolveCovAttrToRuntime('posdef', '-1', null, noTrace, 'classical')).toBe('0');
+    expect(resolveCovAttrToRuntime('posdef', '-1', null, noTrace, 'em')).toBe('3');
+    expect(resolveCovAttrToRuntime('posdef', '-1', null, noTrace, null)).toBeNull();
+  });
+
+  it('file=BLANK: resolves via $EST file (SIR-active case)', async () => {
+    const { resolveCovAttrToRuntime } = await import('../../src/runtime/xml-cov-defaults');
+    const lastEst = { file: 'run001.ext', estimation_method: '' };
+    expect(resolveCovAttrToRuntime('file', 'BLANK', lastEst, noTrace, 'classical')).toBe('run001.ext');
+  });
+
+  it('ranmethod=BLANK: resolves to documented default "3"', async () => {
+    const { resolveCovAttrToRuntime } = await import('../../src/runtime/xml-cov-defaults');
+    expect(resolveCovAttrToRuntime('ranmethod', 'BLANK', null, noTrace, 'classical')).toBe('3');
+  });
+
+  it('non-sentinel values: returns null (no translation)', async () => {
+    const { resolveCovAttrToRuntime } = await import('../../src/runtime/xml-cov-defaults');
+    expect(resolveCovAttrToRuntime('atol', '5', null, noTrace, 'classical')).toBeNull();
+    expect(resolveCovAttrToRuntime('matrix', 'rsr', null, noTrace, 'classical')).toBeNull();
+  });
+
+  it('unknown sentinel-bearing key returns null', async () => {
+    const { resolveCovAttrToRuntime } = await import('../../src/runtime/xml-cov-defaults');
+    expect(resolveCovAttrToRuntime('hypothetical_attr', '-1', null, noTrace, 'classical')).toBeNull();
+  });
+});

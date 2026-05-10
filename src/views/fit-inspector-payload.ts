@@ -25,7 +25,11 @@ import {
   type EstTier,
 } from '../runtime/xml-est-defaults';
 import type { CovarianceOptions } from '../runtime/parse-xml-problem-options';
-import { classifyCovKeys, type CovKeyTier } from '../runtime/xml-cov-defaults';
+import {
+  classifyCovKeys,
+  resolveCovAttrToRuntime,
+  type CovKeyTier,
+} from '../runtime/xml-cov-defaults';
 import type { EstimationStepResult } from '../runtime/parse-xml-results';
 import type { RawEstRecord } from '../runtime/parse-lst-est-records';
 import type { LstTolerances } from '../runtime/parse-lst-tolerances';
@@ -382,6 +386,16 @@ export interface InspectorDiagnostics {
    * (no highlight). Empty `{}` when no $COV record present.
    */
   xmlCovarianceTiers: Record<string, CovKeyTier>;
+  /**
+   * Per-key wire→runtime resolution for $COV attrs. Keys present only
+   * when wire value is a sentinel (`'-1'` or `'BLANK'`) that resolves
+   * to a known runtime-effective value (e.g. `cov_atol='-1'` → '12'
+   * from .lst BASE TOLERANCE block; `cov_posdef='-1'` → '0' for
+   * classical, '3' for EM). The renderer displays the resolved value
+   * and notes the wire format in the tooltip. Empty `{}` when no
+   * sentinels are present or no $COV record.
+   */
+  xmlCovarianceResolved: Record<string, string>;
   /**
    * Verbatim user-typed `$EST` records from the `.lst` control-stream
    * echo. Index-aligned with `xmlEstimationOptions`. Surfaces info XML
@@ -930,6 +944,35 @@ function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnostics | nu
   const xmlCovarianceTiers = xmlCovarianceOptions
     ? classifyCovKeys(xmlCovarianceOptions, lastEst)
     : {};
+  // Per-key wire→runtime resolution for $COV sentinels (atol/tol/
+  // siglcov/siglocov/knuthsumoff/posdef/file/format/ranmethod when
+  // value is '-1' or 'BLANK'). Method discriminator for posdef
+  // (0 classical / 3 EM) derived from the last $EST step's
+  // estimation_method attr — empty/cond → classical; em-method labels
+  // → em. Empty result when no $COV present.
+  const methodKind: 'em' | 'classical' | null = (() => {
+    const m = (lastEst?.estimation_method ?? '').toLowerCase();
+    if (!m) return 'classical';
+    if (m === 'imp' || m === 'impmap' || m === 'saem' || m === 'its'
+        || m === 'direct' || m === 'bayes' || m === 'nuts'
+        || m === 'mcmc' || m === 'chain' || m === 'sir') return 'em';
+    return 'classical';
+  })();
+  const xmlCovarianceResolved: Record<string, string> = {};
+  if (xmlCovarianceOptions) {
+    for (const k of Object.keys(xmlCovarianceOptions)) {
+      const resolved = resolveCovAttrToRuntime(
+        k,
+        xmlCovarianceOptions[k],
+        lastEst,
+        lstTolerances,
+        methodKind,
+      );
+      if (resolved !== null && resolved !== xmlCovarianceOptions[k]) {
+        xmlCovarianceResolved[k] = resolved;
+      }
+    }
+  }
   return {
     termination: lst.termination,
     terminationPhrase: lst.terminationPhrase,
@@ -970,6 +1013,7 @@ function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnostics | nu
     xmlEstimationResults,
     xmlCovarianceOptions,
     xmlCovarianceTiers,
+    xmlCovarianceResolved,
     lstEstRecords,
     lstTolerances,
   };

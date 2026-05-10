@@ -24,6 +24,7 @@
 
 import type { CovarianceOptions } from './parse-xml-problem-options';
 import type { EstimationOptionsStep } from './parse-xml-options';
+import type { LstTolerances } from './parse-lst-tolerances';
 import { findNonDefaultKeys } from './xml-est-defaults';
 
 /** Per-key tier, omitted when the key matches default. */
@@ -56,6 +57,12 @@ const BARE_COV: Readonly<CovarianceOptions> = {
   special: 'no',
   thbnd: '1',
   tol: '-1',
+  // Conditionally-emitted by `$COV PRINT=R` / `PRINT=S` — empirically
+  // verified at probe-cov-survey/print_r/. Treat default 'no' so a
+  // run that DID emit one of these (because user wrote PRINT=R) flags
+  // as non-default. When bare $COV: not emitted, so absent from input.
+  rmatrix_print: 'no',
+  smatrix_print: 'no',
 };
 
 /**
@@ -159,4 +166,49 @@ export function classifyCovKeys(
     }
   }
   return out;
+}
+
+/**
+ * Resolve a $COV attr's wire value to its runtime-effective value.
+ * Returns null when no translation applies (caller displays the wire
+ * value as-is).
+ *
+ * Empirically validated at NM 7.6.0:
+ *   - `'-1'` sentinel: inherits from $EST (per Bauer's $COV doc) for
+ *     atol/tol/siglcov/siglocov/knuthsumoff. `posdef='-1'` resolves
+ *     to method-determined default (0 classical / 3 EM).
+ *   - `'BLANK'` sentinel (only emitted when SIR active for SIR-block
+ *     attrs): inherits from $EST counterpart for file/format; default
+ *     '3' for ranmethod (Bauer's $COV doc says default n=3).
+ *
+ * `lstTolerances` provides resolved $COV ANRD/NRD from .lst trace
+ * (most authoritative source). Fall-through to `lastEst` attrs when
+ * trace doesn't carry the value (knuthsumoff, file, format).
+ */
+export function resolveCovAttrToRuntime(
+  key: string,
+  value: string,
+  lastEst: EstimationOptionsStep | null,
+  lstTolerances: LstTolerances | null,
+  methodKind: 'em' | 'classical' | null,
+): string | null {
+  if (value === '-1') {
+    if (key === 'atol') return lstTolerances?.covAnrd ?? null;
+    if (key === 'tol') return lstTolerances?.covNrd ?? null;
+    if (key === 'siglcov') return lstTolerances?.sigl ?? lastEst?.sigl ?? null;
+    if (key === 'siglocov') return lstTolerances?.siglo ?? lastEst?.siglo ?? null;
+    if (key === 'knuthsumoff') return lastEst?.knuthsumoff ?? null;
+    if (key === 'posdef') {
+      if (methodKind === 'em') return '3';
+      if (methodKind === 'classical') return '0';
+      return null;
+    }
+  }
+  if (value === 'BLANK') {
+    if (key === 'file') return lastEst?.file ?? null;
+    if (key === 'format') return lastEst?.format ?? null;
+    // RANMETHOD default per Bauer $COV doc: `n=3` (uniform PRNG).
+    if (key === 'ranmethod') return '3';
+  }
+  return null;
 }
