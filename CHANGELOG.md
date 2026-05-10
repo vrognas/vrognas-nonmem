@@ -7,6 +7,8 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **fix: implicit tier uses the standard warn color (v0.0.182).** Switched `.xml-options-val--implicit` from `var(--vscode-charts-orange)` to `var(--vscode-editorWarning-foreground)` — the same theme-aware color used for RSE > rseWarnPct in the parameter tables (and other "warn" surfaces across the inspector). Single visual vocabulary for "worth a glance, not bad" across the panel. CSS-only change.
+
 - **feat + refactor: $EST options re-coloring + ATOL display + boolean defaults (v0.0.181).** Three-part reorganization of the $EST options inspector:
 
   (1) **New tier scheme** — replaced the old four-tier (green/blue/yellow/muted-blue) with three tiers anchored on a single semantic axis: did the user type this on the current $EST line? **Blue (`explicit`)** = yes. **Italic blue (`explicitDefault`)** = yes, but value happens to match the method default (typing was a no-op). **Orange (`implicit`)** = no, but value differs from default — set by `AUTO=N`'s per-method overrides or propagated from a prior $EST step. Unstyled = matches default + not typed. Single-pass classifier `classifyEstStep(step, tokens)` in xml-est-defaults.ts produces a per-step `Record<key, EstTier>`; payload ships the tier-map as `xmlEstimationTiers`. Drops the old USER_DRIVEN green tier (was a hack for "we can't tell"); now we can tell because lst tokens give us explicit-vs-not directly. Identity attrs (file, estimation_method, cinterval, etas_fixed_to_zero) stay unstyled via SKIP_TIER_KEYS.

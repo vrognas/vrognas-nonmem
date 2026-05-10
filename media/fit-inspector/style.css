@@ -315,8 +315,12 @@ body {
   font-weight: 500;
   font-style: italic;
 }
+/* Implicit tier uses `--vscode-editorWarning-foreground` (the squiggly-
+   underline color) — same theme-aware warn color as RSE > rseWarnPct
+   in the parameter tables. Consistent visual vocabulary across the
+   inspector: warn = "this isn't bad, but worth a glance". */
 .xml-options-val--implicit {
-  color: var(--vscode-charts-orange);
+  color: var(--vscode-editorWarning-foreground);
   font-weight: 600;
 }
 /* $COV-specific propagated tier: `cov_*='-1'` inheriting from $EST
