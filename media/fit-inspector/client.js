@@ -171,10 +171,12 @@ function render(payload) {
       d.xmlCovarianceResolved || {},
       d.lstTolerances,
       d.lstCovRecord,
-      d.xmlCovarianceTiersV2 || {},
       !!d.hasOde,
     ));
   }
+  // (V1 tier classifier `classifyCovKeys` was retired in v0.0.190 —
+  // `xmlCovarianceTiers` now carries the unified explicit/explicitDefault/
+  // implicit tier map produced by `classifyCovStep`.)
   if (payload.diagnostics && payload.diagnostics.etabar.length) {
     // Per-ETA ETABAR / SE / N / P VAL table. Shrinkage already lives in
     // OMEGA's column; ETABAR ≠ 0 is the new info here (small p-value =
@@ -1178,11 +1180,12 @@ function renderEstimationOptionsStep(step, stepNum, tierMap, lstRecord, lstToler
       tip = (tip || '') + note;
     }
     // PsN-wrapper detection on `file` attr: PsN's execute renames the
-    // FILE= option to psn.ext in the wrapped control stream, so the
-    // user sees their model's name.lst paired with file='psn.ext' in
-    // the XML. Annotate the tier tooltip so the user knows it's not
-    // their setting.
-    if (k === 'file' && /^psn\.ext$/i.test(merged[k])) {
+    // FILE= option to psn.ext in the wrapped control stream. Annotate
+    // ONLY when the user did NOT explicitly type FILE= — i.e. tier is
+    // 'implicit'. If the user did write FILE=psn.ext intentionally
+    // (unusual but valid), it's their choice and the wrapper note
+    // would be wrong.
+    if (k === 'file' && /^psn\.ext$/i.test(merged[k]) && tierMap[k] === 'implicit') {
       const note = ' (PsN\'s execute wrapper rewrites the FILE= option to psn.ext in the wrapped control stream — not the modeller\'s choice.)';
       tip = (tip || '') + note;
     }
@@ -1300,7 +1303,7 @@ function synthesizeInvisibleCovAttrs(covTokens) {
   return out;
 }
 
-function renderCovarianceOptions(opts, tierMap, resolvedMap, lstTolerances, lstCovRecord, tiersV2, hasOde) {
+function renderCovarianceOptions(opts, tiersMap, resolvedMap, lstTolerances, lstCovRecord, hasOde) {
   const outer = document.createElement('details');
   outer.className = 'xml-options';
   const sumOuter = document.createElement('summary');
@@ -1344,14 +1347,15 @@ function renderCovarianceOptions(opts, tierMap, resolvedMap, lstTolerances, lstC
     let cls = 'xml-options-val';
     let tip;
 
-    // v0.0.185+ unified tier scheme (explicit/explicitDefault/implicit)
-    // mirroring $EST. Falls back to the legacy 3-tier scheme when the
-    // V2 tier-map isn't populated for this key.
+    // Unified tier scheme (explicit/explicitDefault/implicit) mirroring
+    // $EST. Synthesised invisible-options use their own
+    // matches-doc-default classification path; XML-emitted attrs use
+    // the `tiersMap` (produced by `classifyCovStep`).
     const synthEntry = synthetic[k];
     // Apply synthesis-tier only when XML didn't already carry this key
     // (additive merge). For `special` specifically, XML carries it
     // unless MATRIX=R suppresses it; in the present-in-XML case fall
-    // through to the V2 tier-map.
+    // through to the tier-map.
     if (synthEntry !== undefined && filledBySynthesis.has(k)) {
       if (synthEntry.isUserSet) {
         const matchesDocDefault = synthEntry.value === INVISIBLE_COV_DEFAULTS[k];
@@ -1369,14 +1373,14 @@ function renderCovarianceOptions(opts, tierMap, resolvedMap, lstTolerances, lstC
         tip = 'Documented default per Bauer (NM didn\'t emit this to XML). Synthesized for visibility.';
       }
     } else {
-      const tierV2 = tiersV2 && tiersV2[k];
-      if (tierV2 === 'explicit') {
+      const tier = tiersMap && tiersMap[k];
+      if (tier === 'explicit') {
         cls += ' xml-options-val--explicit';
         tip = 'Explicitly set on the $COV line (.lst echo).';
-      } else if (tierV2 === 'explicitDefault') {
+      } else if (tier === 'explicitDefault') {
         cls += ' xml-options-val--explicit-default';
         tip = 'Explicitly set on the $COV line, but value matches the default — no effect vs. omitting it.';
-      } else if (tierV2 === 'implicit') {
+      } else if (tier === 'implicit') {
         cls += ' xml-options-val--implicit';
         tip = 'Implicitly set — value differs from default, but the user did NOT type it on the $COV line. Likely inherited from $EST or set by method-default (e.g. cov_posdef=3 for EM).';
       }

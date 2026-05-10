@@ -4,44 +4,26 @@
 // Source: `~/positron-nonmem/probe-cov*/run001.xml` on the host
 // (`bare`, `matrix_r`, `matrix_s`, `print_e`, `sir`, `uncond`, `cov_em`).
 //
-// Single exported entry point: `classifyCovKeys(cov, lastEst)` returns
-// a `Record<key, tier>` where tier ∈ `{ 'nonDefault', 'propagated',
-// 'userDriven' }`. Keys not present in the result render as default
-// (no highlight). Tier resolution order, encoded in one pass:
+// Single exported entry point: `classifyCovStep(cov, covTokens)`
+// returns a `Record<key, CovTier>` where `CovTier ∈ { 'explicit',
+// 'explicitDefault', 'implicit' }`. Keys not present render unstyled.
 //
-//   1. PROPAGATED (yellow): `-1` value AND key in PROPAGATED_KEYS AND
-//      the corresponding $EST sibling is itself non-default. We
-//      cross-reference the last $EST step because $COV inherits from
-//      $EST when the user didn't set the option. If $EST is also at
-//      default, propagation is meaningless ("look at $EST" — nothing
-//      to look at) and we render normal.
-//   2. USER_DRIVEN (green): key in USER_DRIVEN_KEYS AND value differs
-//      from the baseline default (i.e. user actually set it). The
-//      sentinel `'BLANK'` for sirsample/file/format is the not-set
-//      default and renders normal — green would imply "you typed this".
-//   3. NON_DEFAULT (blue): value differs from the baseline.
-//   4. (default): no entry in the result.
+// The user's $COV tokens (from .lst echo) are the ground truth for
+// "explicit vs implicit":
+//   - `explicit`        : user typed this attr on the $COV line.
+//   - `explicitDefault` : user typed it AND value matches the baseline.
+//   - `implicit`        : user did NOT type it AND value differs from
+//                         baseline. Covers $EST inheritance, AUTO-style
+//                         implicit setting, and method-default cases.
+//   - (default)         : matches baseline + not typed → no entry.
 
 import type { CovarianceOptions } from './parse-xml-problem-options';
 import type { EstimationOptionsStep } from './parse-xml-options';
 import type { LstTolerances } from './parse-lst-tolerances';
-import { findNonDefaultKeys } from './xml-est-defaults';
-
-/** Per-key tier, omitted when the key matches default. */
-export type CovKeyTier = 'nonDefault' | 'propagated' | 'userDriven';
 
 /**
- * v0.0.185+ unified tier (matches `EstTier`). The user's $COV tokens
- * (from .lst echo) are the ground truth for "explicit vs implicit":
- *
- *   - `explicit`        : user typed this attr on the $COV line.
- *   - `explicitDefault` : user typed it AND value matches the baseline.
- *   - `implicit`        : user did NOT type it AND value differs from
- *                         baseline. Covers BOTH AUTO-style implicit
- *                         setting and $EST inheritance (cov_atol='-1'
- *                         when $EST has user-customized atol).
- *
- * Keys matching baseline AND not typed → omitted (unstyled).
+ * Per-key tier in the unified scheme. Omitted from the classifier's
+ * output when the key matches the baseline AND user didn't type.
  */
 export type CovTier = 'explicit' | 'explicitDefault' | 'implicit';
 
@@ -103,35 +85,6 @@ const SIR_BLOCK: Readonly<CovarianceOptions> = {
 };
 
 /**
- * `cov_*` keys → corresponding `$EST` knob name. Only keys that
- * inherit from `$EST` — `cov_tol` chains through `$SUBROUTINES`
- * directly (skipping $EST), so we can't cross-reference; it's omitted
- * here and renders normal when `-1`. `cov_posdef` is method-determined
- * (0 classical / 3 EM), also not propagation; same treatment.
- */
-const PROPAGATION_SOURCES: ReadonlyMap<string, string> = new Map([
-  ['atol', 'atol'],
-  ['siglcov', 'sigl'],
-  ['siglocov', 'siglo'],
-  ['knuthsumoff', 'knuthsumoff'],
-]);
-
-/**
- * Keys NM requires the user to set, OR per-run identities (seed paths,
- * file, format strings). Rendered green only when the value DIFFERS
- * from the baseline — `sirsample='BLANK'` and `seed='11456'` are
- * defaults, not user-set, so they render normal.
- */
-const USER_DRIVEN_KEYS: ReadonlySet<string> = new Set([
-  'sirsample',
-  'sirniter',
-  'seed',
-  'clockseed',
-  'file',
-  'format',
-]);
-
-/**
  * Resolve the empirical baseline for the given options. SIR_BLOCK
  * layers on top of BARE_COV when SIR is actually active, defined as
  * `sirsample` parsing to a positive number (`Number('BLANK')` is NaN,
@@ -140,47 +93,6 @@ const USER_DRIVEN_KEYS: ReadonlySet<string> = new Set([
 function findCovDefaults(opts: CovarianceOptions): CovarianceOptions {
   const sirActive = Number(opts.sirsample) > 0;
   return sirActive ? { ...BARE_COV, ...SIR_BLOCK } : BARE_COV;
-}
-
-/**
- * Single-pass classifier. Disjoint tiers, encoded precedence (most
- * specific first). See module-level comment for the full rule set.
- */
-export function classifyCovKeys(
-  cov: CovarianceOptions,
-  lastEst: EstimationOptionsStep | null,
-): Record<string, CovKeyTier> {
-  const defaults = findCovDefaults(cov);
-  const estNonDefaults = lastEst
-    ? new Set<string>(findNonDefaultKeys(lastEst))
-    : new Set<string>();
-  const out: Record<string, CovKeyTier> = {};
-  for (const k of Object.keys(cov)) {
-    const value = cov[k];
-    // 1. Propagated: -1 sentinel, key has an $EST sibling, that sibling
-    //    is non-default. Otherwise (sibling at default or no $EST data)
-    //    → effective default → no entry.
-    if (value === '-1' && PROPAGATION_SOURCES.has(k)) {
-      const estKey = PROPAGATION_SOURCES.get(k);
-      if (estKey && estNonDefaults.has(estKey)) {
-        out[k] = 'propagated';
-      }
-      continue;
-    }
-    // 2. User-driven: only when value actually differs from baseline.
-    //    `sirsample='BLANK'` matches baseline → not user-driven.
-    if (USER_DRIVEN_KEYS.has(k)) {
-      if (defaults[k] !== value) {
-        out[k] = 'userDriven';
-      }
-      continue;
-    }
-    // 3. Non-default: any other key whose value differs from baseline.
-    if (defaults[k] !== value) {
-      out[k] = 'nonDefault';
-    }
-  }
-  return out;
 }
 
 /**
@@ -223,14 +135,19 @@ const COV_ATTR_TO_USER_TOKENS: Readonly<Record<string, ReadonlyArray<RegExp>>> =
 
 /**
  * True when the user's $COV tokens indicate an explicit setting of
- * the given $COV attr.
+ * the given $COV attr. When `COV_ATTR_TO_USER_TOKENS` defines aliases
+ * for an attr, those are authoritative — we do NOT fall back to the
+ * generic `KEY=` regex. Otherwise an attr like `eigen_print` (XML name
+ * differs from user token PRINT=E) could false-positive on unrelated
+ * tokens via the fallback.
  */
 function userWroteCovAttr(attr: string, tokens: readonly string[]): boolean {
   if (tokens.length === 0) return false;
-  const aliases = COV_ATTR_TO_USER_TOKENS[attr] ?? [];
-  for (const re of aliases) {
-    if (tokens.some((t) => re.test(t))) return true;
+  const aliases = COV_ATTR_TO_USER_TOKENS[attr];
+  if (aliases) {
+    return aliases.some((re) => tokens.some((t) => re.test(t)));
   }
+  // No aliases declared — fall back to generic KEY= matching.
   const lowerAttr = attr.toLowerCase();
   return tokens.some((t) => {
     const eq = t.indexOf('=');
@@ -283,6 +200,13 @@ export function classifyCovStep(
   return out;
 }
 
+// NOTE: `methodKind` here is the binary EM-vs-classical discriminator
+// used for posdef's '-1' → 0/3 resolution. The JS renderer
+// (`client.js:deriveMethodKind`) keeps a more granular 4-way label
+// (em/laplace/foce/fo) for INVISIBLE_ATTR_DEFS.applicable gating.
+// Both list the same EM-method labels; if NM ships a new EM method,
+// update both. Cross-file constant deferred (JS in WebView, TS in
+// extension host — no shared bundling target).
 export function resolveCovAttrToRuntime(
   key: string,
   value: string,

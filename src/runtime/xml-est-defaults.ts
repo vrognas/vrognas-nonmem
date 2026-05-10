@@ -373,14 +373,18 @@ const ATTR_TO_USER_TOKENS: Readonly<Record<string, ReadonlyArray<RegExp>>> = {
 
 /**
  * True when the user's $EST tokens indicate an explicit setting of the
- * given XML attr. Combines the alias-aware `ATTR_TO_USER_TOKENS` map
- * with a generic `^attr=` fallback. Empty `tokens` → always false.
+ * given XML attr. When `ATTR_TO_USER_TOKENS` declares aliases for an
+ * attr, those are authoritative — the generic `KEY=` fallback is
+ * skipped to avoid mismatching attrs whose user token form differs
+ * from the XML attr name (e.g. `epseta_interaction` ↔ INTER; the
+ * fallback would never match anyway, but stays consistent with the
+ * "aliases-are-authoritative" rule).
  */
 function userWroteAttr(attr: string, tokens: readonly string[]): boolean {
   if (tokens.length === 0) return false;
-  const aliases = ATTR_TO_USER_TOKENS[attr] ?? [];
-  for (const re of aliases) {
-    if (tokens.some((t) => re.test(t))) return true;
+  const aliases = ATTR_TO_USER_TOKENS[attr];
+  if (aliases) {
+    return aliases.some((re) => tokens.some((t) => re.test(t)));
   }
   // Generic fallback: `attr=value` token where the lower-cased KEY
   // matches the XML attr name. Most attrs follow this convention.

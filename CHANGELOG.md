@@ -7,6 +7,16 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **refactor: 3 review fixes from the v0.0.189 review (v0.0.190).**
+
+  (1) **Dropped legacy V1 $COV tier classifier**: `classifyCovKeys` + `CovKeyTier` + `PROPAGATION_SOURCES` + `USER_DRIVEN_KEYS` + `findCovNonDefaultKeys` / `findCovPropagatedKeys` / `findCovUserDrivenKeys` removed from `xml-cov-defaults.ts`. The renderer was already only using the v0.0.185 V2 classifier (`classifyCovStep`). Renamed `xmlCovarianceTiersV2` → `xmlCovarianceTiers` (the only one now). Dropped the dead `tierMap` arg from `renderCovarianceOptions`. 13 obsolete tests deleted; suite to 437/437.
+
+  (2) **Aliases now authoritative in `userWroteAttr` / `userWroteCovAttr`**: when `ATTR_TO_USER_TOKENS` (or its $COV counterpart) defines aliases for an attr, the generic `KEY=` fallback is skipped. Prevents false-positive matches like `EIGEN_PRINT=YES` (not a real NMTRAN token) sneaking through the fallback for `eigen_print` even though the canonical token is `PRINT=E`.
+
+  (3) **PsN-wrapper tooltip on FILE gated on `implicit` tier**: when the user explicitly typed `FILE=psn.ext` (unusual but valid), the inspector previously appended the "PsN's execute wrapper rewrites the FILE=..." annotation as if NM had injected it. Now only fires when the file attr is in the `implicit` tier (NM/PsN set it, not the user).
+
+  Deferred from review: (a) `deriveMethodKind` lives in both TS (`fit-inspector-payload.ts`, binary em/classical) and JS (`client.js`, 4-way em/laplace/foce/fo) — cross-file unification blocked by the WebView's no-bundling constraint; documented inline. (b) `renderEstimationOptionsStep` / `renderCovarianceOptions` still take 6-7 positional args — options-object conversion deferred (mechanical with marginal payoff after V1 cleanup).
+
 - **empirical: POSTHOC verified silently-ignored for non-FO methods (v0.0.189).** 16-probe matrix at `~/positron-nonmem/probe-posthoc/` plus 3 NOPOSTHOC probes at `~/positron-nonmem/probe-noposthoc/`. Confirmed: NM 7.6.0 accepts POSTHOC AND NOPOSTHOC for ALL methods (including FOCE — Bauer's "May not be used with METHOD=1" claim is empirically false). For FOCE/Laplace/IMP/SAEM/ITS: posthoc eta computation is always implicit, both options produce byte-identical .phi files vs bare. For FO: POSTHOC is opt-in (and meaningful in principle, though for trivial models all etas converge to zero anyway). The inspector's `INVISIBLE_ATTR_DEFS.posthoc.applicable = 'fo'` is correct (from v0.0.187). WARNING tooltip wording sharpened from "NM likely ignores it" → empirically-verified "POSTHOC/NOPOSTHOC only meaningfully apply to METHOD=ZERO (FO). Other methods compute posthoc etas implicitly regardless of the option." `docs/empirical-notes.md` updated.
 
 - **feat: context-aware option visibility + shrinkage warn tier (v0.0.188).** Several related visibility refinements:

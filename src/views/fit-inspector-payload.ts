@@ -26,10 +26,8 @@ import {
 } from '../runtime/xml-est-defaults';
 import type { CovarianceOptions } from '../runtime/parse-xml-problem-options';
 import {
-  classifyCovKeys,
   classifyCovStep,
   resolveCovAttrToRuntime,
-  type CovKeyTier,
   type CovTier,
 } from '../runtime/xml-cov-defaults';
 import type { EstimationStepResult } from '../runtime/parse-xml-results';
@@ -383,13 +381,13 @@ export interface InspectorDiagnostics {
    */
   xmlCovarianceOptions: CovarianceOptions | null;
   /**
-   * Per-key tier classification: `'nonDefault'` (blue), `'propagated'`
-   * (yellow — `-1` sentinel cross-referenced against the LAST $EST step
-   * being non-default), or `'userDriven'` (green — value differs from
-   * the not-set sentinel). Keys absent from this map render as default
-   * (no highlight). Empty `{}` when no $COV record present.
+   * Per-key tier classification: `'explicit'` (blue), `'explicitDefault'`
+   * (italic blue), or `'implicit'` (orange). Computed via
+   * `classifyCovStep` using the user's $COV tokens. Keys absent from
+   * this map render as default (unstyled). Empty `{}` when no $COV
+   * record present.
    */
-  xmlCovarianceTiers: Record<string, CovKeyTier>;
+  xmlCovarianceTiers: Record<string, CovTier>;
   /**
    * Per-key wire→runtime resolution for $COV attrs. Keys present only
    * when wire value is a sentinel (`'-1'` or `'BLANK'`) that resolves
@@ -400,15 +398,6 @@ export interface InspectorDiagnostics {
    * sentinels are present or no $COV record.
    */
   xmlCovarianceResolved: Record<string, string>;
-  /**
-   * Unified $COV tier-map (v0.0.185+). `key → 'explicit' |
-   * 'explicitDefault' | 'implicit'`. Same scheme as `xmlEstimationTiers`
-   * — blue/italic-blue/orange. Computed via `classifyCovStep` using
-   * the user's $COV tokens from the .lst echo. Empty `{}` when no
-   * $COV record present. Supersedes `xmlCovarianceTiers` (kept for
-   * back-compat); renderer prefers this when populated.
-   */
-  xmlCovarianceTiersV2: Record<string, CovTier>;
   /**
    * Verbatim user-typed `$EST` records from the `.lst` control-stream
    * echo. Index-aligned with `xmlEstimationOptions`. Surfaces info XML
@@ -970,22 +959,14 @@ function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnostics | nu
     const tokens = lstEstRecords[i]?.tokens ?? [];
     return classifyEstStep(step, tokens, expectedDefaultFile);
   });
-  // $COV: single classifier returning a tier-map (key → 'nonDefault' |
-  // 'propagated' | 'userDriven'). Propagation is cross-referenced
-  // against the LAST $EST step's non-default attrs — `cov_atol='-1'`
-  // is meaningless when $EST is also at default ATOL (effective value
-  // is the built-in default; nothing to "look elsewhere" for).
+  // Unified $COV tier-map (explicit/explicitDefault/implicit) — same
+  // scheme as $EST. Drives the inspector's $COV coloring via .lst $COV
+  // tokens (user-typed vs. not).
   const lastEst = xmlEstimationOptions.length > 0
     ? xmlEstimationOptions[xmlEstimationOptions.length - 1]
     : null;
-  const xmlCovarianceTiers = xmlCovarianceOptions
-    ? classifyCovKeys(xmlCovarianceOptions, lastEst)
-    : {};
-  // v0.0.185+ unified $COV tier-map using the same explicit/implicit/
-  // explicitDefault scheme as $EST. Drives the inspector's $COV
-  // coloring via .lst $COV tokens (user-typed vs. not).
   const covTokens = lstCovRecord?.tokens ?? [];
-  const xmlCovarianceTiersV2: Record<string, CovTier> = xmlCovarianceOptions
+  const xmlCovarianceTiers: Record<string, CovTier> = xmlCovarianceOptions
     ? classifyCovStep(xmlCovarianceOptions, covTokens)
     : {};
   // Per-key wire→runtime resolution for $COV sentinels (atol/tol/
@@ -1057,7 +1038,6 @@ function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnostics | nu
     xmlEstimationResults,
     xmlCovarianceOptions,
     xmlCovarianceTiers,
-    xmlCovarianceTiersV2,
     xmlCovarianceResolved,
     lstEstRecords,
     lstTolerances,
