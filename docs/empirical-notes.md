@@ -527,3 +527,54 @@ $COV value comes from $EST" — when the user reads the inspector, they need to 
 at $EST's value to know the effective $COV setting. The .lst trace
 (`TOLERANCES FOR COVARIANCE STEP: ANRD: 10`) confirms this is what's actually
 applied at runtime.
+
+## $EST option propagation across chained steps (NM 7.6.0)
+
+**Expectation.** Per Bauer's $EST doc: "Options specified in an $ESTIMATION record will
+carry over to the next $ESTIMATION record unless a new option is specified." Per
+`nm7/em-monte-carlo.qmd:1829`: "when using AUTO=1, the transfer of any options settings
+explicitly set by the user from previous $EST statements may or may not occur for those
+options set by the AUTO option, depending on the situation." Need to nail down exactly
+what propagates.
+
+**Probe.** `~/positron-nonmem/probe-chains-v2/` on the host. Six 2-step chains varying
+whether step 1 sets options explicitly vs via AUTO=1, and whether step 2 cancels AUTO
+or not. Inspect each step's `<nm:estimation_options>` block.
+
+**Outcome.**
+
+1. **Explicit options DO propagate** to the next step. SAEM with `CTYPE=3` → IMP (no
+   CTYPE) yields IMP step with `ctype=3`.
+2. **Explicit options survive AUTO cancellation** in next step. SAEM `CTYPE=3` → IMP
+   `AUTO=0` still emits `ctype=3` for IMP.
+3. **The AUTO setting itself propagates**. SAEM `AUTO=1` → IMP (no AUTO) yields IMP step
+   with `auto=1` inherited.
+4. **When inherited AUTO=1 re-fires in next step, it re-applies for that step's method**.
+   So step 2's `ctype=3` may be from AUTO=1 re-applying (not propagation per se).
+5. **AUTO-implicit values reset to bare-method defaults when AUTO is canceled in next
+   step**. The smoking gun: SAEM `AUTO=1` (which implicitly sets `ctype=3, noprior=1`)
+   → IMP `AUTO=0` yields `ctype=0, noprior=0` for IMP. AUTO-implicit values do NOT
+   propagate as values; only the AUTO setting itself does.
+
+**Implication for the inspector tier classifier.** Looking at step N's XML alone, we
+cannot distinguish:
+   - (a) value set explicitly on step N
+   - (b) value propagated from step N-1's explicit setting
+   - (c) value set implicitly by AUTO=N on step N
+   - (d) value set implicitly by AUTO=N on step N-1 (via AUTO-setting propagation +
+         re-application)
+
+Disambiguating (a) from (b)/(c)/(d) requires parsing the `.lst $ESTIMATION` echo
+(proposal B in the inspector design — pending). Without it, the blue tier's
+"non-default" label is accurate but loses the "you-typed-it-here" vs
+"propagated-or-AUTO-set" nuance.
+
+**Practical workflow caveat.** Modelers should be aware: in `SAEM → IMP EONLY` chains,
+explicit options on SAEM (e.g. INTERACTION, NOPRIOR=1) carry over to the IMP EONLY
+step. AUTO=1's implicit settings (NITER=1000, NBURN=4000, etc.) do NOT carry as values,
+but if AUTO=1 is left on for the IMP step, AUTO=1's IMP-specific overrides apply
+(NITER=500, ISAMPLE=300, etc.). Cancel with `AUTO=0` on the IMP step to get bare-IMP
+behavior + only the explicit options that were carried over.
+
+Verified 2026-05-10 against NONMEM 7.6.0 on Linux via probes at
+`~/positron-nonmem/probe-chains-v2/` (auto1_then_auto0 is the critical case).
