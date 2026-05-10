@@ -2,7 +2,7 @@
   "name": "positron-nonmem",
   "displayName": "Positron NONMEM",
   "description": "NONMEM as a first-class Positron language runtime: local nmfe76 execution (or via Positron Remote SSH), run history tree, and pharmacometric workbench features. Companion to the vscode-nmtran language extension.",
-  "version": "0.0.187",
+  "version": "0.0.188",
   "publisher": "vrognas",
   "license": "MIT",
   "private": true,
@@ -171,6 +171,12 @@
           "default": 30,
           "minimum": 0,
           "description": "Shrinkage above this percent is highlighted red in the Fit Inspector (default: 30, the pharmacometrics convention). Set to 100 to effectively disable the warning."
+        },
+        "nonmem.shrinkageBorderlineWarnPct": {
+          "type": "number",
+          "default": 20,
+          "minimum": 0,
+          "description": "Shrinkage above this percent (but below `shrinkageWarnPct`) is highlighted yellow (warn — borderline) in the Fit Inspector. Default: 20. Set ≥ shrinkageWarnPct to disable the warn tier."
         },
         "nonmem.rseThetaWarnPct": {
           "type": "number",

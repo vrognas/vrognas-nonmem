@@ -159,11 +159,13 @@ describe('resolveCovAttrToRuntime', () => {
     expect(resolveCovAttrToRuntime('siglocov', '-1', lastEst, noTrace, 'classical')).toBe('5');
   });
 
-  it('posdef=-1: classical → 0, em → 3', async () => {
+  it('posdef=-1: classical → 0, em → 3, null → 0 (classical-fallback)', async () => {
     const { resolveCovAttrToRuntime } = await import('../../src/runtime/xml-cov-defaults');
     expect(resolveCovAttrToRuntime('posdef', '-1', null, noTrace, 'classical')).toBe('0');
     expect(resolveCovAttrToRuntime('posdef', '-1', null, noTrace, 'em')).toBe('3');
-    expect(resolveCovAttrToRuntime('posdef', '-1', null, noTrace, null)).toBeNull();
+    // v0.0.187: null method falls back to '0' (classical is the common
+    // case; safer than leaking the wire sentinel).
+    expect(resolveCovAttrToRuntime('posdef', '-1', null, noTrace, null)).toBe('0');
   });
 
   it('file=BLANK: resolves via $EST file (SIR-active case)', async () => {

@@ -164,6 +164,21 @@ export interface VariablesContext {
    * couldn't be extracted.
    */
   lstCovRecord: RawEstRecord | null;
+  /**
+   * Whether the model uses an ODE solver (ADVAN9/13/14/15/16/17/18).
+   * Detected via the .lst BASE TOLERANCE block presence — these blocks
+   * only emit for ODE-solver runs. Drives the inspector's "is ATOL/TOL
+   * applicable" decision: when false, atol/tol rows are hidden unless
+   * the user explicitly typed them.
+   */
+  hasOde: boolean;
+  /**
+   * Whether the model has a `$LEVEL` record. Used to gate
+   * LEVCENTER/LEVOBJTYPE/LEVWT synthesis (these require $LEVEL per
+   * Bauer's docs). Derived from a regex scan of the .lst control-stream
+   * slice.
+   */
+  hasLevel: boolean;
 }
 
 /** Logger contract — every diagnostic line about the resolution path goes here. */
@@ -206,7 +221,7 @@ async function resolveModMode(
   }
   log(`mod-mode: parsedModel ok — ${parsedModelStatsLine(model)}`);
   const runrecord = await loadRunrecord(uri.fsPath, log);
-  return { model, modUri: uri, fit: null, sumo: null, lst: null, runrecord, prderr: null, fmsg: null, cor: null, cnv: null, trajectories: [], xmlEstimationOptions: [], xmlEstimationResults: [], xmlCovarianceOptions: null, lstEstRecords: [], lstTolerances: { baseNrd: null, baseAnrd: null, estNrd: null, estAnrd: null, covNrd: null, covAnrd: null, siglo: null, sigl: null }, lstCovRecord: null };
+  return { model, modUri: uri, fit: null, sumo: null, lst: null, runrecord, prderr: null, fmsg: null, cor: null, cnv: null, trajectories: [], xmlEstimationOptions: [], xmlEstimationResults: [], xmlCovarianceOptions: null, lstEstRecords: [], lstTolerances: { baseNrd: null, baseAnrd: null, estNrd: null, estAnrd: null, covNrd: null, covAnrd: null, siglo: null, sigl: null }, lstCovRecord: null, hasOde: false, hasLevel: false };
 }
 
 /**
@@ -301,6 +316,12 @@ async function resolveLstMode(
   // TOLERANCE + SIGL/SIGLO blocks. Sparse — fields are null when the
   // corresponding block wasn't emitted (non-ODE model, no $COV, etc.).
   const lstTolerances = parseLstTolerances(lstText);
+  // Model-feature flags derived from the control-stream slice.
+  // Used by the inspector to gate option-row visibility (ATOL only
+  // matters when ODE is used; LEVCENTER/LEVOBJTYPE/LEVWT only with
+  // $LEVEL).
+  const hasOde = lstTolerances.baseAnrd !== null;
+  const hasLevel = ctrlStream ? /^\s*\$LEVEL\b/im.test(ctrlStream) : false;
   if (!fit) {
     log(`lst-mode: no .ext / unparseable / no final row — pushing init-only`);
   } else {
@@ -330,6 +351,8 @@ async function resolveLstMode(
     lstEstRecords,
     lstTolerances,
     lstCovRecord,
+    hasOde,
+    hasLevel,
   };
 }
 

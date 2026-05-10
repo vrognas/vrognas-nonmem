@@ -62,6 +62,7 @@ window.addEventListener('unhandledrejection', (ev) => {
 // `DEFAULT_THRESHOLDS` in fit-inspector-payload.ts.
 let thresholds = {
   shrinkageWarnPct: 30,
+  shrinkageBorderlineWarnPct: 20,
   rseWarnPct: 100,
   rseThetaWarnPct: 30,
   rseOmegaWarnPct: 50,
@@ -154,7 +155,7 @@ function render(payload) {
     const d = payload.diagnostics;
     const tiers = d.xmlEstimationTiers || [];
     const lstRecords = d.lstEstRecords || [];
-    root.append(renderEstimationOptions(d.xmlEstimationOptions, tiers, lstRecords, d.lstTolerances));
+    root.append(renderEstimationOptions(d.xmlEstimationOptions, tiers, lstRecords, d.lstTolerances, !!d.hasOde, !!d.hasLevel));
   }
   if (payload.diagnostics && payload.diagnostics.xmlCovarianceOptions) {
     // $COV options from `<nm:problem_options>`'s `cov_*` attrs. Single
@@ -171,6 +172,7 @@ function render(payload) {
       d.lstTolerances,
       d.lstCovRecord,
       d.xmlCovarianceTiersV2 || {},
+      !!d.hasOde,
     ));
   }
   if (payload.diagnostics && payload.diagnostics.etabar.length) {
@@ -845,7 +847,7 @@ function renderPrderr(prderr) {
  * NONMEM emitted them — no type coercion, so the user sees the
  * verbatim wire format.
  */
-function renderEstimationOptions(steps, tiersPerStep, lstEstRecords, lstTolerances) {
+function renderEstimationOptions(steps, tiersPerStep, lstEstRecords, lstTolerances, hasOde, hasLevel) {
   const outer = document.createElement('details');
   outer.className = 'xml-options';
   const sumOuter = document.createElement('summary');
@@ -855,7 +857,7 @@ function renderEstimationOptions(steps, tiersPerStep, lstEstRecords, lstToleranc
   for (let i = 0; i < steps.length; i++) {
     const tiers = (tiersPerStep && tiersPerStep[i]) || {};
     const lstRecord = (lstEstRecords && lstEstRecords[i]) || null;
-    outer.append(renderEstimationOptionsStep(steps[i], i + 1, tiers, lstRecord, lstTolerances));
+    outer.append(renderEstimationOptionsStep(steps[i], i + 1, tiers, lstRecord, lstTolerances, hasOde, hasLevel));
   }
   return outer;
 }
@@ -889,13 +891,24 @@ function isInvisibleToken(token) {
  */
 const INVISIBLE_ATTR_DEFS = {
   print:        { default: '9999', applicable: 'all' },
-  posthoc:      { default: 'no',   applicable: 'all' },
+  // POSTHOC is FO-only per Bauer line 3082 ("This option may be used when
+  // the FO method is used") and the user's empirical experience. Pending
+  // a probe (task #94 to verify across methods).
+  posthoc:      { default: 'no',   applicable: 'fo' },
   etabarcheck:  { default: 'no',   applicable: 'all' },
   numerical:    { default: 'no',   applicable: 'laplace' },
   centering:    { default: 'no',   applicable: 'foce' },
   parafile:     { default: 'OFF',  applicable: 'all' },
   parafprint:   { default: '1',    applicable: 'all' },
   fparafile:    { default: 'OFF',  applicable: 'all' },
+  // LEVCENTER/LEVOBJTYPE/LEVWT require $LEVEL record. Bauer says
+  // "There is no default. Required with $LEVEL and $ESTIMATION" — so we
+  // show empty value when $LEVEL present + user didn't type. The
+  // `requiresLevel: true` flag tells the synthesiser to skip when no
+  // $LEVEL record is in the control stream.
+  levcenter:    { default: '',     applicable: 'all', requiresLevel: true },
+  levobjtype:   { default: '',     applicable: 'all', requiresLevel: true },
+  levwt:        { default: '',     applicable: 'all', requiresLevel: true },
 };
 
 // Convenience: doc defaults indexed by attr name, for tooltip lookups.
@@ -923,6 +936,9 @@ const KV_INVISIBLE_PATTERNS = {
   parafile: /^PARAFILE=/i,
   parafprint: /^PARAFPRINT=/i,
   fparafile: /^FPARAFILE=/i,
+  levcenter: /^LEVCENTER=/i,
+  levobjtype: /^LEVOBJTYPE=/i,
+  levwt: /^LEVWT=/i,
 };
 
 /**
@@ -946,12 +962,16 @@ function deriveMethodKind(step) {
 }
 
 /**
- * Whether a synthesised attr applies to the given method-kind. `'all'`
- * applies everywhere.
+ * Whether a synthesised attr applies to the given context (method +
+ * model features). Returns false when:
+ *   - the attr's method-applicability doesn't match (e.g. CENTERING
+ *     when methodKind is 'em')
+ *   - the attr requires $LEVEL but the model has no $LEVEL record
  */
-function attrAppliesToMethod(attr, methodKind) {
+function attrAppliesToContext(attr, methodKind, hasLevel) {
   const def = INVISIBLE_ATTR_DEFS[attr];
   if (!def) return true;
+  if (def.requiresLevel && !hasLevel) return false;
   if (def.applicable === 'all') return true;
   return def.applicable === methodKind;
 }
@@ -964,18 +984,17 @@ function attrAppliesToMethod(attr, methodKind) {
  * type them. When inapplicable AND user typed → included with
  * `inapplicable: true` so the renderer can flag the warning.
  */
-function synthesizeInvisibleAttrs(userTokens, methodKind) {
+function synthesizeInvisibleAttrs(userTokens, methodKind, hasLevel) {
   const out = {};
-  // KV-style: PRINT, PARAFILE, PARAFPRINT, FPARAFILE.
+  // KV-style: PRINT, PARAFILE, PARAFPRINT, FPARAFILE, LEVCENTER, ...
   for (const [attr, re] of Object.entries(KV_INVISIBLE_PATTERNS)) {
     const match = userTokens.find((t) => re.test(t));
-    const applies = attrAppliesToMethod(attr, methodKind);
+    const applies = attrAppliesToContext(attr, methodKind, hasLevel);
     if (match) {
-      const inapplicable = !applies;
       out[attr] = {
         value: match.split('=')[1] || '',
         isUserSet: true,
-        inapplicable,
+        inapplicable: !applies,
       };
     } else if (applies) {
       out[attr] = {
@@ -989,7 +1008,7 @@ function synthesizeInvisibleAttrs(userTokens, methodKind) {
   // Boolean toggles.
   for (const [attr, re] of Object.entries(BOOLEAN_TOGGLE_PATTERNS)) {
     const match = userTokens.find((t) => re.test(t));
-    const applies = attrAppliesToMethod(attr, methodKind);
+    const applies = attrAppliesToContext(attr, methodKind, hasLevel);
     if (match) {
       const isNegated = /^NO/i.test(match);
       out[attr] = {
@@ -1009,37 +1028,45 @@ function synthesizeInvisibleAttrs(userTokens, methodKind) {
 }
 
 /**
- * Map a `<nm:estimation_options>` attr to its runtime-resolved value
- * via the `.lst` trace, when applicable. Currently only `atol`/`tol`
- * have empirical evidence of being sentinels (`atol='0'` resolves to
- * runtime ANRD=12 per `~/positron-nonmem/probe-resolved/`'s BASE
- * TOLERANCE block). Returns null when no translation applies.
+ * Map a `<nm:estimation_options>` attr to its runtime-resolved value.
+ * Prefers the `.lst` trace (most authoritative — reflects the actual
+ * runtime value after $EST/$SUBROUTINES overrides). Falls back to the
+ * documented Bauer default when the trace is absent (non-ODE models
+ * don't emit BASE/EST TOLERANCE blocks). Returns null when no
+ * translation applies.
+ *
+ * Caveat for the fallback: a user-supplied `$SUBROUTINES ATOL=N`
+ * override would not be detected without the .lst trace; the inspector
+ * would show the doc default `12`. Better than leaking the sentinel.
  */
 function resolveEstAttrFromLst(key, value, tolerances) {
-  if (!tolerances) return null;
-  // atol='0' is the wire sentinel for "user didn't set" — runtime
-  // value is the EST step's resolved ANRD (or BASE if EST not emitted).
+  // atol='0' is the wire sentinel for "user didn't set on $EST".
+  // Effective value: $SUBROUTINES ATOL (if set) → built-in default 12.
   if (key === 'atol' && value === '0') {
-    return tolerances.estAnrd || tolerances.baseAnrd;
+    return (tolerances && (tolerances.estAnrd || tolerances.baseAnrd)) || '12';
   }
   return null;
 }
 
 /**
  * Map a `<nm:problem_options>` cov_* attr to its runtime-resolved
- * value via the `.lst` trace. `cov_atol='-1'` and `cov_tol='-1'`
- * inherit from $EST (or $SUBROUTINES); the .lst's "TOLERANCES FOR
- * COVARIANCE STEP" block gives the actually-used value. Returns null
- * when no translation applies.
+ * value. Same trace-prefer-then-doc-fallback pattern as $EST. Returns
+ * null when no translation applies.
  */
 function resolveCovAttrFromLst(key, value, tolerances) {
-  if (!tolerances) return null;
-  if (key === 'atol' && value === '-1') return tolerances.covAnrd;
-  if (key === 'tol' && value === '-1') return tolerances.covNrd;
+  if (key === 'atol' && value === '-1') {
+    // cov_atol='-1' inherits from $EST atol (and chain → $SUBROUTINES →
+    // built-in 12). Use covAnrd from .lst trace when available; else
+    // fall back to the documented Bauer default.
+    return (tolerances && tolerances.covAnrd) || '12';
+  }
+  if (key === 'tol' && value === '-1') {
+    return tolerances && tolerances.covNrd;
+  }
   return null;
 }
 
-function renderEstimationOptionsStep(step, stepNum, tierMap, lstRecord, lstTolerances) {
+function renderEstimationOptionsStep(step, stepNum, tierMap, lstRecord, lstTolerances, hasOde, hasLevel) {
   const inner = document.createElement('details');
   inner.className = 'xml-options-step';
   const sumInner = document.createElement('summary');
@@ -1063,8 +1090,15 @@ function renderEstimationOptionsStep(step, stepNum, tierMap, lstRecord, lstToler
   // methods unless user explicitly typed them. Effective view =
   // XML attrs ∪ synthesised.
   const methodKind = deriveMethodKind(step);
-  const synthetic = synthesizeInvisibleAttrs(userTokens, methodKind);
+  const synthetic = synthesizeInvisibleAttrs(userTokens, methodKind, !!hasLevel);
+  const userWroteAtol = userTokens.some((t) => /^ATOL=/i.test(t));
   const merged = { ...step };
+  // Filter ATOL from XML when ODE is not used AND user didn't type it.
+  // NM always emits atol='0' even for non-ODE models, but the value is
+  // irrelevant. Hide rather than mislead.
+  if (!hasOde && !userWroteAtol && merged.atol === '0') {
+    delete merged.atol;
+  }
   for (const k of Object.keys(synthetic)) {
     merged[k] = synthetic[k].value;
   }
@@ -1261,7 +1295,7 @@ function synthesizeInvisibleCovAttrs(covTokens) {
   return out;
 }
 
-function renderCovarianceOptions(opts, tierMap, resolvedMap, lstTolerances, lstCovRecord, tiersV2) {
+function renderCovarianceOptions(opts, tierMap, resolvedMap, lstTolerances, lstCovRecord, tiersV2, hasOde) {
   const outer = document.createElement('details');
   outer.className = 'xml-options';
   const sumOuter = document.createElement('summary');
@@ -1271,7 +1305,14 @@ function renderCovarianceOptions(opts, tierMap, resolvedMap, lstTolerances, lstC
   // it). When XML carries the key, trust the wire value.
   const covTokens = lstCovRecord && lstCovRecord.tokens ? lstCovRecord.tokens : [];
   const synthetic = synthesizeInvisibleCovAttrs(covTokens);
+  const userWroteAtolCov = covTokens.some((t) => /^ATOL=/i.test(t));
+  const userWroteTolCov = covTokens.some((t) => /^TOL=/i.test(t));
   const merged = { ...opts };
+  // Filter cov_atol/cov_tol when ODE not used AND user didn't type them
+  // on $COV. NM emits cov_atol='-1' regardless; for non-ODE models the
+  // value is irrelevant.
+  if (!hasOde && !userWroteAtolCov && merged.atol === '-1') delete merged.atol;
+  if (!hasOde && !userWroteTolCov && merged.tol === '-1') delete merged.tol;
   // Track which keys were FILLED by synthesis (vs. present in XML) so
   // the renderer can decide whether to apply quirk annotations.
   const filledBySynthesis = new Set();

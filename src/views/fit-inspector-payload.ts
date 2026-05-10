@@ -154,6 +154,8 @@ export interface TrajectoryWire {
 export interface InspectorThresholds {
   /** Shrinkage% above this is highlighted red. Pharmacometrics convention: 30%. User-configurable. */
   shrinkageWarnPct: number;
+  /** Shrinkage% above this (and below `shrinkageWarnPct`) is highlighted yellow/warn. Default 20%. */
+  shrinkageBorderlineWarnPct: number;
   /**
    * RSE% above this is highlighted **red** (`bad`) regardless of
    * parameter kind — typically 100% (SE ≥ |estimate|, parameter is
@@ -421,6 +423,10 @@ export interface InspectorDiagnostics {
    * All fields null in mod-mode or for runs that don't emit the trace.
    */
   lstTolerances: LstTolerances;
+  /** Whether the model uses an ODE solver. Gates ATOL/TOL row visibility. */
+  hasOde: boolean;
+  /** Whether the model has a `$LEVEL` record. Gates LEVCENTER/LEVOBJTYPE/LEVWT synthesis. */
+  hasLevel: boolean;
 }
 
 export interface InspectorSummary {
@@ -472,8 +478,14 @@ export interface BuildContext {
   lstCovRecord?: RawEstRecord | null;
   /** Runtime-resolved tolerance / sig-digits values from `.lst` trace blocks. Used for wire-vs-runtime annotations on sentinel attrs. */
   lstTolerances?: LstTolerances;
+  /** Whether the model uses an ODE solver (gates ATOL/TOL row visibility). */
+  hasOde?: boolean;
+  /** Whether the model has a `$LEVEL` record (gates LEVCENTER/LEVOBJTYPE/LEVWT synthesis). */
+  hasLevel?: boolean;
   /** User-configurable shrinkage warn threshold (percent). Default 30 (pharmacometrics convention). */
   shrinkageWarnPct?: number;
+  /** Shrinkage borderline (yellow/warn) threshold. Default 20. */
+  shrinkageBorderlineWarnPct?: number;
   /** RSE% red-bad threshold (uniform across THETA / OMEGA / SIGMA). Default 100. */
   rseWarnPct?: number;
   /** THETA RSE% orange-warn threshold. Default 30. */
@@ -492,6 +504,7 @@ export interface BuildContext {
 
 const DEFAULT_THRESHOLDS: InspectorThresholds = {
   shrinkageWarnPct: 30,
+  shrinkageBorderlineWarnPct: 20,
   rseWarnPct: 100,
   rseThetaWarnPct: 30,
   rseOmegaWarnPct: 50,
@@ -611,6 +624,8 @@ export function buildInspectorPayload(
             baseNrd: null, baseAnrd: null, estNrd: null, estAnrd: null,
             covNrd: null, covAnrd: null, siglo: null, sigl: null,
           },
+          hasOde: ctx.hasOde ?? false,
+          hasLevel: ctx.hasLevel ?? false,
           // NM's default `file` for this run is `<basename>.ext`. When
           // PsN's execute wraps the model the lst is at <psn-dir>/run001.lst
           // but the wrapped control stream sets FILE=psn.ext — comparing
@@ -623,6 +638,8 @@ export function buildInspectorPayload(
       : null,
     thresholds: {
       shrinkageWarnPct: ctx.shrinkageWarnPct ?? DEFAULT_THRESHOLDS.shrinkageWarnPct,
+      shrinkageBorderlineWarnPct:
+        ctx.shrinkageBorderlineWarnPct ?? DEFAULT_THRESHOLDS.shrinkageBorderlineWarnPct,
       rseWarnPct: ctx.rseWarnPct ?? DEFAULT_THRESHOLDS.rseWarnPct,
       rseThetaWarnPct: ctx.rseThetaWarnPct ?? DEFAULT_THRESHOLDS.rseThetaWarnPct,
       rseOmegaWarnPct: ctx.rseOmegaWarnPct ?? DEFAULT_THRESHOLDS.rseOmegaWarnPct,
@@ -873,6 +890,8 @@ interface BuildDiagnosticsArgs {
   lstEstRecords: RawEstRecord[];
   lstCovRecord: RawEstRecord | null;
   lstTolerances: LstTolerances;
+  hasOde: boolean;
+  hasLevel: boolean;
   /**
    * NM's default `file` value for this run, derived as `<basename>.ext`
    * from the lst path (e.g., `run001.lst` → `run001.ext`). Null when
@@ -900,6 +919,8 @@ function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnostics | nu
     lstCovRecord,
     lstTolerances,
     expectedDefaultFile,
+    hasOde,
+    hasLevel,
   } = args;
   const conditionNumber = sumo?.conditionNumber ?? lst.conditionNumber ?? null;
   const eigs = lst.eigenvalues;
@@ -1040,6 +1061,8 @@ function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnostics | nu
     xmlCovarianceResolved,
     lstEstRecords,
     lstTolerances,
+    hasOde,
+    hasLevel,
   };
 }
 

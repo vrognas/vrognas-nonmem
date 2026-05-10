@@ -291,21 +291,30 @@ export function resolveCovAttrToRuntime(
   methodKind: 'em' | 'classical' | null,
 ): string | null {
   if (value === '-1') {
-    if (key === 'atol') return lstTolerances?.covAnrd ?? null;
+    // ATOL inherits from $EST → $SUBS → built-in default 12. Trace
+    // value is most authoritative; fall back to doc default when
+    // the trace block isn't emitted (non-ODE model).
+    if (key === 'atol') return lstTolerances?.covAnrd ?? '12';
     if (key === 'tol') return lstTolerances?.covNrd ?? null;
-    if (key === 'siglcov') return lstTolerances?.sigl ?? lastEst?.sigl ?? null;
-    if (key === 'siglocov') return lstTolerances?.siglo ?? lastEst?.siglo ?? null;
-    if (key === 'knuthsumoff') return lastEst?.knuthsumoff ?? null;
+    // SIGL/SIGLO inherit from $EST; doc default is 100 (per nm7/est-
+    // options.qmd:116: "If user does not specify SIGL, or sets SIGL=100,
+    // then the optimization algorithm will perform the traditional
+    // NONMEM VI optimization"). Fall back to '100' when nothing else.
+    if (key === 'siglcov') return lstTolerances?.sigl ?? lastEst?.sigl ?? '100';
+    if (key === 'siglocov') return lstTolerances?.siglo ?? lastEst?.siglo ?? '100';
+    // KNUTHSUMOFF default is 0 per Bauer.
+    if (key === 'knuthsumoff') return lastEst?.knuthsumoff ?? '0';
     if (key === 'posdef') {
+      // posdef='-1' resolves to 0 (classical) or 3 (EM); when method
+      // is unknown, fall back to '0' as the safer default (classical
+      // is the most common case).
       if (methodKind === 'em') return '3';
-      if (methodKind === 'classical') return '0';
-      return null;
+      return '0';
     }
   }
   if (value === 'BLANK') {
     if (key === 'file') return lastEst?.file ?? null;
-    if (key === 'format') return lastEst?.format ?? null;
-    // RANMETHOD default per Bauer $COV doc: `n=3` (uniform PRNG).
+    if (key === 'format') return lastEst?.format ?? 's1PE12.5';
     if (key === 'ranmethod') return '3';
   }
   return null;

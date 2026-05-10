@@ -7,6 +7,14 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **feat: context-aware option visibility + shrinkage warn tier (v0.0.188).** Several related visibility refinements:
+
+  - **Hide ATOL when not relevant**: `atol='0'` (wire sentinel) is hidden from the $EST options table when the model doesn't use an ODE solver AND user didn't explicitly type `ATOL=` on $EST. Same logic for `cov_atol='-1'` and `cov_tol='-1'`. ODE detection via `hasOde` (derived from the `.lst` BASE TOLERANCE block presence — these only emit for ODE-solver runs).
+  - **$LEVEL-gated options**: Added `LEVCENTER` / `LEVOBJTYPE` / `LEVWT` to invisible-options synthesis. They have no documented default (Bauer line 2678: "There is no default. Required with $LEVEL"), so the row renders with empty value when `$LEVEL` is present and user didn't type. Skipped entirely when no `$LEVEL` record. Detection via simple control-stream regex `/^\s*\$LEVEL\b/im`.
+  - **POSTHOC → FO-only**: Updated `INVISIBLE_ATTR_DEFS.posthoc.applicable` from `'all'` to `'fo'` per Bauer line 3082 ("This option may be used when the FO method is used"). Empirical verification queued (task #94). Other-method runs with user-typed POSTHOC will surface with WARNING tooltip.
+  - **PARAFILE / PARAFPRINT / FPARAFILE synthesized for all methods** (carried over from v0.0.187).
+  - **Shrinkage borderline warn tier**: shrinkage > 20% (and below `shrinkageWarnPct` 30%) now highlights yellow. New `shrinkageBorderlineWarnPct` setting (default 20, configurable). Matches the existing convention for RSE warn / bad tiers.
+
 - **feat: method-aware $EST invisible-option synthesis (v0.0.187).** Until now `synthesizeInvisibleAttrs` added rows for PRINT, POSTHOC, ETABARCHECK, NUMERICAL, CENTERING regardless of the current step's method. Per Bauer's $EST docs and the user's "universal options" list, only a subset apply universally:
 
   - **Universal**: PRINT, POSTHOC, ETABARCHECK, plus parallel-processing knobs PARAFILE / PARAFPRINT / FPARAFILE (newly added — never emit to XML; documented Bauer defaults `OFF` / `1` / `OFF`).

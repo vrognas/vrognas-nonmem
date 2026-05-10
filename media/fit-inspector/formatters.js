@@ -111,13 +111,22 @@ function fmtPVal(v) {
 }
 
 /**
- * Shrinkage formatted as `XX.XX%`. Above `thresholds.shrinkageWarnPct`
- * (configurable; default 30) gets `.bad`, otherwise plain text.
+ * Shrinkage formatted as `XX.XX%`. Two tiers:
+ *   - `.bad`  (red)   : `v > thresholds.shrinkageWarnPct` (default 30,
+ *                       pharmacometrics red-flag). Configurable via
+ *                       `positronNonmem.shrinkageWarnPct`.
+ *   - `.warn` (yellow): `v > 20` AND below the bad threshold —
+ *                       borderline shrinkage, worth a glance even if
+ *                       below the red flag. Hard-coded 20% per
+ *                       common pharmacometric convention; not yet
+ *                       user-configurable.
  */
 function fmtShrinkage(v) {
   if (typeof v !== 'number' || !isFinite(v)) return null;
   const text = v.toFixed(2) + '%';
-  return v > thresholds.shrinkageWarnPct ? badge(text, 'bad') : text;
+  if (v > thresholds.shrinkageWarnPct) return badge(text, 'bad');
+  if (v > thresholds.shrinkageBorderlineWarnPct) return badge(text, 'warn');
+  return text;
 }
 
 /**
