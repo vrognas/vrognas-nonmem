@@ -1132,9 +1132,14 @@ function renderEstimationOptionsStep(step, stepNum, tierMap, lstRecord, lstToler
         tip = 'User-typed (NM never emits this to XML; synthesized from .lst echo). Default per Bauer: ' + INVISIBLE_ATTR_DEFAULTS[k] + (matchesDocDefault ? ' — matches default.' : '.');
         if (synthEntry.inapplicable) {
           // Method-applicability warning (e.g. CENTERING typed on SAEM —
-          // doc says METHOD=1 only).
+          // doc says METHOD=1 only; POSTHOC on non-FO — empirically
+          // verified silently ignored).
           const applicableTo = INVISIBLE_ATTR_DEFS[k].applicable;
-          tip += ' WARNING: this option only applies to ' + applicableTo.toUpperCase() + ' methods; the current step uses ' + methodKind.toUpperCase() + '. NM likely ignores it silently.';
+          if (k === 'posthoc') {
+            tip += ' WARNING: POSTHOC/NOPOSTHOC only meaningfully apply to METHOD=ZERO (FO). Empirically verified: other methods compute posthoc etas implicitly regardless of the option, NM 7.6.0.';
+          } else {
+            tip += ' WARNING: this option only applies to ' + applicableTo.toUpperCase() + ' methods; the current step uses ' + methodKind.toUpperCase() + '. NM silently ignores it.';
+          }
         }
       } else {
         tip = 'Documented default per Bauer (NM never emits this to XML). Synthesized for visibility.';

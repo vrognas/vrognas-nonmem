@@ -674,3 +674,40 @@ that the docs flag as interaction-sensitive and inspects (a) the resulting
   used."
 
 Verified 2026-05-11 against NONMEM 7.6.0 on Linux via the probes above.
+
+## POSTHOC/NOPOSTHOC effect across $EST methods (NM 7.6.0)
+
+**Expectation.** Bauer's $EST POSTHOC doc (line 3082): "This option may be used when
+the FO method is used." And NOPOSTHOC (line 3088): "Etas are not estimated. This is
+the default with METHOD=0. May not be used with METHOD=1." So:
+- FO: NOPOSTHOC default; POSTHOC opt-in
+- METHOD=1 (FOCE): NOPOSTHOC rejected; posthoc is implicit
+
+**Probe.** 16-probe matrix at `~/positron-nonmem/probe-posthoc/` — for each method
+(FO, FOCE, FOCEI, Laplace, IMP, ITS, SAEM, MAXEVAL=0), a bare run and a POSTHOC-explicit
+run. Plus separate `~/positron-nonmem/probe-noposthoc/` testing NOPOSTHOC with FOCE /
+IMP / SAEM (Bauer says these should be rejected).
+
+**Outcomes.**
+
+1. **All methods generate `.phi` regardless of POSTHOC/NOPOSTHOC**. Including FO bare
+   (file size 150168 bytes, content all-zero etas for the trivial model).
+2. **POSTHOC + bare have BYTE-IDENTICAL `.phi`** across every method probed. .ext final
+   estimates also identical. The numerical output doesn't change.
+3. **NM accepts NOPOSTHOC for FOCE / IMP / SAEM** without error (Bauer claims "May not
+   be used with METHOD=1" — empirically false at 7.6.0). The .phi is still generated.
+4. **`.lst` echoes "POP. ETAS OBTAINED POST HOC: YES"** when POSTHOC is explicit — so
+   NM recognises the option, just doesn't change behavior.
+
+**Implication.** POSTHOC/NOPOSTHOC are **silently ignored for non-FO methods** at
+NM 7.6.0 — posthoc eta computation is always implicit for FOCE/Laplace/EM. For FO they
+ARE meaningful (toggle posthoc on/off), though for trivial models the eta values may
+all converge to zero either way.
+
+**How to apply.** The Fit Inspector's `INVISIBLE_ATTR_DEFS.posthoc.applicable = 'fo'`
+(v0.0.187+) is correct. WARNING tooltip wording updated v0.0.189: when user types
+POSTHOC on non-FO, the inspector annotates "POSTHOC/NOPOSTHOC only meaningfully apply
+to METHOD=ZERO (FO). Other methods compute posthoc etas implicitly regardless of the
+option."
+
+Verified 2026-05-11 against NONMEM 7.6.0 on Linux via the probes above.

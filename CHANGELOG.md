@@ -7,6 +7,8 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **empirical: POSTHOC verified silently-ignored for non-FO methods (v0.0.189).** 16-probe matrix at `~/positron-nonmem/probe-posthoc/` plus 3 NOPOSTHOC probes at `~/positron-nonmem/probe-noposthoc/`. Confirmed: NM 7.6.0 accepts POSTHOC AND NOPOSTHOC for ALL methods (including FOCE — Bauer's "May not be used with METHOD=1" claim is empirically false). For FOCE/Laplace/IMP/SAEM/ITS: posthoc eta computation is always implicit, both options produce byte-identical .phi files vs bare. For FO: POSTHOC is opt-in (and meaningful in principle, though for trivial models all etas converge to zero anyway). The inspector's `INVISIBLE_ATTR_DEFS.posthoc.applicable = 'fo'` is correct (from v0.0.187). WARNING tooltip wording sharpened from "NM likely ignores it" → empirically-verified "POSTHOC/NOPOSTHOC only meaningfully apply to METHOD=ZERO (FO). Other methods compute posthoc etas implicitly regardless of the option." `docs/empirical-notes.md` updated.
+
 - **feat: context-aware option visibility + shrinkage warn tier (v0.0.188).** Several related visibility refinements:
 
   - **Hide ATOL when not relevant**: `atol='0'` (wire sentinel) is hidden from the $EST options table when the model doesn't use an ODE solver AND user didn't explicitly type `ATOL=` on $EST. Same logic for `cov_atol='-1'` and `cov_tol='-1'`. ODE detection via `hasOde` (derived from the `.lst` BASE TOLERANCE block presence — these only emit for ODE-solver runs).
