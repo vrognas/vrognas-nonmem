@@ -576,5 +576,61 @@ but if AUTO=1 is left on for the IMP step, AUTO=1's IMP-specific overrides apply
 (NITER=500, ISAMPLE=300, etc.). Cancel with `AUTO=0` on the IMP step to get bare-IMP
 behavior + only the explicit options that were carried over.
 
+### Exhaustive matrix verification (NM 7.6.0)
+
+Second probe round at `~/positron-nonmem/probe-chains-exhaustive/` (18 probes across
+seven layers, varying option type, AUTO state, method transition, chain depth).
+
+**Layer 1 — explicit propagation across many attrs.** SAEM(option=X) → IMP(no option)
+with AUTO=0 in step 2. All tested attrs propagated step 1 → step 2:
+`ctype=3`, `iaccept=0.5`, `mceta=5`, `noprior=1`, `seed=42`, `calpha=0.01`,
+`citer=5`, `constrain=2`. Rule confirmed across ~8 different option types.
+
+**Layer 2 — AUTO=1 cancellation behavior.** Three sub-probes:
+
+- `L2_auto1_to_auto0`: SAEM AUTO=1 → IMP AUTO=0 — step 2 has `auto=0 ctype=0
+  noprior=0` (AUTO-implicit values FROM step 1 reset).
+- `L2_auto1_inherit`: SAEM AUTO=1 → IMP (no AUTO) — step 2 has `auto=1` inherited
+  AND the IMP-method AUTO=1 override-set re-fires (`mceta=3`, `iaccept=0.0`,
+  `cinterval=1`).
+- `L2_auto1_explicit`: explicitly written AUTO=1 in step 2 produces same result as
+  inheriting it.
+
+**Layer 3 — AUTO=2 propagation.** `L3_auto2_imp_to_auto0_saem`: IMP AUTO=2 (sets
+`ctype=3 noprior=1 mceta=3 iaccept=0`) → SAEM AUTO=0 — all those values reset to
+bare-SAEM defaults (`ctype=0 noprior=0 mceta=0 iaccept=0.4`). Same rule as AUTO=1.
+
+**Layer 4 — three-step chain.** `L4_three_step_cancel_then_check`: SAEM AUTO=1 → IMP
+AUTO=0 → IMP (no AUTO). Step 3 has `auto=0 ctype=0 noprior=0` — once AUTO is
+canceled, cancellation propagates forward.
+
+**Layer 5 — explicit override of AUTO-set value.**
+- `L5_auto1_explicit_override_ctype`: SAEM AUTO=1 CTYPE=1 (overrides AUTO's
+  CTYPE=3) → IMP AUTO=0. Step 2 has `ctype=1` (the user's explicit, NOT 3 from
+  AUTO, NOT 0 from bare default). NM tracks "user-explicit vs AUTO-implicit"
+  internally and propagates only the explicit.
+- `L5_auto1_explicit_override_noprior`: same story for NOPRIOR=0.
+
+**Layer 6 — cross-method-class propagation.**
+- `L6_foce_explicit_to_imp`: FOCE NOPRIOR=1 → IMP AUTO=0 — step 2 has noprior=1.
+- `L6_foce_explicit_to_saem`: FOCE CTYPE=3 → SAEM AUTO=0 — step 2 has ctype=3.
+
+**Layer 7 — same-method propagation.** `L7_saem_to_saem`: SAEM CTYPE=3 → SAEM (no
+CTYPE) — step 2 has ctype=3.
+
+**Final consolidated rule set.**
+
+1. **Explicit values propagate** (verified across ~8 attrs and 3 method-class transitions).
+2. **AUTO setting itself propagates** forward through the chain.
+3. **AUTO=N re-fires for each step's method** when active.
+4. **AUTO-implicit values RESET to bare-method defaults** when AUTO is canceled in
+   next step. Verified for both AUTO=1 and AUTO=2.
+5. **Once cancelled, AUTO=0 propagates forward** — subsequent steps stay at bare
+   defaults.
+6. **Explicit user overrides of AUTO-set values are tracked separately** — they
+   propagate as explicit values even when AUTO is canceled. NM internally
+   distinguishes "user typed it" from "AUTO chose it".
+
 Verified 2026-05-10 against NONMEM 7.6.0 on Linux via probes at
-`~/positron-nonmem/probe-chains-v2/` (auto1_then_auto0 is the critical case).
+`~/positron-nonmem/probe-chains-v2/` (auto1_then_auto0 is the canonical case)
+and `~/positron-nonmem/probe-chains-exhaustive/` (18-probe matrix).
