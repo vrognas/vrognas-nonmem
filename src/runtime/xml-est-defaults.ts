@@ -395,23 +395,8 @@ function userWroteAttr(attr: string, tokens: readonly string[]): boolean {
 /**
  * Sorted list of attribute keys at `currentStep` whose values match
  * `prevStep`'s same-key value AND were NOT explicitly written by the
- * user on `currentStep`'s $EST line. These are the values that "carried
- * over" from the prior step rather than being typed (or AUTO-set) on
- * this step.
- *
- * Empirically (NM 7.6.0): explicit user options propagate forward;
- * AUTO-implicit values reset on AUTO=0 cancellation; the `auto`
- * setting itself propagates and re-fires per step's method (so
- * AUTO=1's per-method overrides reapply). This function flags only
- * the values that survived because of explicit-propagation, not because
- * of AUTO re-application.
- *
- * Pre-conditions:
- *   - `prevStep` null → returns `[]` (nothing to propagate from)
- *   - `tokens` from the user's verbatim $EST line for THIS step
- *
- * Excludes `USER_DRIVEN_KEYS` and any key not in `findNonDefaultKeys`
- * (defaults stay default; no propagation tier needed).
+ * user on `currentStep`'s $EST line. Kept for backward compat /
+ * tests; the unified `classifyEstStep` is the new entry point.
  */
 export function findPropagatedKeys(
   currentStep: EstimationOptionsStep,
@@ -422,13 +407,77 @@ export function findPropagatedKeys(
   const nonDefault = new Set(findNonDefaultKeys(currentStep));
   const out: string[] = [];
   for (const k of nonDefault) {
-    // User explicitly typed it on THIS step's $EST line → not propagated.
     if (userWroteAttr(k, tokens)) continue;
-    // Same value as prev step → propagated (NM carried it forward as
-    // an explicit setting, since AUTO-implicit values reset on AUTO=0).
     if (prevStep[k] !== undefined && prevStep[k] === currentStep[k]) {
       out.push(k);
     }
   }
   return out.sort();
+}
+
+/**
+ * Per-attr tier in the new (v0.0.181+) coloring scheme:
+ *   - `explicit`        : user typed this attr on the current $EST line.
+ *                         Renders blue. Whether it overwrites the default
+ *                         doesn't matter — the user's intent IS the signal.
+ *   - `explicitDefault` : user typed it AND value matches the method
+ *                         baseline default. Renders blue + italic so the
+ *                         user can tell their explicit value was "no-op".
+ *   - `implicit`        : user did NOT type it AND value differs from
+ *                         baseline. Set by AUTO=N's per-method overrides
+ *                         OR propagated from a prior $EST step. Renders
+ *                         orange — visually flags "I didn't pick this,
+ *                         NM did, and it's not the default".
+ *
+ * Keys that match the baseline default AND were not user-typed are
+ * omitted from the result (render unstyled).
+ */
+export type EstTier = 'explicit' | 'explicitDefault' | 'implicit';
+
+/**
+ * Identity-style attrs that don't fit the explicit/implicit/default
+ * model — file is per-run-derived (NM auto-picks from mod name);
+ * estimation_method is informational; cinterval cascades from PRINT;
+ * etas_fixed_to_zero is HYBRID-only. Render unstyled even when present.
+ */
+const SKIP_TIER_KEYS: ReadonlySet<string> = new Set([
+  'file',
+  'estimation_method',
+  'cinterval',
+  'etas_fixed_to_zero',
+]);
+
+/**
+ * Single-pass classifier producing the tier-map for a `$EST` step.
+ * Tier semantics encode "did the user type this on the current step's
+ * $EST line, and does the resulting value differ from the bare-method
+ * default?". See `EstTier` for tier meanings.
+ *
+ * `tokens` are the user's verbatim tokens from the .lst echo (empty
+ * when no .lst available — degrades gracefully: everything becomes
+ * implicit-or-default).
+ */
+export function classifyEstStep(
+  step: EstimationOptionsStep,
+  tokens: readonly string[],
+): Record<string, EstTier> {
+  const defaults = findDefaultsForStep(step) || {};
+  const out: Record<string, EstTier> = {};
+  for (const k of Object.keys(step)) {
+    if (SKIP_TIER_KEYS.has(k)) continue;
+    const value = step[k];
+    const wroteIt = userWroteAttr(k, tokens);
+    // Treat absent baseline (NM 7.7+ unknown attr, contextual emit)
+    // as "differs from default" — surfaces the gap to a maintainer.
+    const matchesDefault = defaults[k] !== undefined && defaults[k] === value;
+    if (wroteIt && matchesDefault) {
+      out[k] = 'explicitDefault';
+    } else if (wroteIt) {
+      out[k] = 'explicit';
+    } else if (!matchesDefault) {
+      out[k] = 'implicit';
+    }
+    // matches default + not typed → omit (unstyled)
+  }
+  return out;
 }

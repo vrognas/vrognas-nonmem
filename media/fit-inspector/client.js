@@ -152,11 +152,9 @@ function render(payload) {
     // .lst echo records (lstEstRecords) carry user-typed tokens for
     // NOABORT/NOHABORT distinction + invisible-to-XML options.
     const d = payload.diagnostics;
-    const nonDefaults = d.xmlEstimationNonDefaults || [];
-    const userDriven = d.xmlEstimationUserDriven || [];
-    const propagated = d.xmlEstimationPropagated || [];
+    const tiers = d.xmlEstimationTiers || [];
     const lstRecords = d.lstEstRecords || [];
-    root.append(renderEstimationOptions(d.xmlEstimationOptions, nonDefaults, userDriven, propagated, lstRecords, d.lstTolerances));
+    root.append(renderEstimationOptions(d.xmlEstimationOptions, tiers, lstRecords, d.lstTolerances));
   }
   if (payload.diagnostics && payload.diagnostics.xmlCovarianceOptions) {
     // $COV options from `<nm:problem_options>`'s `cov_*` attrs. Single
@@ -840,7 +838,7 @@ function renderPrderr(prderr) {
  * NONMEM emitted them — no type coercion, so the user sees the
  * verbatim wire format.
  */
-function renderEstimationOptions(steps, nonDefaultsPerStep, userDrivenPerStep, propagatedPerStep, lstEstRecords, lstTolerances) {
+function renderEstimationOptions(steps, tiersPerStep, lstEstRecords, lstTolerances) {
   const outer = document.createElement('details');
   outer.className = 'xml-options';
   const sumOuter = document.createElement('summary');
@@ -848,26 +846,21 @@ function renderEstimationOptions(steps, nonDefaultsPerStep, userDrivenPerStep, p
     + steps.length + (steps.length === 1 ? ' step)' : ' steps)');
   outer.append(sumOuter);
   for (let i = 0; i < steps.length; i++) {
-    const nonDefaults = (nonDefaultsPerStep && nonDefaultsPerStep[i]) || [];
-    const userDriven = (userDrivenPerStep && userDrivenPerStep[i]) || [];
-    const propagated = (propagatedPerStep && propagatedPerStep[i]) || [];
+    const tiers = (tiersPerStep && tiersPerStep[i]) || {};
     const lstRecord = (lstEstRecords && lstEstRecords[i]) || null;
-    outer.append(renderEstimationOptionsStep(steps[i], i + 1, nonDefaults, userDriven, propagated, lstRecord, lstTolerances));
+    outer.append(renderEstimationOptionsStep(steps[i], i + 1, tiers, lstRecord, lstTolerances));
   }
   return outer;
 }
 
-// Tokens NM never emits in the XML even when user explicitly sets them.
-// Empirically verified at ~/positron-nonmem/probe-attrs-survey/ on
-// NM 7.6.0. When these appear in the user's verbatim $EST line, the
-// inspector must surface them separately — they are otherwise invisible.
-// PRINT is excluded here because we synthesize a `print` row directly
-// into the main attr table (default 9999 per Bauer's docs); see
-// `synthesizeInvisibleAttrs` below.
+// Tokens NM never emits in the XML even when user explicitly sets them,
+// AND that we don't synthesize as their own attr row. PRINT, POSTHOC,
+// ETABARCHECK, NUMERICAL, CENTERING are all synthesized via
+// `synthesizeInvisibleAttrs` so they show up as proper rows. NOSORT
+// remains here because SORT emits visible `objsort='yes'` (so the user
+// can see the explicit case in the main table); only the NO-prefix /
+// default state would otherwise be invisible.
 const INVISIBLE_TOKEN_PATTERNS = [
-  /^N?O?POSTHOC$/i,
-  /^N?O?CENTERING$/i,
-  /^N?O?ETABARCHECK$/i,
   /^N?O?SORT$/i,
 ];
 
@@ -877,27 +870,57 @@ function isInvisibleToken(token) {
 
 /**
  * Doc-default values for $EST options that NM never emits to XML.
- * Currently only PRINT is doc-defaulted at 9999; others (POSTHOC,
- * CENTERING, ETABARCHECK, NOSORT) are method-dependent or boolean
- * with no clean numeric default to surface inline.
+ * Boolean flags use the NMTRAN convention `[FLAG|NOFLAG]` — the NO-
+ * prefixed variant disables. Defaults verified at
+ * `~/positron-nonmem/probe-attrs-survey/` (NM 7.6.0) + nmguides.
  */
 const INVISIBLE_ATTR_DEFAULTS = {
   print: '9999',
+  // Boolean flags: 'no'/'yes' rendered. Default per Bauer:
+  posthoc: 'no',         // line 3089: NOPOSTHOC default for METHOD=0
+  etabarcheck: 'no',     // line 2465: NOETABARCHECK is the default
+  numerical: 'no',       // line 2940: NONUMERICAL is the default
+  centering: 'no',       // line 2386: NOCENTERING is the default
+};
+
+/**
+ * NMTRAN boolean toggle pairs — `[FLAG|NOFLAG]` syntax. Maps the synth
+ * attr name to the regex matching either form. NO-prefixed token sets
+ * the value to 'no'; bare token sets to 'yes'. Used by
+ * `synthesizeInvisibleAttrs` to interpret user $EST tokens.
+ */
+const BOOLEAN_TOGGLE_PATTERNS = {
+  posthoc: /^(NO)?POSTHOC$/i,
+  etabarcheck: /^(NO)?ETABARCHECK$/i,
+  numerical: /^(NO)?NUMERICAL$/i,
+  centering: /^(NO)?CENTERING$/i,
 };
 
 /**
  * Build a synthetic-attr overlay for the step from the user's verbatim
  * $EST tokens. Returns {value, isUserSet} per attr. Used to inject
- * doc-defaulted invisible options (PRINT) into the main option table.
+ * doc-defaulted invisible options into the main option table:
+ *   - PRINT (numeric, default 9999)
+ *   - POSTHOC, ETABARCHECK, NUMERICAL, CENTERING (boolean toggle flags)
  */
 function synthesizeInvisibleAttrs(userTokens) {
   const out = {};
-  // PRINT: extract user's value if present; default 9999 otherwise.
+  // PRINT: numeric. Extract user's value if present; default 9999.
   const printToken = userTokens.find((t) => /^PRINT=/i.test(t));
   if (printToken) {
     out.print = { value: printToken.split('=')[1] || '', isUserSet: true };
   } else {
     out.print = { value: INVISIBLE_ATTR_DEFAULTS.print, isUserSet: false };
+  }
+  // Boolean toggles: bare flag → 'yes'; NO-prefix → 'no'; absent → default.
+  for (const [attr, re] of Object.entries(BOOLEAN_TOGGLE_PATTERNS)) {
+    const match = userTokens.find((t) => re.test(t));
+    if (match) {
+      const isNegated = /^NO/i.test(match);
+      out[attr] = { value: isNegated ? 'no' : 'yes', isUserSet: true };
+    } else {
+      out[attr] = { value: INVISIBLE_ATTR_DEFAULTS[attr], isUserSet: false };
+    }
   }
   return out;
 }
@@ -933,7 +956,7 @@ function resolveCovAttrFromLst(key, value, tolerances) {
   return null;
 }
 
-function renderEstimationOptionsStep(step, stepNum, nonDefaultKeys, userDrivenKeys, propagatedKeys, lstRecord, lstTolerances) {
+function renderEstimationOptionsStep(step, stepNum, tierMap, lstRecord, lstTolerances) {
   const inner = document.createElement('details');
   inner.className = 'xml-options-step';
   const sumInner = document.createElement('summary');
@@ -974,39 +997,36 @@ function renderEstimationOptionsStep(step, stepNum, nonDefaultKeys, userDrivenKe
     const tdV = document.createElement('td');
     let cls = 'xml-options-val';
     let tip;
-    // Synthesized invisible attrs (PRINT) get their own classification
-    // path — the static XML-defaults table doesn't carry them.
+    // v0.0.181 tier scheme: blue (explicit) / blue-italic
+    // (explicit-matches-default) / orange (implicit). The tier-map is
+    // computed payload-side via classifyEstStep — single source of truth.
     const synthEntry = synthetic[k];
     if (synthEntry !== undefined) {
+      // Synthesized invisible attrs (PRINT) — tier based on isUserSet,
+      // doc-default match.
       if (synthEntry.isUserSet) {
-        cls += ' xml-options-val--user-driven';
-        tip = 'User-typed in $ESTIMATION but NEVER appears in NONMEM\'s XML output (synthesized from .lst echo). Default per Bauer: ' + INVISIBLE_ATTR_DEFAULTS[k] + '.';
+        const matchesDocDefault = synthEntry.value === INVISIBLE_ATTR_DEFAULTS[k];
+        cls += matchesDocDefault
+          ? ' xml-options-val--explicit-default'
+          : ' xml-options-val--explicit';
+        tip = 'User-typed (NM never emits this to XML; synthesized from .lst echo). Default per Bauer: ' + INVISIBLE_ATTR_DEFAULTS[k] + (matchesDocDefault ? ' — matches default.' : '.');
       } else {
-        // Default value — the user didn't set it; we're surfacing the
-        // documented default for transparency.
         tip = 'Documented default per Bauer (NM never emits this to XML). Synthesized for visibility.';
       }
+    } else {
+      const tier = tierMap[k];
+      if (tier === 'explicit') {
+        cls += ' xml-options-val--explicit';
+        tip = 'Explicitly set on this $EST line (.lst echo).';
+      } else if (tier === 'explicitDefault') {
+        cls += ' xml-options-val--explicit-default';
+        tip = 'Explicitly set on this $EST line, but the value matches the method default — has no effect vs. omitting it.';
+      } else if (tier === 'implicit') {
+        cls += ' xml-options-val--implicit';
+        tip = 'Implicitly set — value differs from default, but the user did NOT type it on this $EST line. Set by AUTO=N\'s per-method overrides or propagated from a prior $EST step.';
+      }
     }
-    // Tier resolution order, most specific first:
-    //   user-driven → propagated → non-default → default.
-    // Propagated tier: value matches PREVIOUS step's value AND user
-    // didn't write the attr on THIS step's $EST line. Empirically
-    // (NM 7.6.0): explicit user options carry forward across steps;
-    // AUTO-implicit values reset. So a "value match without user typing"
-    // strongly indicates carry-over from the prior step.
-    else if (userDrivenKeys.includes(k)) {
-      cls += ' xml-options-val--user-driven';
-      tip = 'User-driven: NONMEM requires this to be set, or it\'s a per-run identity (seed, file, method). Not compared against defaults.';
-    } else if (propagatedKeys.includes(k)) {
-      cls += ' xml-options-val--propagated-est';
-      tip = 'Propagated from previous $EST step. Empirically: NONMEM carries explicit user options forward across chained $EST records (AUTO-implicit values do NOT propagate). User did not type this on the current step\'s $EST line.';
-    } else if (nonDefaultKeys.includes(k)) {
-      cls += ' xml-options-val--non-default';
-      tip = 'Non-default: differs from this method\'s empirical baseline (probed against NM 7.6.0).';
-    }
-    // Special-case `abort='no'`: XML conflates NOABORT (theta-recovery +
-    // some non-PD Hessian forcing) with NOHABORT (PD correction at all
-    // levels — more aggressive). Source-of-truth is the .lst echo.
+    // Special-case `abort='no'`: XML conflates NOABORT/NOHABORT.
     if (k === 'abort' && merged[k] === 'no') {
       if (userWroteNohabort) {
         tip = 'NOHABORT: positive definite correction at all levels of the estimation. More aggressive than NOABORT — can hide ill-posed problems. (XML wire: abort=\'no\' — same as NOABORT)';
@@ -1016,17 +1036,18 @@ function renderEstimationOptionsStep(step, stepNum, nonDefaultKeys, userDrivenKe
         tip = (tip || '') + ' (XML wire abort=\'no\' is shared by NOABORT and NOHABORT; .lst echo absent — can\'t disambiguate.)';
       }
     }
-    // Wire-vs-runtime annotation for sentinel-style attrs whose .lst
-    // trace gives the resolved value. Empirically (NM 7.6.0): atol='0'
-    // is a sentinel and the runtime ANRD value lives in
-    // .lst's "TOLERANCES FOR ESTIMATION" block.
+    // Wire-vs-runtime translation. ATOL='0' is a sentinel — display
+    // the resolved runtime ANRD from the .lst trace as the cell value.
+    // Tooltip preserves the wire format for transparency.
+    let displayValue = merged[k];
     const resolved = resolveEstAttrFromLst(k, merged[k], tolerances);
     if (resolved && resolved !== merged[k]) {
-      const note = ' (runtime: ' + resolved + ' — from .lst trace; XML wire \'' + merged[k] + '\' is a sentinel)';
+      displayValue = resolved;
+      const note = ' (XML wire: \'' + merged[k] + '\' — sentinel for the built-in default; effective runtime value ' + resolved + ' from .lst trace.)';
       tip = (tip || '') + note;
     }
     tdV.className = cls;
-    tdV.textContent = fmtXmlOptionValue(merged[k]);
+    tdV.textContent = fmtXmlOptionValue(displayValue);
     if (tip) tdV.title = tip;
     tr.append(tdK, tdV);
     table.append(tr);

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  classifyEstStep,
   findDefaultsForStep,
   findNonDefaultKeys,
   findPropagatedKeys,
@@ -261,5 +262,77 @@ describe('findPropagatedKeys', () => {
     const curr = { estimation_method: 'imp', ctype: '3', noprior: '1', mceta: '5', isample: '300' };
     const propagated = findPropagatedKeys(curr, prev, ['METHOD=IMP']);
     expect(propagated).toEqual([...propagated].sort());
+  });
+});
+
+describe('classifyEstStep (v0.0.181 tier scheme)', () => {
+  it('user-typed + differs from default → "explicit"', () => {
+    // SAEM with user-set CTYPE=3 (default 0). Token CTYPE=3 → explicit.
+    const step = { estimation_method: 'saem', ctype: '3' };
+    const tiers = classifyEstStep(step, ['METHOD=SAEM', 'CTYPE=3']);
+    expect(tiers.ctype).toBe('explicit');
+  });
+
+  it('user-typed + matches default → "explicitDefault"', () => {
+    // User typed NSIG=3 but 3 is the default — typing was a no-op.
+    const step = { estimation_method: 'saem', nsig: '3' };
+    const tiers = classifyEstStep(step, ['METHOD=SAEM', 'NSIG=3']);
+    expect(tiers.nsig).toBe('explicitDefault');
+  });
+
+  it('not typed + differs from default → "implicit"', () => {
+    // SAEM with auto=1 (NM default 0). User didn't type AUTO=1
+    // but XML has it — must have been propagated from prev step.
+    const step = { estimation_method: 'saem', auto: '1' };
+    const tiers = classifyEstStep(step, ['METHOD=SAEM']);
+    expect(tiers.auto).toBe('implicit');
+  });
+
+  it('not typed + matches default → omitted (unstyled)', () => {
+    const step = { estimation_method: 'saem', ctype: '0', noprior: '0' };
+    const tiers = classifyEstStep(step, ['METHOD=SAEM']);
+    expect(tiers.ctype).toBeUndefined();
+    expect(tiers.noprior).toBeUndefined();
+  });
+
+  it('alias-aware: NOABORT token → abort=no classifies as explicit', () => {
+    const step = { estimation_method: 'saem', abort: 'no' };
+    const tiers = classifyEstStep(step, ['METHOD=SAEM', 'NOABORT']);
+    expect(tiers.abort).toBe('explicit');
+  });
+
+  it('alias-aware: INTER token → epseta_interaction=yes classifies as explicit', () => {
+    // FOCE-INTER: user wrote INTER, XML has epseta_interaction='yes'.
+    const step = { cond_estim: 'yes', epseta_interaction: 'yes' };
+    const tiers = classifyEstStep(step, ['METHOD=COND', 'INTER']);
+    expect(tiers.epseta_interaction).toBe('explicit');
+  });
+
+  it('SKIP_TIER_KEYS: file / estimation_method / cinterval / etas_fixed_to_zero never classified', () => {
+    const step = {
+      estimation_method: 'saem',
+      file: 'mymodel.ext',
+      cinterval: '50',
+      etas_fixed_to_zero: '1',
+    };
+    const tiers = classifyEstStep(step, ['METHOD=SAEM', 'FILE=mymodel.ext']);
+    expect(tiers.file).toBeUndefined();
+    expect(tiers.estimation_method).toBeUndefined();
+    expect(tiers.cinterval).toBeUndefined();
+    expect(tiers.etas_fixed_to_zero).toBeUndefined();
+  });
+
+  it('NM 7.7+ unknown attr (not in baseline) classifies as implicit when not user-typed', () => {
+    const step = { estimation_method: 'saem', hypothetical_nm77: 'x' };
+    const tiers = classifyEstStep(step, ['METHOD=SAEM']);
+    expect(tiers.hypothetical_nm77).toBe('implicit');
+  });
+
+  it('empty tokens (no .lst echo) → all non-default classify as implicit', () => {
+    // Degraded mode: without lst data, we can't tell if user typed.
+    // Conservative: assume not typed → implicit if differs from default.
+    const step = { estimation_method: 'saem', ctype: '3' };
+    const tiers = classifyEstStep(step, []);
+    expect(tiers.ctype).toBe('implicit');
   });
 });

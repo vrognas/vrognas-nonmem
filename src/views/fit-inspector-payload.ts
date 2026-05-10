@@ -18,9 +18,11 @@ import type { ExtEstimates } from '../runtime/parse-ext-fit';
 import type { ExtTrajectory } from '../runtime/parse-ext-trajectory';
 import type { EstimationOptionsStep } from '../runtime/parse-xml-options';
 import {
+  classifyEstStep,
   findNonDefaultKeys,
   findPropagatedKeys,
   findUserDrivenKeys,
+  type EstTier,
 } from '../runtime/xml-est-defaults';
 import type { CovarianceOptions } from '../runtime/parse-xml-problem-options';
 import { classifyCovKeys, type CovKeyTier } from '../runtime/xml-cov-defaults';
@@ -347,16 +349,18 @@ export interface InspectorDiagnostics {
   /**
    * Per-step list of attribute keys that match the PREVIOUS step's
    * value and were NOT explicitly written on THIS step's $EST line.
-   * These "carried over" from a prior chained $EST. Empirically (NM
-   * 7.6.0): explicit user options propagate forward; AUTO-implicit
-   * values reset on AUTO=0 cancellation. So matching prev-step value
-   * + not-on-current-line is a strong propagation signal.
-   *
-   * Renders muted/grey (4th tier). Step 0's array is always `[]`
-   * since nothing precedes it. Disjoint from `xmlEstimationNonDefaults`
-   * (propagation steals from the non-default pool).
+   * Kept for backward compat with v0.0.179 payloads. The new (v0.0.181+)
+   * `xmlEstimationTiers` field is the primary source for tier-rendering.
    */
   xmlEstimationPropagated: string[][];
+  /**
+   * Per-step tier-map: key → 'explicit' | 'explicitDefault' | 'implicit'.
+   * Computed via `classifyEstStep`. Encodes the v0.0.181 coloring
+   * scheme: blue for user-typed, orange for AUTO/propagation-set,
+   * unstyled for default. See `EstTier` in xml-est-defaults.ts for
+   * full semantics.
+   */
+  xmlEstimationTiers: Record<string, EstTier>[];
   /**
    * Per-`$EST`-step result fields from `<nm:estimation>` blocks.
    * Empty when no `.xml` was loaded. Surfaces termination_status +
@@ -880,28 +884,24 @@ function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnostics | nu
     xmlEstimationResults.length === 0 &&
     xmlCovarianceOptions === null;
   if (empty) return null;
-  // Compute per-step non-default + user-driven + propagated key lists
-  // here so the heavy defaults table stays in TS land. All sorted
-  // string[][] (postMessage-compatible).
+  // Legacy per-step lists (kept for back-compat with older payload
+  // consumers / tests). The new `xmlEstimationTiers` is the primary
+  // source for v0.0.181+ tier-rendering.
   const xmlEstimationNonDefaults = xmlEstimationOptions.map(findNonDefaultKeys);
   const xmlEstimationUserDriven = xmlEstimationOptions.map(findUserDrivenKeys);
-  // Propagation tier: needs prev step + this step's $EST tokens. Step 0
-  // has no predecessor → empty. Other steps cross-reference prev step's
-  // attrs against this step's lst tokens to distinguish "user-typed
-  // here" from "carried over from prev step".
   const xmlEstimationPropagated = xmlEstimationOptions.map((step, i) => {
     if (i === 0) return [];
     const tokens = lstEstRecords[i]?.tokens ?? [];
     return findPropagatedKeys(step, xmlEstimationOptions[i - 1], tokens);
   });
-  // Propagated keys steal from the non-default pool — surfaced as grey,
-  // not blue, to differentiate "carried over" from "explicitly set".
-  // Subtract the propagated set so the renderer's tier check is
-  // non-overlapping when it walks `nonDefault.includes(k)`.
-  for (let i = 0; i < xmlEstimationNonDefaults.length; i++) {
-    const propSet = new Set(xmlEstimationPropagated[i]);
-    xmlEstimationNonDefaults[i] = xmlEstimationNonDefaults[i].filter((k) => !propSet.has(k));
-  }
+  // v0.0.181+ tier-map: per-step `key → tier`. Single source of truth
+  // for the inspector's coloring. Implicit tier covers BOTH AUTO-set
+  // and propagation cases (visually unified — both are "NM picked
+  // this, not the user").
+  const xmlEstimationTiers = xmlEstimationOptions.map((step, i) => {
+    const tokens = lstEstRecords[i]?.tokens ?? [];
+    return classifyEstStep(step, tokens);
+  });
   // $COV: single classifier returning a tier-map (key → 'nonDefault' |
   // 'propagated' | 'userDriven'). Propagation is cross-referenced
   // against the LAST $EST step's non-default attrs — `cov_atol='-1'`
@@ -949,6 +949,7 @@ function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnostics | nu
     xmlEstimationNonDefaults,
     xmlEstimationUserDriven,
     xmlEstimationPropagated,
+    xmlEstimationTiers,
     xmlEstimationResults,
     xmlCovarianceOptions,
     xmlCovarianceTiers,

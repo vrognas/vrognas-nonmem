@@ -5,6 +5,18 @@ All notable changes documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **feat + refactor: $EST options re-coloring + ATOL display + boolean defaults (v0.0.181).** Three-part reorganization of the $EST options inspector:
+
+  (1) **New tier scheme** — replaced the old four-tier (green/blue/yellow/muted-blue) with three tiers anchored on a single semantic axis: did the user type this on the current $EST line? **Blue (`explicit`)** = yes. **Italic blue (`explicitDefault`)** = yes, but value happens to match the method default (typing was a no-op). **Orange (`implicit`)** = no, but value differs from default — set by `AUTO=N`'s per-method overrides or propagated from a prior $EST step. Unstyled = matches default + not typed. Single-pass classifier `classifyEstStep(step, tokens)` in xml-est-defaults.ts produces a per-step `Record<key, EstTier>`; payload ships the tier-map as `xmlEstimationTiers`. Drops the old USER_DRIVEN green tier (was a hack for "we can't tell"); now we can tell because lst tokens give us explicit-vs-not directly. Identity attrs (file, estimation_method, cinterval, etas_fixed_to_zero) stay unstyled via SKIP_TIER_KEYS.
+
+  (2) **ATOL wire-vs-runtime display** — when XML emits `atol='0'` (sentinel for "user didn't set; runtime uses base ANRD"), the inspector now displays the resolved value from the `.lst` BASE TOLERANCE block as the cell text (typically `12`), with the wire format preserved in the tooltip. Same for `cov_atol='-1'` → resolved $COV ANRD. User asked for full translation of sentinels; tooltip-only annotation in v0.0.179 wasn't enough.
+
+  (3) **Boolean defaults synthesized** — extended `synthesizeInvisibleAttrs` from PRINT-only to also synthesize POSTHOC, ETABARCHECK, NUMERICAL, CENTERING rows (all NMTRAN `[FLAG|NOFLAG]` toggle pairs that NM never emits to XML). User typing the bare flag → 'yes'; NO-prefix → 'no'; absent → documented default (all four default to 'no' per Bauer). NOSORT still surfaces in the "Also typed" footer because SORT does emit visible `objsort='yes'` — only the default-case is invisible.
+
+  9 new tests for `classifyEstStep` covering all four tier outcomes, alias-aware tokens (NOABORT/INTER), SKIP_TIER_KEYS, NM 7.7+ unknown attr fallback, and degraded-mode (no .lst echo). Suite to 425/425.
+
 ### Added
 
 - **feat: synthesize PRINT into $EST options table (v0.0.180).** PRINT is never emitted in XML even when set, but Bauer's docs document its default (9999). New `synthesizeInvisibleAttrs(tokens)` overlays a `print` row into each step's option table — value pulled from the user's `PRINT=N` token (.lst echo) or defaulted to `9999`. User-set values render green (user-driven tier) with tooltip explaining "synthesized from .lst echo, NM never emits to XML"; defaults render unstyled with a transparency tooltip noting they're synthesized from docs. PRINT removed from the "Also typed (invisible to XML)" caption since it's now in the main table. Step header attribute count updated to reflect the merged total.

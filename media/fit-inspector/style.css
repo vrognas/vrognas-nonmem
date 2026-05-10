@@ -298,42 +298,43 @@ body {
   font-variant-numeric: tabular-nums;
   text-align: left !important;
 }
-/* Non-default values: differ from the method's empirically-probed
-   baseline (see runtime/xml-est-defaults.ts). Blue tint matches the
-   FIXED-row convention used elsewhere in the inspector for
-   "user-customised" attributes. */
-.xml-options-val--non-default {
+/* v0.0.181 tier scheme — single semantic axis: did the user type this?
+   Blue = explicit (user typed it on this step's $EST line, regardless
+   of whether the value happens to match the default).
+   Italic-blue = explicit-matches-default (user typed it but value is
+   the same as the method default — typing was a no-op).
+   Orange = implicit (NM picked the value, either via AUTO=N's
+   per-method overrides or propagation from a prior step).
+   Unstyled = matches default + user didn't type. */
+.xml-options-val--explicit {
   color: var(--vscode-charts-blue);
   font-weight: 600;
 }
-/* User-driven values: NM requires user to supply (niter, nburn,
-   isample) or per-run identity (seed, clockseed, file,
-   estimation_method). Distinct visual tier from non-default —
-   "you typed this" not "you customised away from method default." */
-.xml-options-val--user-driven {
-  color: var(--vscode-charts-green);
+.xml-options-val--explicit-default {
+  color: var(--vscode-charts-blue);
+  font-weight: 500;
+  font-style: italic;
+}
+.xml-options-val--implicit {
+  color: var(--vscode-charts-orange);
   font-weight: 600;
 }
-/* Propagated values ($COV-specific): `-1` value means "inherits from
-   $EST / $SUBS / method default" (atol, tol, siglcov, siglocov,
-   knuthsumoff, posdef). Yellow because the actual effective value
-   isn't here — user should look at $EST. Distinct from blue
-   non-default ("user-customised") and green user-driven ("user-set"). */
+/* $COV-specific propagated tier: `cov_*='-1'` inheriting from $EST
+   when the $EST sibling is itself non-default. Renders yellow to
+   match the "inherited" semantic in the $COV section. Distinct from
+   the $EST `--implicit` orange because the inheritance source
+   (cross-record $EST→$COV) differs. */
 .xml-options-val--propagated {
   color: var(--vscode-charts-yellow);
   font-weight: 600;
 }
-/* Propagated-from-previous-$EST tier (chained $EST records). Muted
-   blue-grey — visible enough to register as "this isn't default" but
-   distinct from the brighter blue (user-customised on this step) and
-   the yellow (cov_*='-1' inheriting from $EST). Empirical basis:
-   NM 7.6.0 carries explicit user options across $EST steps; AUTO-set
-   values reset on AUTO=0 cancellation. */
+/* Legacy classes — kept so older renders don't break on stale
+   payloads, but the new tier-map drives all new $EST coloring. */
+.xml-options-val--non-default,
+.xml-options-val--user-driven,
 .xml-options-val--propagated-est {
   color: var(--vscode-charts-blue);
-  opacity: 0.6;
-  font-weight: 500;
-  font-style: italic;
+  font-weight: 600;
 }
 /* Invisible-to-XML user-typed tokens (PRINT, POSTHOC, etc.) surfaced
    from the .lst echo. Small caption-style row under each step's table. */
