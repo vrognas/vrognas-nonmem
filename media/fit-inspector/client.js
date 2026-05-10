@@ -145,10 +145,13 @@ function render(payload) {
     // Exhaustive per-$EST option list from sibling .xml. Closed by default
     // (verbose). Three-tier classification: green = user-driven, blue =
     // non-default vs method's empirical baseline, normal = matches default.
+    // .lst echo records (lstEstRecords) carry user-typed tokens for
+    // NOABORT/NOHABORT distinction + invisible-to-XML options.
     const d = payload.diagnostics;
     const nonDefaults = d.xmlEstimationNonDefaults || [];
     const userDriven = d.xmlEstimationUserDriven || [];
-    root.append(renderEstimationOptions(d.xmlEstimationOptions, nonDefaults, userDriven));
+    const lstRecords = d.lstEstRecords || [];
+    root.append(renderEstimationOptions(d.xmlEstimationOptions, nonDefaults, userDriven, lstRecords));
   }
   if (payload.diagnostics && payload.diagnostics.xmlCovarianceOptions) {
     // $COV options from `<nm:problem_options>`'s `cov_*` attrs. Single
@@ -826,7 +829,7 @@ function renderPrderr(prderr) {
  * NONMEM emitted them — no type coercion, so the user sees the
  * verbatim wire format.
  */
-function renderEstimationOptions(steps, nonDefaultsPerStep, userDrivenPerStep) {
+function renderEstimationOptions(steps, nonDefaultsPerStep, userDrivenPerStep, lstEstRecords) {
   const outer = document.createElement('details');
   outer.className = 'xml-options';
   const sumOuter = document.createElement('summary');
@@ -836,17 +839,32 @@ function renderEstimationOptions(steps, nonDefaultsPerStep, userDrivenPerStep) {
   for (let i = 0; i < steps.length; i++) {
     const nonDefaults = (nonDefaultsPerStep && nonDefaultsPerStep[i]) || [];
     const userDriven = (userDrivenPerStep && userDrivenPerStep[i]) || [];
-    outer.append(renderEstimationOptionsStep(steps[i], i + 1, nonDefaults, userDriven));
+    const lstRecord = (lstEstRecords && lstEstRecords[i]) || null;
+    outer.append(renderEstimationOptionsStep(steps[i], i + 1, nonDefaults, userDriven, lstRecord));
   }
   return outer;
 }
 
-function renderEstimationOptionsStep(step, stepNum, nonDefaultKeys, userDrivenKeys) {
+// Tokens NM never emits in the XML even when user explicitly sets them.
+// Empirically verified at ~/positron-nonmem/probe-attrs-survey/ on
+// NM 7.6.0. When these appear in the user's verbatim $EST line, the
+// inspector must surface them separately — they are otherwise invisible.
+const INVISIBLE_TOKEN_PATTERNS = [
+  /^PRINT=/i,
+  /^N?O?POSTHOC$/i,
+  /^N?O?CENTERING$/i,
+  /^N?O?ETABARCHECK$/i,
+  /^N?O?SORT$/i,
+];
+
+function isInvisibleToken(token) {
+  return INVISIBLE_TOKEN_PATTERNS.some((re) => re.test(token));
+}
+
+function renderEstimationOptionsStep(step, stepNum, nonDefaultKeys, userDrivenKeys, lstRecord) {
   const inner = document.createElement('details');
   inner.className = 'xml-options-step';
   const sumInner = document.createElement('summary');
-  // Method label (estimation_method='saem' / 'imp' / etc.) drives the
-  // step title; falls back to "Step N" when absent.
   const method = step.estimation_method
     ? step.estimation_method.toUpperCase()
     : 'Step ' + stepNum;
@@ -855,12 +873,15 @@ function renderEstimationOptionsStep(step, stepNum, nonDefaultKeys, userDrivenKe
     + ' (' + count + ' attributes)';
   inner.append(sumInner);
 
+  // The user's verbatim $EST tokens (from .lst echo) — used to distinguish
+  // NOABORT vs NOHABORT (XML conflates both into abort='no') and to surface
+  // tokens NM never emits to XML (PRINT, POSTHOC, etc.).
+  const userTokens = lstRecord && lstRecord.tokens ? lstRecord.tokens : [];
+  const userWroteNoabort = userTokens.some((t) => /^NOABORT$/i.test(t));
+  const userWroteNohabort = userTokens.some((t) => /^NOHABORT$/i.test(t));
+
   const table = document.createElement('table');
   table.className = 'xml-options-table';
-  // Sort keys alphabetically — easier to scan when looking for a
-  // specific option (`isample`, `ctype`, etc.). Keys render uppercase
-  // via CSS `text-transform`; values pass through `fmtXmlOptionValue`
-  // to strip NONMEM's trailing-zero noise (`1000000.00000000` → `1000000`).
   const keys = Object.keys(step).sort();
   for (const k of keys) {
     const tr = document.createElement('tr');
@@ -868,11 +889,6 @@ function renderEstimationOptionsStep(step, stepNum, nonDefaultKeys, userDrivenKe
     tdK.className = 'xml-options-key';
     tdK.textContent = k;
     const tdV = document.createElement('td');
-    // Three-tier classification — disjoint by construction
-    // (`findNonDefaultKeys` excludes USER_DRIVEN_KEYS):
-    //   user-driven → green (NM requires setting / per-run identity)
-    //   non-default → blue  (differs from method baseline)
-    //   default     → no extra class
     let cls = 'xml-options-val';
     let tip;
     if (userDrivenKeys.includes(k)) {
@@ -882,6 +898,18 @@ function renderEstimationOptionsStep(step, stepNum, nonDefaultKeys, userDrivenKe
       cls += ' xml-options-val--non-default';
       tip = 'Non-default: differs from this method\'s empirical baseline (probed against NM 7.6.0).';
     }
+    // Special-case `abort='no'`: XML conflates NOABORT (theta-recovery +
+    // some non-PD Hessian forcing) with NOHABORT (PD correction at all
+    // levels — more aggressive). Source-of-truth is the .lst echo.
+    if (k === 'abort' && step[k] === 'no') {
+      if (userWroteNohabort) {
+        tip = 'NOHABORT: positive definite correction at all levels of the estimation. More aggressive than NOABORT — can hide ill-posed problems. (XML wire: abort=\'no\' — same as NOABORT)';
+      } else if (userWroteNoabort) {
+        tip = 'NOABORT: theta-recovery + force most non-PD Hessian matrices to be PD. (XML wire: abort=\'no\' — same as NOHABORT)';
+      } else {
+        tip = (tip || '') + ' (XML wire abort=\'no\' is shared by NOABORT and NOHABORT; .lst echo absent — can\'t disambiguate.)';
+      }
+    }
     tdV.className = cls;
     tdV.textContent = fmtXmlOptionValue(step[k]);
     if (tip) tdV.title = tip;
@@ -889,6 +917,30 @@ function renderEstimationOptionsStep(step, stepNum, nonDefaultKeys, userDrivenKe
     table.append(tr);
   }
   inner.append(table);
+
+  // Surface invisible-to-XML tokens (PRINT, POSTHOC, CENTERING,
+  // ETABARCHECK, NOSORT) the user typed. The XML can't carry them, so
+  // without the .lst echo the inspector would simply not show them.
+  const invisibleTokens = userTokens.filter(isInvisibleToken);
+  if (invisibleTokens.length > 0) {
+    const note = document.createElement('div');
+    note.className = 'xml-options-invisible';
+    note.title =
+      'These options are user-typed in $ESTIMATION but NEVER appear in ' +
+      'NONMEM\'s XML output (empirically verified, NM 7.6.0). ' +
+      'Surfaced from the .lst control-stream echo.';
+    const label = document.createElement('span');
+    label.className = 'xml-options-invisible-label';
+    label.textContent = 'Also typed (invisible to XML):';
+    note.append(label);
+    for (const t of invisibleTokens) {
+      const tag = document.createElement('span');
+      tag.className = 'xml-options-invisible-tag';
+      tag.textContent = t;
+      note.append(' ', tag);
+    }
+    inner.append(note);
+  }
   return inner;
 }
 

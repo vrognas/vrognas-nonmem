@@ -36,6 +36,10 @@ import { lastCorTable, type CorTable } from '../runtime/parse-cor';
 import { parseExtFit } from '../runtime/parse-ext-fit';
 import { parseExtTrajectory, type ExtTrajectory } from '../runtime/parse-ext-trajectory';
 import {
+  parseLstEstRecords,
+  type RawEstRecord,
+} from '../runtime/parse-lst-est-records';
+import {
   parseEstimationOptions,
   type EstimationOptionsStep,
 } from '../runtime/parse-xml-options';
@@ -128,6 +132,15 @@ export interface VariablesContext {
    * (model has no `$COV` record), or parse failed.
    */
   xmlCovarianceOptions: CovarianceOptions | null;
+  /**
+   * Verbatim user-typed `$EST` records from the `.lst`'s embedded
+   * control-stream echo. Index-aligned with `xmlEstimationOptions`
+   * (both 1:1 with chained $EST). Carries information XML loses:
+   * NOABORT vs NOHABORT (XML conflates), and PRINT/POSTHOC/AUTO/
+   * CENTERING/ETABARCHECK/NOSORT (never emitted in XML). Empty when
+   * mod-mode (no .lst) or .lst echo couldn't be extracted.
+   */
+  lstEstRecords: RawEstRecord[];
 }
 
 /** Logger contract — every diagnostic line about the resolution path goes here. */
@@ -170,7 +183,7 @@ async function resolveModMode(
   }
   log(`mod-mode: parsedModel ok — ${parsedModelStatsLine(model)}`);
   const runrecord = await loadRunrecord(uri.fsPath, log);
-  return { model, modUri: uri, fit: null, sumo: null, lst: null, runrecord, prderr: null, fmsg: null, cor: null, cnv: null, trajectories: [], xmlEstimationOptions: [], xmlEstimationResults: [], xmlCovarianceOptions: null };
+  return { model, modUri: uri, fit: null, sumo: null, lst: null, runrecord, prderr: null, fmsg: null, cor: null, cnv: null, trajectories: [], xmlEstimationOptions: [], xmlEstimationResults: [], xmlCovarianceOptions: null, lstEstRecords: [] };
 }
 
 /**
@@ -254,6 +267,12 @@ async function resolveLstMode(
   const xmlEstimationOptions = xmlText ? parseEstimationOptions(xmlText) : [];
   const xmlEstimationResults = xmlText ? parseEstimationResults(xmlText) : [];
   const xmlCovarianceOptions = xmlText ? parseCovarianceOptions(xmlText) : null;
+  // Verbatim `$EST` echoes from the .lst control-stream slice. Carries
+  // user-typed information XML loses (NOABORT vs NOHABORT, PRINT,
+  // POSTHOC, etc.). `extractControlStream` returns null when the .lst
+  // is malformed or truncated; degrade to empty array.
+  const ctrlStream = extractControlStream(lstText);
+  const lstEstRecords = ctrlStream ? parseLstEstRecords(ctrlStream) : [];
   if (!fit) {
     log(`lst-mode: no .ext / unparseable / no final row — pushing init-only`);
   } else {
@@ -280,6 +299,7 @@ async function resolveLstMode(
     xmlEstimationOptions,
     xmlEstimationResults,
     xmlCovarianceOptions,
+    lstEstRecords,
   };
 }
 

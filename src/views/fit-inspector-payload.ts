@@ -21,6 +21,7 @@ import { findNonDefaultKeys, findUserDrivenKeys } from '../runtime/xml-est-defau
 import type { CovarianceOptions } from '../runtime/parse-xml-problem-options';
 import { classifyCovKeys, type CovKeyTier } from '../runtime/xml-cov-defaults';
 import type { EstimationStepResult } from '../runtime/parse-xml-results';
+import type { RawEstRecord } from '../runtime/parse-lst-est-records';
 import type { LstSummary } from '../runtime/parse-lst';
 import type { RunrecordTags } from '../runtime/parse-runrecord';
 import type { SumoSummary } from '../runtime/parse-sumo';
@@ -359,6 +360,13 @@ export interface InspectorDiagnostics {
    * (no highlight). Empty `{}` when no $COV record present.
    */
   xmlCovarianceTiers: Record<string, CovKeyTier>;
+  /**
+   * Verbatim user-typed `$EST` records from the `.lst` control-stream
+   * echo. Index-aligned with `xmlEstimationOptions`. Surfaces info XML
+   * loses: NOABORT/NOHABORT distinction, and tokens never emitted in
+   * XML (PRINT, POSTHOC, AUTO, CENTERING, ETABARCHECK, NOSORT).
+   */
+  lstEstRecords: RawEstRecord[];
 }
 
 export interface InspectorSummary {
@@ -404,6 +412,8 @@ export interface BuildContext {
   xmlEstimationResults?: EstimationStepResult[];
   /** `$COV` option dictionary from `<nm:problem_options>`'s `cov_*` attrs. Null when no `$COV` record. */
   xmlCovarianceOptions?: CovarianceOptions | null;
+  /** Verbatim user-typed `$EST` records from `.lst` echo. Carries info XML loses (NOABORT/NOHABORT, PRINT, POSTHOC, etc.). */
+  lstEstRecords?: RawEstRecord[];
   /** User-configurable shrinkage warn threshold (percent). Default 30 (pharmacometrics convention). */
   shrinkageWarnPct?: number;
   /** RSE% red-bad threshold (uniform across THETA / OMEGA / SIGMA). Default 100. */
@@ -537,6 +547,7 @@ export function buildInspectorPayload(
           xmlEstimationOptions: ctx.xmlEstimationOptions ?? [],
           xmlEstimationResults: ctx.xmlEstimationResults ?? [],
           xmlCovarianceOptions: ctx.xmlCovarianceOptions ?? null,
+          lstEstRecords: ctx.lstEstRecords ?? [],
         })
       : null,
     thresholds: {
@@ -788,6 +799,7 @@ interface BuildDiagnosticsArgs {
   xmlEstimationOptions: EstimationOptionsStep[];
   xmlEstimationResults: EstimationStepResult[];
   xmlCovarianceOptions: CovarianceOptions | null;
+  lstEstRecords: RawEstRecord[];
 }
 
 function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnostics | null {
@@ -803,6 +815,7 @@ function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnostics | nu
     xmlEstimationOptions,
     xmlEstimationResults,
     xmlCovarianceOptions,
+    lstEstRecords,
   } = args;
   const conditionNumber = sumo?.conditionNumber ?? lst.conditionNumber ?? null;
   const eigs = lst.eigenvalues;
@@ -888,6 +901,7 @@ function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnostics | nu
     xmlEstimationResults,
     xmlCovarianceOptions,
     xmlCovarianceTiers,
+    lstEstRecords,
   };
 }
 
