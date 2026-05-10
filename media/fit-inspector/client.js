@@ -861,8 +861,10 @@ function renderEstimationOptions(steps, nonDefaultsPerStep, userDrivenPerStep, p
 // Empirically verified at ~/positron-nonmem/probe-attrs-survey/ on
 // NM 7.6.0. When these appear in the user's verbatim $EST line, the
 // inspector must surface them separately — they are otherwise invisible.
+// PRINT is excluded here because we synthesize a `print` row directly
+// into the main attr table (default 9999 per Bauer's docs); see
+// `synthesizeInvisibleAttrs` below.
 const INVISIBLE_TOKEN_PATTERNS = [
-  /^PRINT=/i,
   /^N?O?POSTHOC$/i,
   /^N?O?CENTERING$/i,
   /^N?O?ETABARCHECK$/i,
@@ -871,6 +873,33 @@ const INVISIBLE_TOKEN_PATTERNS = [
 
 function isInvisibleToken(token) {
   return INVISIBLE_TOKEN_PATTERNS.some((re) => re.test(token));
+}
+
+/**
+ * Doc-default values for $EST options that NM never emits to XML.
+ * Currently only PRINT is doc-defaulted at 9999; others (POSTHOC,
+ * CENTERING, ETABARCHECK, NOSORT) are method-dependent or boolean
+ * with no clean numeric default to surface inline.
+ */
+const INVISIBLE_ATTR_DEFAULTS = {
+  print: '9999',
+};
+
+/**
+ * Build a synthetic-attr overlay for the step from the user's verbatim
+ * $EST tokens. Returns {value, isUserSet} per attr. Used to inject
+ * doc-defaulted invisible options (PRINT) into the main option table.
+ */
+function synthesizeInvisibleAttrs(userTokens) {
+  const out = {};
+  // PRINT: extract user's value if present; default 9999 otherwise.
+  const printToken = userTokens.find((t) => /^PRINT=/i.test(t));
+  if (printToken) {
+    out.print = { value: printToken.split('=')[1] || '', isUserSet: true };
+  } else {
+    out.print = { value: INVISIBLE_ATTR_DEFAULTS.print, isUserSet: false };
+  }
+  return out;
 }
 
 /**
@@ -911,9 +940,8 @@ function renderEstimationOptionsStep(step, stepNum, nonDefaultKeys, userDrivenKe
   const method = step.estimation_method
     ? step.estimation_method.toUpperCase()
     : 'Step ' + stepNum;
-  const count = Object.keys(step).length;
-  sumInner.textContent = 'Step ' + stepNum + ': ' + method
-    + ' (' + count + ' attributes)';
+  // Use the merged-attr count below (after synthesizeInvisibleAttrs)
+  // so the header reflects the actual rendered row count.
   inner.append(sumInner);
 
   // The user's verbatim $EST tokens (from .lst echo) — used to distinguish
@@ -924,9 +952,20 @@ function renderEstimationOptionsStep(step, stepNum, nonDefaultKeys, userDrivenKe
   const userWroteNohabort = userTokens.some((t) => /^NOHABORT$/i.test(t));
   const tolerances = lstTolerances || null;
 
+  // Synthesize doc-defaulted invisible attrs (currently only PRINT)
+  // into the merged option set. Effective view = XML attrs ∪ synthesized.
+  const synthetic = synthesizeInvisibleAttrs(userTokens);
+  const merged = { ...step };
+  for (const k of Object.keys(synthetic)) {
+    merged[k] = synthetic[k].value;
+  }
+  const count = Object.keys(merged).length;
+  sumInner.textContent = 'Step ' + stepNum + ': ' + method
+    + ' (' + count + ' attributes)';
+
   const table = document.createElement('table');
   table.className = 'xml-options-table';
-  const keys = Object.keys(step).sort();
+  const keys = Object.keys(merged).sort();
   for (const k of keys) {
     const tr = document.createElement('tr');
     const tdK = document.createElement('td');
@@ -935,6 +974,19 @@ function renderEstimationOptionsStep(step, stepNum, nonDefaultKeys, userDrivenKe
     const tdV = document.createElement('td');
     let cls = 'xml-options-val';
     let tip;
+    // Synthesized invisible attrs (PRINT) get their own classification
+    // path — the static XML-defaults table doesn't carry them.
+    const synthEntry = synthetic[k];
+    if (synthEntry !== undefined) {
+      if (synthEntry.isUserSet) {
+        cls += ' xml-options-val--user-driven';
+        tip = 'User-typed in $ESTIMATION but NEVER appears in NONMEM\'s XML output (synthesized from .lst echo). Default per Bauer: ' + INVISIBLE_ATTR_DEFAULTS[k] + '.';
+      } else {
+        // Default value — the user didn't set it; we're surfacing the
+        // documented default for transparency.
+        tip = 'Documented default per Bauer (NM never emits this to XML). Synthesized for visibility.';
+      }
+    }
     // Tier resolution order, most specific first:
     //   user-driven → propagated → non-default → default.
     // Propagated tier: value matches PREVIOUS step's value AND user
@@ -942,7 +994,7 @@ function renderEstimationOptionsStep(step, stepNum, nonDefaultKeys, userDrivenKe
     // (NM 7.6.0): explicit user options carry forward across steps;
     // AUTO-implicit values reset. So a "value match without user typing"
     // strongly indicates carry-over from the prior step.
-    if (userDrivenKeys.includes(k)) {
+    else if (userDrivenKeys.includes(k)) {
       cls += ' xml-options-val--user-driven';
       tip = 'User-driven: NONMEM requires this to be set, or it\'s a per-run identity (seed, file, method). Not compared against defaults.';
     } else if (propagatedKeys.includes(k)) {
@@ -955,7 +1007,7 @@ function renderEstimationOptionsStep(step, stepNum, nonDefaultKeys, userDrivenKe
     // Special-case `abort='no'`: XML conflates NOABORT (theta-recovery +
     // some non-PD Hessian forcing) with NOHABORT (PD correction at all
     // levels — more aggressive). Source-of-truth is the .lst echo.
-    if (k === 'abort' && step[k] === 'no') {
+    if (k === 'abort' && merged[k] === 'no') {
       if (userWroteNohabort) {
         tip = 'NOHABORT: positive definite correction at all levels of the estimation. More aggressive than NOABORT — can hide ill-posed problems. (XML wire: abort=\'no\' — same as NOABORT)';
       } else if (userWroteNoabort) {
@@ -968,13 +1020,13 @@ function renderEstimationOptionsStep(step, stepNum, nonDefaultKeys, userDrivenKe
     // trace gives the resolved value. Empirically (NM 7.6.0): atol='0'
     // is a sentinel and the runtime ANRD value lives in
     // .lst's "TOLERANCES FOR ESTIMATION" block.
-    const resolved = resolveEstAttrFromLst(k, step[k], tolerances);
-    if (resolved && resolved !== step[k]) {
-      const note = ' (runtime: ' + resolved + ' — from .lst trace; XML wire \'' + step[k] + '\' is a sentinel)';
+    const resolved = resolveEstAttrFromLst(k, merged[k], tolerances);
+    if (resolved && resolved !== merged[k]) {
+      const note = ' (runtime: ' + resolved + ' — from .lst trace; XML wire \'' + merged[k] + '\' is a sentinel)';
       tip = (tip || '') + note;
     }
     tdV.className = cls;
-    tdV.textContent = fmtXmlOptionValue(step[k]);
+    tdV.textContent = fmtXmlOptionValue(merged[k]);
     if (tip) tdV.title = tip;
     tr.append(tdK, tdV);
     table.append(tr);
