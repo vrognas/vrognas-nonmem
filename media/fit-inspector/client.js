@@ -1116,12 +1116,22 @@ const COV_TIER_TIPS = {
   nonDefault: 'Non-default: differs from the empirical baseline (probed against NM 7.6.0).',
 };
 
-// Doc-default values for $COV options that NM never emits to XML.
-// Boolean-toggle pairs use the NMTRAN `[FLAG|NOFLAG]` convention.
+// Doc-default values for $COV options that NM never (or conditionally)
+// emits to XML. Boolean-toggle pairs use the NMTRAN `[FLAG|NOFLAG]`
+// convention.
+//
+// `special` is a conditional case — bare $COV emits cov_special='no'
+// (visible), but `$COV MATRIX=R` SUPPRESSES it from XML emission
+// (empirically verified at probe-cov-survey/matrix_r, NM 7.6.0). The
+// synthesis is additive (only adds when XML doesn't carry the key) so
+// we surface SPECIAL even when MATRIX=R hides it. Bauer's doc warning
+// "MATRIX=R should not be used with SPECIAL" is reflected via a tooltip
+// annotation on the synthesized row.
 const INVISIBLE_COV_DEFAULTS = {
   conditional: 'yes',     // CONDITIONAL is default; UNCONDITIONAL is the toggle
   parafile: 'OFF',        // PARAFILE=OFF default per Bauer
   parafprint: '1',        // PARAFPRINT=1 default
+  special: 'no',          // suppressed from XML when MATRIX=R; surface here
 };
 
 const INVISIBLE_COV_TOKEN_PATTERNS = {
@@ -1131,12 +1141,18 @@ const INVISIBLE_COV_TOKEN_PATTERNS = {
   ],
   parafile: [{ re: /^PARAFILE=/i, value: null /* extract from `=` */ }],
   parafprint: [{ re: /^PARAFPRINT=/i, value: null }],
+  special: [{ re: /^SPECIAL$/i, value: 'yes' }],
 };
 
 /**
  * Build synthetic-attr overlay for the $COV step. Surfaces options NM
  * never emits to XML (CONDITIONAL, PARAFILE, PARAFPRINT) with their
- * documented defaults or the user's value when typed.
+ * documented defaults or the user's value when typed. Includes
+ * `special` (conditionally emitted: suppressed by MATRIX=R per NM
+ * 7.6.0 empirical).
+ *
+ * Caller decides whether to merge additively (only fill missing keys)
+ * or overwrite — see `renderCovarianceOptions`.
  */
 function synthesizeInvisibleCovAttrs(covTokens) {
   const out = {};
@@ -1165,13 +1181,22 @@ function renderCovarianceOptions(opts, tierMap, resolvedMap, lstTolerances, lstC
   outer.className = 'xml-options';
   const sumOuter = document.createElement('summary');
 
-  // Synthesize invisible $COV options (CONDITIONAL, PARAFILE, PARAFPRINT).
+  // Synthesize invisible $COV options. ADDITIVE merge — only fills
+  // keys missing from XML (e.g. cov_special when MATRIX=R suppresses
+  // it). When XML carries the key, trust the wire value.
   const covTokens = lstCovRecord && lstCovRecord.tokens ? lstCovRecord.tokens : [];
   const synthetic = synthesizeInvisibleCovAttrs(covTokens);
   const merged = { ...opts };
+  // Track which keys were FILLED by synthesis (vs. present in XML) so
+  // the renderer can decide whether to apply quirk annotations.
+  const filledBySynthesis = new Set();
   for (const k of Object.keys(synthetic)) {
-    merged[k] = synthetic[k].value;
+    if (!(k in merged)) {
+      merged[k] = synthetic[k].value;
+      filledBySynthesis.add(k);
+    }
   }
+  const matrixIsR = merged.matrix === 'r';
   const count = Object.keys(merged).length;
   sumOuter.textContent = '$COV options (XML, exhaustive — ' + count + ' attributes)';
   outer.append(sumOuter);
@@ -1192,15 +1217,25 @@ function renderCovarianceOptions(opts, tierMap, resolvedMap, lstTolerances, lstC
     // mirroring $EST. Falls back to the legacy 3-tier scheme when the
     // V2 tier-map isn't populated for this key.
     const synthEntry = synthetic[k];
-    if (synthEntry !== undefined) {
+    // Apply synthesis-tier only when XML didn't already carry this key
+    // (additive merge). For `special` specifically, XML carries it
+    // unless MATRIX=R suppresses it; in the present-in-XML case fall
+    // through to the V2 tier-map.
+    if (synthEntry !== undefined && filledBySynthesis.has(k)) {
       if (synthEntry.isUserSet) {
         const matchesDocDefault = synthEntry.value === INVISIBLE_COV_DEFAULTS[k];
         cls += matchesDocDefault
           ? ' xml-options-val--explicit-default'
           : ' xml-options-val--explicit';
-        tip = 'User-typed on $COV (NM never emits this to XML; synthesized from .lst echo). Default per Bauer: ' + INVISIBLE_COV_DEFAULTS[k] + (matchesDocDefault ? ' — matches default.' : '.');
+        tip = 'User-typed on $COV (NM didn\'t emit this to XML for this run; synthesized from .lst echo). Default per Bauer: ' + INVISIBLE_COV_DEFAULTS[k] + (matchesDocDefault ? ' — matches default.' : '.');
+        // MATRIX=R + SPECIAL quirk: NM silently suppresses SPECIAL when
+        // MATRIX=R is in effect. The user typed it; NM ignored it.
+        // Bauer warns "MATRIX=R should not be used with SPECIAL".
+        if (k === 'special' && matrixIsR) {
+          tip += ' WARNING: NM silently ignores SPECIAL when MATRIX=R is used (empirically verified, NM 7.6.0; Bauer\'s docs warn against this combination). Setting has no effect.';
+        }
       } else {
-        tip = 'Documented default per Bauer (NM never emits this to XML). Synthesized for visibility.';
+        tip = 'Documented default per Bauer (NM didn\'t emit this to XML). Synthesized for visibility.';
       }
     } else {
       const tierV2 = tiersV2 && tiersV2[k];

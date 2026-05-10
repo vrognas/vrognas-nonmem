@@ -7,6 +7,12 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **feat: $COV quirk handling — MATRIX=R suppresses SPECIAL (v0.0.186).** Empirically probed (NM 7.6.0) to verify the two `$COV` quirks called out previously and applied tier-aware treatment:
+
+  - **ATOL "only with SIGL" quirk: empirically FALSE.** Probe at `~/positron-nonmem/probe-cov-quirks/atol_alone` — `$COV ATOL=5` (no SIGL/SIGLO) emitted `cov_atol='5'` AND the `.lst` "TOLERANCES FOR COVARIANCE STEP" line shows `ANRD=5`. Bauer's doc claim "ATOL is changed for the $COV step only if SIGL and/or SIGLO are also specified" is wrong (or outdated) at NM 7.6.0. No fix needed; ATOL works as written. Documented in empirical-notes.
+
+  - **MATRIX=R suppresses `cov_special` (only that one attr).** Empirically verified: `$COV MATRIX=R + ATOL=5 + CHOLROFF=1` still emits `cov_atol='5'` and `cov_cholroff='1'` and they take effect at runtime. Only `cov_special` is suppressed when MATRIX=R. Bauer warns "MATRIX=R should not be used with SPECIAL" — NM's response is to silently drop SPECIAL. The Fit Inspector now adds `cov_special` to the invisible-options synthesis (additive merge — only fills when XML lacks the key, so bare $COV's XML-emitted `cov_special='no'` is still preferred). When the user typed `SPECIAL` on `$COV` AND `cov_matrix='r'` is in effect, the synthesized row appends a WARNING tooltip: "NM silently ignores SPECIAL when MATRIX=R is used (empirically verified, NM 7.6.0; Bauer's docs warn against this combination)."
+
 - **feat: unified $COV tier scheme + invisible options + .lst $COV echo (v0.0.185).** Brings $COV options to feature-parity with the v0.0.181 $EST recoloring + the v0.0.180 PRINT synthesis. Three parts:
 
   (1) **`.lst $COV` echo parser**: `parseLstCovRecord(stream)` extracts the user's verbatim `$COVARIANCE` line (NONMEM permits at most one $COV per problem). Reuses the generic record-extraction machinery from `parseLstEstRecords` via a new private helper. Handles `$COV` / `$COVR` / `$COVARIANCE` aliases.

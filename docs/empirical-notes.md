@@ -634,3 +634,43 @@ CTYPE) — step 2 has ctype=3.
 Verified 2026-05-10 against NONMEM 7.6.0 on Linux via probes at
 `~/positron-nonmem/probe-chains-v2/` (auto1_then_auto0 is the canonical case)
 and `~/positron-nonmem/probe-chains-exhaustive/` (18-probe matrix).
+
+## `$COV` quirks — MATRIX=R suppresses SPECIAL only (NM 7.6.0)
+
+**Expectation.** Bauer's `$COVARIANCE ATOL` doc says "ATOL is changed for the $COV
+step only if SIGL and/or SIGLO are also specified at the $COV record." So
+`$COV ATOL=5` without SIGL/SIGLO should leave ANRD at the default (12).
+Separately Bauer's `MATRIX=R` doc warns "MATRIX=R should not be used with option
+SPECIAL" without saying what NM does when both are present.
+
+**Probes.** `~/positron-nonmem/probe-cov-quirks/` (4 probes) and
+`~/positron-nonmem/probe-matrix-r-atol/` (1 probe). Each combines $COV options
+that the docs flag as interaction-sensitive and inspects (a) the resulting
+`cov_*` XML attrs and (b) the `.lst` "TOLERANCES FOR COVARIANCE STEP" block.
+
+**Outcomes.**
+
+1. **`$COV ATOL=5` alone (no SIGL/SIGLO) DOES take effect.** Probe `atol_alone`:
+   XML emits `cov_atol='5'` AND `.lst` shows `ANRD=5`. The doc claim is wrong (or
+   outdated). No quirk to flag; ATOL works as written regardless of SIGL/SIGLO.
+2. **`$COV MATRIX=R` suppresses `cov_special` from XML** (only). Probe `matrix_r`:
+   `cov_special` is absent from the XML attr set. The other attrs (`cov_atol`,
+   `cov_cholroff`, `cov_siglcov`, `cov_siglocov`, etc.) are still emitted.
+3. **`$COV MATRIX=R + ATOL=5 + CHOLROFF=1`** still emits `cov_atol='5'` AND
+   `cov_cholroff='1'`, AND the `.lst` trace confirms `ANRD=5`. So ATOL/CHOLROFF
+   take effect even with MATRIX=R.
+4. **`$COV MATRIX=R + SPECIAL`** silently ignores SPECIAL. NM doesn't raise an
+   error or warn; `cov_special` is simply absent from XML, and the runtime
+   behaves as if SPECIAL weren't typed.
+
+**Implication for the Fit Inspector.**
+
+- ATOL "only with SIGL" rule isn't really a rule. No tooltip / quirk annotation
+  needed.
+- `cov_special` synthesis (v0.0.186+): added to the invisible-options overlay
+  in `client.js`. When the `.lst` $COV echo shows the user typed SPECIAL but
+  MATRIX=R suppressed cov_special, the synthesized row flags the user's intent
+  + appends a tooltip warning: "NM silently ignores SPECIAL when MATRIX=R is
+  used."
+
+Verified 2026-05-11 against NONMEM 7.6.0 on Linux via the probes above.
