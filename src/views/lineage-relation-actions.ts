@@ -20,6 +20,7 @@ import { computeNextModelName, promoteEstimates } from '../runtime/promote-estim
 import { scrubPrivate } from '../scrub';
 import { discoverLineage, readNamedLineages } from './lineage-discovery';
 import { wouldOverrideCreateCycle, type LineageGraph } from './lineage-graph';
+import { toSettingPath } from './lineage-paths';
 
 export interface RelationActionDeps {
   log: Logger;
@@ -70,7 +71,10 @@ export async function writeOverride(
   const config = vscode.workspace.getConfiguration('nonmem');
   const current = config.get<Record<string, string | null>>('lineageOverrides') ?? {};
   const next: Record<string, string | null> = { ...current };
-  next[childPath] = parentPath;
+  // Store workspace-relative when possible so settings.json doesn't leak
+  // the absolute /home/<user>/… or remote-FS prefix. Reads handle both
+  // forms (see lineage-paths.ts).
+  next[toSettingPath(childPath)] = parentPath === null ? null : toSettingPath(parentPath);
   try {
     await config.update('lineageOverrides', next, vscode.ConfigurationTarget.Workspace);
     deps.log(`lineage-panel: set parent of ${childBasename} → ${parentPath ?? '(none)'}`);
@@ -92,6 +96,7 @@ export async function setParent(
     title: `Set parent of ${childBasename}`,
     placeHolder: 'Pick a parent run (or "none" to make this a root)',
     excludePath: childPath,
+    priorityPaths: priorityPathsForLineage(deps.currentLineage),
     noneOption: {
       label: '$(circle-slash) (none — make this a root)',
       description: 'remove the parent link',
@@ -115,6 +120,7 @@ export async function createRelation(
     title: `Create relation: ${originBasename} ↔ …`,
     placeHolder: 'Pick the other run',
     excludePath: originPath,
+    priorityPaths: priorityPathsForLineage(deps.currentLineage),
   });
   if (!partner || !partner.modelPath) return;
   interface DirectionItem extends vscode.QuickPickItem {
@@ -226,11 +232,13 @@ export async function removeFromLineage(
 
 /**
  * Write the named-lineages map back to workspace settings. Map → record
- * conversion preserves insertion order of the dropdown.
+ * conversion preserves insertion order of the dropdown. Paths are
+ * stored workspace-relative when possible (privacy hygiene — see
+ * `lineage-paths.ts`).
  */
 export async function writeLineages(map: Map<string, string[]>): Promise<void> {
   const obj: Record<string, string[]> = {};
-  for (const [name, runs] of map) obj[name] = runs;
+  for (const [name, runs] of map) obj[name] = runs.map(toSettingPath);
   try {
     await vscode.workspace
       .getConfiguration('nonmem')
@@ -304,6 +312,21 @@ function quickPickItemForRun(n: {
 }
 
 /**
+ * Resolve the priority-path set for the current curated lineage.
+ * Returns `undefined` when no lineage is active (sentinel empty string
+ * = "All Runs") — picker shows the flat sorted list in that case.
+ * Otherwise returns the set of modelPaths in the named lineage, used
+ * by `pickRunFromGraph` to surface them above a Separator before the
+ * rest of the workspace.
+ */
+function priorityPathsForLineage(currentLineage: string): ReadonlySet<string> | undefined {
+  if (!currentLineage) return undefined;
+  const named = readNamedLineages();
+  const paths = named.get(currentLineage);
+  return paths ? new Set(paths) : undefined;
+}
+
+/**
  * Shared QuickPicker for "pick another run from this workspace" — the
  * common shape behind `setParent`, `createRelation`, and any future
  * relation-edit action. Returns the picked item (with `modelPath`
@@ -311,6 +334,12 @@ function quickPickItemForRun(n: {
  * or null when the user dismissed the picker. Shows an info toast
  * instead of an empty picker when there are no other runs AND the
  * caller didn't supply a `noneOption`.
+ *
+ * When `priorityPaths` is supplied (the active curated lineage's
+ * member set), items in that set appear FIRST, then a `Separator`,
+ * then the rest of the workspace — addresses 6th-review L4 by
+ * promoting in-lineage runs while keeping cross-lineage edits one
+ * extra scroll away rather than gating them behind a mode switch.
  */
 async function pickRunFromGraph(
   log: (m: string) => void,
@@ -319,6 +348,7 @@ async function pickRunFromGraph(
     placeHolder: string;
     excludePath: string;
     noneOption?: { label: string; description?: string };
+    priorityPaths?: ReadonlySet<string>;
   },
 ): Promise<PickedRun | null> {
   const { graph } = await discoverLineage(log);
@@ -332,6 +362,9 @@ async function pickRunFromGraph(
   interface Item extends vscode.QuickPickItem {
     modelPath: string | null;
   }
+  const sortedItems: Item[] = others
+    .map((n): Item => ({ modelPath: n.modelPath, ...quickPickItemForRun(n) }))
+    .sort((a, b) => a.label.localeCompare(b.label));
   const items: Item[] = [];
   if (opts.noneOption) {
     items.push({
@@ -340,16 +373,37 @@ async function pickRunFromGraph(
       description: opts.noneOption.description,
     });
   }
-  items.push(
-    ...others
-      .map((n): Item => ({ modelPath: n.modelPath, ...quickPickItemForRun(n) }))
-      .sort((a, b) => a.label.localeCompare(b.label)),
-  );
+  if (opts.priorityPaths && opts.priorityPaths.size > 0) {
+    const inLineage = sortedItems.filter((it) => opts.priorityPaths!.has(it.modelPath!));
+    const outside = sortedItems.filter((it) => !opts.priorityPaths!.has(it.modelPath!));
+    if (inLineage.length > 0) {
+      items.push({
+        modelPath: null,
+        label: 'In this lineage',
+        kind: vscode.QuickPickItemKind.Separator,
+      });
+      items.push(...inLineage);
+    }
+    if (outside.length > 0) {
+      items.push({
+        modelPath: null,
+        label: 'Other workspace runs',
+        kind: vscode.QuickPickItemKind.Separator,
+      });
+      items.push(...outside);
+    }
+  } else {
+    items.push(...sortedItems);
+  }
   const pick = await vscode.window.showQuickPick(items, {
     title: opts.title,
     placeHolder: opts.placeHolder,
     matchOnDescription: true,
     matchOnDetail: true,
   });
-  return pick ? { modelPath: pick.modelPath, label: pick.label } : null;
+  // Separators come back as `pick` too but have null `modelPath`. The
+  // picker won't actually let the user select a Separator (VS Code
+  // skips them), but defensively filter just in case.
+  if (!pick || pick.kind === vscode.QuickPickItemKind.Separator) return null;
+  return { modelPath: pick.modelPath, label: pick.label };
 }

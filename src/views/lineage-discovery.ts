@@ -23,6 +23,7 @@ import { loadExtFitForLst } from '../runtime/load-ext-fit';
 import { parseLst } from '../runtime/parse-lst';
 import { parseRunrecord } from '../runtime/parse-runrecord';
 import { extractRunNumber } from '../runtime/promote-estimates';
+import { fromSettingPath } from './lineage-paths';
 import {
   buildLineageGraph,
   type LineageGraph,
@@ -160,15 +161,21 @@ export async function discoverLineage(
 
 /**
  * Read `positronNonmem.lineages` workspace setting. Shape:
- *   { "<name>": ["/abs/run001.mod", "/abs/run002.mod", ...] }
- * Empty map when unset.
+ *   { "<name>": ["<rel-or-abs-path>", ...] }
+ * Paths stored workspace-relative when possible (see `lineage-paths.ts`);
+ * legacy absolute entries pass through. Both forms resolve to absolute
+ * at read time. Empty map when unset.
  */
 export function readNamedLineages(): Map<string, string[]> {
   try {
     const raw =
       vscode.workspace.getConfiguration('nonmem').get<Record<string, string[]>>('lineages') ??
       {};
-    return new Map(Object.entries(raw));
+    const out = new Map<string, string[]>();
+    for (const [name, paths] of Object.entries(raw)) {
+      out.set(name, paths.map(fromSettingPath));
+    }
+    return out;
   } catch {
     return new Map();
   }
@@ -193,8 +200,11 @@ export function readLineageOfvThreshold(): number {
 
 /**
  * Read `positronNonmem.lineageOverrides` workspace setting. Shape:
- *   { "<absolute-child-mod-path>": "<absolute-parent-mod-path>" | null }
- * Empty map when unset / not in a workspace.
+ *   { "<child-mod-path>": "<parent-mod-path>" | null }
+ * Paths are stored workspace-relative when possible (privacy hygiene
+ * — see `lineage-paths.ts`); legacy absolute entries pass through.
+ * Both forms resolve to absolute at read time so downstream comparisons
+ * against `LineageNode.modelPath` stay simple. Empty map when unset.
  */
 function readLineageOverrides(): Map<string, string | null> {
   try {
@@ -202,7 +212,11 @@ function readLineageOverrides(): Map<string, string | null> {
       vscode.workspace
         .getConfiguration('nonmem')
         .get<Record<string, string | null>>('lineageOverrides') ?? {};
-    return new Map(Object.entries(raw));
+    const out = new Map<string, string | null>();
+    for (const [k, v] of Object.entries(raw)) {
+      out.set(fromSettingPath(k), v === null ? null : fromSettingPath(v));
+    }
+    return out;
   } catch {
     return new Map();
   }

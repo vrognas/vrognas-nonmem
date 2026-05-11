@@ -7,6 +7,19 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **fix: 6th-review remaining items — FIR6/FIR7/L4 + settings-path privacy (v0.0.202).** Closes the four deferred items from the 6th-review backlog.
+
+  **FIR6 — `tuneGridColumns` rAF trade-off documented** (`media/fit-inspector/client.js`): the per-slider-tick measure pass forces one synchronous layout per frame; ResizeObserver wouldn't help (it triggers on container size, not content width). Single-digit ms per frame at ≤20 params (pharm ceiling). Expanded the docstring with the trade-off analysis + the future-optimisation path (cache `colWidth` and skip Phase 2 when within 5px of the cached value).
+
+  **FIR7 — defensive guard on `shrinkSdByIndex[r.index - 1]`** (`media/fit-inspector/client.js:1933`): added explicit `typeof r.index === 'number' && r.index >= 1` check before the array access. Without it, a contract-violating `null` or `0` would index `[-1]` → undefined → silent data loss in `fmtShrinkage`. The check costs nothing and surfaces the violation as an em-dash rather than swallowing it.
+
+  **L4 — curated-lineage priority in picker** (`src/views/lineage-relation-actions.ts`): `pickRunFromGraph` now accepts an optional `priorityPaths: ReadonlySet<string>`. When set (computed by `priorityPathsForLineage(deps.currentLineage)`), the picker splits into two sections with VS Code `QuickPickItemKind.Separator` headings — "In this lineage" first, then "Other workspace runs" below. Cross-lineage relation edits still work (no behaviour gate); curated-lineage members just get UX priority. Threaded through both `setParent` and `createRelation`.
+
+  **Settings.json absolute-path side-channel — workspace-relative storage** (new `src/views/lineage-paths.ts`, `toSettingPath` / `fromSettingPath`): the workspace settings `positronNonmem.lineageOverrides` and `positronNonmem.lineages` previously stored absolute paths, which embedded `/home/<user>/…` or remote-FS layout. Settings files commonly get committed / shared for support; the absolute form was a privacy side-channel CLAUDE.md treats as load-bearing.
+    - **Write side**: `vscode.workspace.asRelativePath(p, false)` converts to workspace-relative when `p` is inside any workspace folder; absolute otherwise. Applied in `writeOverride` (child + parent paths) and `writeLineages` (each run path).
+    - **Read side**: `fromSettingPath(stored)` resolves relative paths against the first workspace folder (single-folder is the common case); absolute paths pass through unchanged. Applied in `readLineageOverrides` and `readNamedLineages`.
+    - **Migration**: backward-compatible. Legacy absolute entries on disk keep working (passed through on read); the first user edit of any entry rewrites it to relative form. No one-shot bulk migration; entries migrate organically as edits happen.
+
 - **refactor: FIR5 — extract `buildEstAttrCell` + `buildCovAttrCell` (v0.0.201).** Decomposed the ~155-LOC inner-loop tooltip-assembly in `renderEstimationOptionsStep` and the parallel ~60-LOC inner loop in `renderCovarianceOptions`. Both inner loops now collapse to ~15 lines (tr/td DOM build + one helper call); the SOLID single-responsibility violation flagged in the 6th review is addressed.
 
   - New `TIER_TIPS = { est: {...}, cov: {...} }` constant — per-scope wording for the three-tier classification (explicit / explicitDefault / implicit) plus the synth-user / synth-doc strings. Single source of tier-tip text.

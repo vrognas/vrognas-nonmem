@@ -460,6 +460,18 @@ function renderTrajectoryStep(t, xmlResult, stepOpts, methodKind) {
   // `renderPlots` does a full grid rebuild + measure pass — running
   // it on every event during a fast drag is wasteful. Coalesce so
   // at most one render runs per animation frame.
+  //
+  // Trade-off acknowledged (6th-review FIR6): the measure pass inside
+  // `tuneGridColumns` forces one synchronous layout per frame because
+  // trace-suffix widths shift with the iteration window (early iters
+  // print wider OFVs). At ≤20 params per model — the pharmacometric
+  // ceiling — this is single-digit ms per frame and unnoticeable on
+  // modern hardware. ResizeObserver wouldn't help: it triggers on
+  // container size change, not content width change. If we ever need
+  // to optimise further, the right move is caching colWidth across
+  // ticks and skipping Phase 2 when the new measurement is ≤5px wider
+  // than the cached value — keeps the visible width stable for tiny
+  // value drift.
   let pendingFrame = false;
   slider.addEventListener('input', () => {
     const idx = Number(slider.value);
@@ -1930,7 +1942,15 @@ function renderSection(title, rows, hasFit, kind, showLabel = true) {
       base.push(null);
       return base;
     }
-    const shrink = matrixIsDiagonal(r.name) ? shrinkSdByIndex[r.index - 1] : undefined;
+    // Diagonal-only + valid 1-based index defended. `r.index` should
+    // always be set for diagonal rows (payload contract), but a
+    // contract-violating null/0 would silently look up `[-1]` →
+    // undefined → fmtShrinkage drops it as non-finite. No crash, but
+    // silent data loss is worse than visible em-dash. Guard explicitly.
+    const shrink =
+      matrixIsDiagonal(r.name) && typeof r.index === 'number' && r.index >= 1
+        ? shrinkSdByIndex[r.index - 1]
+        : undefined;
     base.push(fmtShrinkage(shrink));
     return base;
   };
