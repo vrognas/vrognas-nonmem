@@ -400,6 +400,14 @@ export interface InspectorDiagnostics {
    */
   lstEstRecords: RawEstRecord[];
   /**
+   * Verbatim user-typed `$COV` record from the `.lst` control-stream
+   * echo. Null when no $COV present. Surfaces tokens NM never emits to
+   * XML (CONDITIONAL/UNCONDITIONAL, PARAFILE, PARAFPRINT, SPECIAL) —
+   * without it the WebView falls back to synthesised doc-defaults and
+   * misreports user-typed UNCONDITIONAL as default CONDITIONAL='yes'.
+   */
+  lstCovRecord: RawEstRecord | null;
+  /**
    * Runtime-resolved tolerance / sig-digits values from the `.lst`'s
    * trace blocks. Used by the inspector to show "wire vs runtime"
    * annotations (e.g. `atol='0'` → ANRD=12 from BASE TOLERANCE block).
@@ -1042,6 +1050,7 @@ function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnostics | nu
     xmlCovarianceTiers,
     xmlCovarianceResolved,
     lstEstRecords,
+    lstCovRecord,
     lstTolerances,
     hasOde,
     hasLevel,

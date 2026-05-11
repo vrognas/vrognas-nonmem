@@ -7,6 +7,8 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **fix: `lstCovRecord` not shipped to WebView — UNCONDITIONAL misrendered as default (v0.0.203).** User reported `$COVARIANCE PRINT=E UNCONDITIONAL` showing as "Conditional: Yes" in the Fit Inspector. Root cause: `lstCovRecord` was destructured + used internally in `buildDiagnostics` (to compute `xmlCovarianceTiers` via `classifyCovStep`) but never included in the returned `InspectorDiagnostics` object. The WebView's `renderCovarianceOptions` received `undefined` for the cov record, so `covTokens = []`, the UNCONDITIONAL pattern never matched, and the synthesiser fell back to the doc-default `conditional: 'yes'`. Added `lstCovRecord: RawEstRecord | null` to the `InspectorDiagnostics` interface and to the return object. The tier classification was already correct; only the WebView-side synthesis was misled by the missing field. Caught on the 7th-review pass by user empirical observation rather than by the reviewer — flagged as a coverage gap (fit-inspector-payload's diagnostic returns lacked round-trip tests for $COV-specific fields).
+
 - **fix: 6th-review remaining items — FIR6/FIR7/L4 + settings-path privacy (v0.0.202).** Closes the four deferred items from the 6th-review backlog.
 
   **FIR6 — `tuneGridColumns` rAF trade-off documented** (`media/fit-inspector/client.js`): the per-slider-tick measure pass forces one synchronous layout per frame; ResizeObserver wouldn't help (it triggers on container size, not content width). Single-digit ms per frame at ≤20 params (pharm ceiling). Expanded the docstring with the trade-off analysis + the future-optimisation path (cache `colWidth` and skip Phase 2 when within 5px of the cached value).
