@@ -10,13 +10,8 @@
 
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { COMMAND } from '../constants';
-import { formatNumberCompact } from '../format-number';
-import { parentDirName } from '../fs-utils';
 import { errMsg, type Logger } from '../log-utils';
 import type { Runner } from '../runner';
-import { computeNextModelName, promoteEstimates } from '../runtime/promote-estimates';
-import { scrubPrivate } from '../scrub';
 import {
   discoverLineage,
   findStaleOverrides,
@@ -24,7 +19,18 @@ import {
   readNamedLineages,
 } from './lineage-discovery';
 import { loadEdgeIOfvSummary } from './lineage-edge-iofv';
-import { wouldOverrideCreateCycle, type LineageGraph } from './lineage-graph';
+import type { LineageGraph } from './lineage-graph';
+import {
+  addToLineage,
+  createRelation,
+  promoteFromPath,
+  removeFromLineage,
+  setParent,
+  writeLineages,
+  writeOverride,
+  type RelationActionDeps,
+} from './lineage-relation-actions';
+import { buildWebviewShell } from './webview-shell';
 
 /** Special selector value meaning "show every run in the workspace". */
 const ALL_RUNS_SELECTION = '';
@@ -163,20 +169,16 @@ export class LineagePanel {
       // already chose both endpoints); `createRelation` does a two-
       // step picker (partner run, then "set as parent" / "as child").
       if (m.action === 'open') return this.openModel(m.modelPath);
-      if (m.action === 'promote') return this.promoteFromPath(m.modelPath);
-      if (m.action === 'setParent') return this.setParent(m.modelPath, m.basename ?? '');
-      if (m.action === 'createRelation') {
-        return this.createRelation(m.modelPath, m.basename ?? '');
-      }
-      if (m.action === 'setParentDirect' && typeof m.parentModelPath === 'string') {
-        return this.writeOverride(m.modelPath, m.parentModelPath, m.basename ?? '');
-      }
-      if (m.action === 'addToLineage') {
-        return this.addToLineage(m.modelPath, m.basename ?? '');
-      }
-      if (m.action === 'removeFromLineage') {
-        return this.removeFromLineage(m.modelPath, m.basename ?? '');
-      }
+      const deps = this.actionDeps();
+      if (m.action === 'promote') return promoteFromPath(deps, m.modelPath);
+      if (m.action === 'setParent') return setParent(deps, m.modelPath, m.basename ?? '');
+      if (m.action === 'createRelation')
+        return createRelation(deps, m.modelPath, m.basename ?? '');
+      if (m.action === 'setParentDirect' && typeof m.parentModelPath === 'string')
+        return writeOverride(deps, m.modelPath, m.parentModelPath, m.basename ?? '');
+      if (m.action === 'addToLineage') return addToLineage(deps, m.modelPath, m.basename ?? '');
+      if (m.action === 'removeFromLineage')
+        return removeFromLineage(deps, m.modelPath, m.basename ?? '');
     } else if (m.type === 'refresh') {
       void this.refresh();
     } else if (m.type === 'ready') {
@@ -321,129 +323,21 @@ export class LineagePanel {
   }
 
   /**
-   * Promote estimates without an ActiveRun shape — just a model path.
-   * Mirrors the body of `extension.ts:promoteEstimatesCommand` so the
-   * lineage entry point produces the same result (default name from
-   * `computeNextModelName`, name-prompt input box, refresh runs tree
-   * on success). Errors are scrubbed before display because PsN's
-   * stderr can carry hostnames / user paths.
+   * Build a deps snapshot for the action functions in
+   * `lineage-relation-actions.ts`. Called at each dispatch so reads of
+   * `lastGraph` / `currentLineage` reflect the freshest state.
    */
-  /**
-   * Right-click → "Set parent…" workflow. Re-runs discovery to get
-   * the current node list, presents a QuickPick of every OTHER run
-   * (so the user can pick any to be the parent regardless of name —
-   * `run<NNN>` and Pirana / hand-rolled names both qualify), and
-   * writes the choice to `positronNonmem.lineageOverrides` workspace
-   * setting. The picker disambiguates same-basename runs in different
-   * folders by showing the parent-dir name in the description and
-   * the full path in the detail line.
-   *
-   * Picking the "(none — make this a root)" entry writes `null` so
-   * the override forces the child to be a root regardless of any
-   * `;; Based on:` marker in the file.
-   */
-  private async setParent(childPath: string, childBasename: string): Promise<void> {
-    const pick = await pickRunFromGraph(this.log, {
-      title: `Set parent of ${childBasename}`,
-      placeHolder: 'Pick a parent run (or "none" to make this a root)',
-      excludePath: childPath,
-      noneOption: {
-        label: '$(circle-slash) (none — make this a root)',
-        description: 'remove the parent link',
+  private actionDeps(): RelationActionDeps {
+    return {
+      log: this.log,
+      runner: this.runner,
+      lastGraph: this.lastGraph,
+      currentLineage: this.currentLineage,
+      refresh: () => this.refresh(),
+      setCurrentLineage: (name) => {
+        this.currentLineage = name;
       },
-    });
-    if (!pick) return;
-    await this.writeOverride(childPath, pick.modelPath, childBasename);
-  }
-
-  /**
-   * "Create relation…" — clicked-driven counterpart to drag-and-drop.
-   * Two-step picker: pick a partner run, then choose whether the
-   * starting node should be that partner's parent or child. Writes
-   * the override via `writeOverride`. Surfaces in the right-click
-   * menu so the action is keyboard-navigable (drag isn't).
-   */
-  private async createRelation(originPath: string, originBasename: string): Promise<void> {
-    const partner = await pickRunFromGraph(this.log, {
-      title: `Create relation: ${originBasename} ↔ …`,
-      placeHolder: 'Pick the other run',
-      excludePath: originPath,
-    });
-    if (!partner || !partner.modelPath) return;
-    interface DirectionItem extends vscode.QuickPickItem {
-      direction: 'asParent' | 'asChild';
-    }
-    const directionItems: DirectionItem[] = [
-      {
-        direction: 'asParent',
-        label: `$(arrow-up) Set ${partner.label} as parent of ${originBasename}`,
-        description: `${originBasename}.basedOn = ${partner.label}`,
-      },
-      {
-        direction: 'asChild',
-        label: `$(arrow-down) Set ${partner.label} as child of ${originBasename}`,
-        description: `${partner.label}.basedOn = ${originBasename}`,
-      },
-    ];
-    const directionPick = await vscode.window.showQuickPick(directionItems, {
-      title: 'Pick direction',
-      placeHolder: 'Which way is the relation?',
-    });
-    if (!directionPick) return;
-    if (directionPick.direction === 'asParent') {
-      await this.writeOverride(originPath, partner.modelPath, originBasename);
-    } else {
-      await this.writeOverride(partner.modelPath, originPath, partner.label);
-    }
-  }
-
-  /**
-   * Write `positronNonmem.lineageOverrides[childPath] = parentPath`
-   * (or `null` for "make this a root"). Shared write path for all
-   * three relation-edit entry points: `setParent` QuickPick,
-   * `createRelation` two-step picker, and drag-to-drop.
-   *
-   * Pre-flight cycle check: if the proposed override would close a loop
-   * with the current edges, refuse the write and toast the user.
-   * `buildLineageGraph` would otherwise drop both endpoints to roots
-   * (cycle handling), leaving the user with a fragmented tree and no
-   * explanation. The check uses `lastGraph` — if we haven't refreshed
-   * yet (shouldn't happen after the constructor's first refresh), skip
-   * the check rather than block on a missing snapshot.
-   */
-  private async writeOverride(
-    childPath: string,
-    parentPath: string | null,
-    childBasename: string,
-  ): Promise<void> {
-    if (
-      parentPath !== null &&
-      this.lastGraph &&
-      wouldOverrideCreateCycle(this.lastGraph.edges, childPath, parentPath)
-    ) {
-      void vscode.window.showWarningMessage(
-        `Positron NONMEM: setting that parent for ${childBasename} would create a cycle in the lineage. No change made.`,
-      );
-      this.log(
-        `lineage-panel: refused cycle-creating override ${childBasename} → ${parentPath}`,
-      );
-      return;
-    }
-    const config = vscode.workspace.getConfiguration('nonmem');
-    const current = config.get<Record<string, string | null>>('lineageOverrides') ?? {};
-    const next: Record<string, string | null> = { ...current };
-    next[childPath] = parentPath;
-    try {
-      await config.update('lineageOverrides', next, vscode.ConfigurationTarget.Workspace);
-      this.log(
-        `lineage-panel: set parent of ${childBasename} → ${parentPath ?? '(none)'}`,
-      );
-      void this.refresh();
-    } catch (e) {
-      void vscode.window.showErrorMessage(
-        `Positron NONMEM: couldn't save parent override: ${errMsg(e)}`,
-      );
-    }
+    };
   }
 
   /**
@@ -463,124 +357,9 @@ export class LineagePanel {
       },
     });
     if (!name) return;
-    await this.writeLineages(new Map(existing).set(name.trim(), []));
+    await writeLineages(new Map(existing).set(name.trim(), []));
     this.currentLineage = name.trim();
     void this.refresh();
-  }
-
-  /**
-   * Right-click → "Add to lineage…" — pick (or create) a named
-   * lineage and append the run's modelPath to its set. Switches the
-   * current view to that lineage so the user sees the result.
-   */
-  private async addToLineage(modelPath: string, basename: string): Promise<void> {
-    const existing = readNamedLineages();
-    interface Item extends vscode.QuickPickItem {
-      // `kind` collides with VS Code's QuickPickItemKind union type;
-      // use `mode` to side-step the structural-type clash.
-      mode: 'existing' | 'new';
-      name?: string;
-    }
-    const items: Item[] = [
-      ...[...existing.entries()].map(([name, runs]): Item => ({
-        mode: 'existing',
-        name,
-        label: name,
-        description: `${runs.length} run${runs.length === 1 ? '' : 's'}`,
-        detail: runs.includes(modelPath) ? '(already in this lineage)' : undefined,
-      })),
-      { mode: 'new', label: '$(add) Create new lineage…' },
-    ];
-    const pick = await vscode.window.showQuickPick(items, {
-      title: `Add ${basename} to lineage`,
-      placeHolder: 'Pick an existing lineage or create a new one',
-    });
-    if (!pick) return;
-    let target: string;
-    if (pick.mode === 'new') {
-      const name = await vscode.window.showInputBox({
-        title: 'New Lineage',
-        prompt: `Name for the new lineage (${basename} will be its first run)`,
-        validateInput: (v) => {
-          const t = v.trim();
-          if (!t) return 'name required';
-          if (existing.has(t)) return `lineage "${t}" already exists`;
-          return null;
-        },
-      });
-      if (!name) return;
-      target = name.trim();
-    } else {
-      target = pick.name!;
-    }
-    const next = new Map(existing);
-    const list = next.get(target) ?? [];
-    if (!list.includes(modelPath)) list.push(modelPath);
-    next.set(target, list);
-    await this.writeLineages(next);
-    this.currentLineage = target;
-    void this.refresh();
-  }
-
-  /** Right-click in a curated lineage → drop this run from it. */
-  private async removeFromLineage(modelPath: string, basename: string): Promise<void> {
-    if (!this.currentLineage) return;
-    const existing = readNamedLineages();
-    const list = existing.get(this.currentLineage);
-    if (!list) return;
-    const next = new Map(existing);
-    next.set(this.currentLineage, list.filter((p) => p !== modelPath));
-    await this.writeLineages(next);
-    this.log(`lineage-panel: removed ${basename} from ${this.currentLineage}`);
-    void this.refresh();
-  }
-
-  /**
-   * Write the named-lineages map back to workspace settings. Map → record
-   * conversion preserves insertion order of the dropdown.
-   */
-  private async writeLineages(map: Map<string, string[]>): Promise<void> {
-    const obj: Record<string, string[]> = {};
-    for (const [name, runs] of map) obj[name] = runs;
-    try {
-      await vscode.workspace
-        .getConfiguration('nonmem')
-        .update('lineages', obj, vscode.ConfigurationTarget.Workspace);
-    } catch (e) {
-      void vscode.window.showErrorMessage(
-        `Positron NONMEM: couldn't save lineages: ${errMsg(e)}`,
-      );
-    }
-  }
-
-  private async promoteFromPath(modelPath: string): Promise<void> {
-    const defaultPath = computeNextModelName(modelPath);
-    const defaultBase = path.basename(defaultPath);
-    const newName = await vscode.window.showInputBox({
-      title: 'Promote Estimates to New Model',
-      prompt: `update_inits will write a new .mod next to ${path.basename(modelPath)}`,
-      value: defaultBase,
-      valueSelection: [0, defaultBase.length - path.extname(defaultBase).length],
-      validateInput: (v) => (v && v.trim() ? null : 'name required'),
-    });
-    if (!newName) return;
-    this.log(`lineage-panel: promote ${modelPath} → ${newName}`);
-    try {
-      const { outputModelPath } = await promoteEstimates({
-        modelPath,
-        outputName: newName,
-        runner: this.runner,
-      });
-      this.log(`lineage-panel: wrote ${outputModelPath}`);
-      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(outputModelPath));
-      await vscode.window.showTextDocument(doc, { preview: false });
-      void vscode.commands.executeCommand(COMMAND.refreshRuns);
-      void this.refresh();
-    } catch (e) {
-      const msg = scrubPrivate(errMsg(e));
-      this.log(`lineage-panel: promote failed — ${msg}`);
-      void vscode.window.showErrorMessage(`Positron NONMEM: ${msg}`);
-    }
   }
 
   private _disposed = false;
@@ -607,91 +386,16 @@ export class LineagePanel {
 }
 
 /**
- * Build the QuickPick item shape used by `Set parent…` /
- * `Create relation…` (and any future picker that lists runs). Shows
- * basename as label, parent-dir + OFV in description (with
- * `formatNumberCompact` so very small / very large OFVs don't lose
- * precision via toFixed), full path as detail. Single helper means
- * all the run-pickers stay visually consistent.
- */
-function quickPickItemForRun(
-  n: { basename: string; ofv: number | null; modelPath: string },
-): vscode.QuickPickItem {
-  const dir = parentDirName(n.modelPath);
-  const ofvLabel = n.ofv !== null ? `OFV = ${formatNumberCompact(n.ofv)}` : 'no fit';
-  return {
-    label: n.basename,
-    description: dir ? `${dir} · ${ofvLabel}` : ofvLabel,
-    detail: n.modelPath,
-  };
-}
-
-/**
- * Shared QuickPicker for "pick another run from this workspace" — the
- * common shape behind `Set parent…`, `Create relation…`, and any
- * future relation-edit action. Returns the picked item (with `modelPath`
- * either a path or null when the optional `noneOption` was selected),
- * or null when the user dismissed the picker. Shows an info toast
- * instead of an empty picker when there are no other runs AND the
- * caller didn't supply a `noneOption`.
- */
-interface PickedRun {
-  modelPath: string | null;
-  label: string;
-}
-
-async function pickRunFromGraph(
-  log: (m: string) => void,
-  opts: {
-    title: string;
-    placeHolder: string;
-    excludePath: string;
-    noneOption?: { label: string; description?: string };
-  },
-): Promise<PickedRun | null> {
-  const { graph } = await discoverLineage(log);
-  const others = graph.nodes.filter((n) => n.modelPath !== opts.excludePath);
-  if (others.length === 0 && !opts.noneOption) {
-    void vscode.window.showInformationMessage(
-      'NONMEM: no other runs in this workspace to relate to.',
-    );
-    return null;
-  }
-  interface Item extends vscode.QuickPickItem {
-    modelPath: string | null;
-  }
-  const items: Item[] = [];
-  if (opts.noneOption) {
-    items.push({
-      modelPath: null,
-      label: opts.noneOption.label,
-      description: opts.noneOption.description,
-    });
-  }
-  items.push(
-    ...others
-      .map((n): Item => ({ modelPath: n.modelPath, ...quickPickItemForRun(n) }))
-      .sort((a, b) => a.label.localeCompare(b.label)),
-  );
-  const pick = await vscode.window.showQuickPick(items, {
-    title: opts.title,
-    placeHolder: opts.placeHolder,
-    matchOnDescription: true,
-    matchOnDetail: true,
-  });
-  return pick ? { modelPath: pick.modelPath, label: pick.label } : null;
-}
-
-/**
  * Static shell HTML pointing at the webview-served CSS + JS assets.
  * No user data in here — pure asset URIs and a fixed legend that
  * interpolates the ΔOFV threshold from the graph module so it can't
  * drift if the threshold ever becomes user-configurable.
+ *
+ * Cytoscape's renderer applies inline styles to its container at
+ * runtime — `allowInlineStyle: true` lifts the CSP `style-src` so the
+ * canvas paints. Scripts stay strict (`script-src ${cspSource}`).
  */
-export function renderShellHtml(
-  webview: vscode.Webview,
-  extensionUri: vscode.Uri,
-): string {
+export function renderShellHtml(webview: vscode.Webview, extensionUri: vscode.Uri): string {
   const threshold = readLineageOfvThreshold();
   const styleUri = webview.asWebviewUri(
     vscode.Uri.joinPath(extensionUri, 'media', 'lineage', 'style.css'),
@@ -699,25 +403,7 @@ export function renderShellHtml(
   const scriptUri = webview.asWebviewUri(
     vscode.Uri.joinPath(extensionUri, 'media', 'lineage', 'client.js'),
   );
-  // Cytoscape's renderer applies inline styles to its container at
-  // runtime (cy.css() etc.) — without `'unsafe-inline'` on `style-src`
-  // the canvas paints blank and the console logs CSP violations.
-  // Scripts stay strict (`script-src ${cspSource}` only) so we still
-  // can't be tricked into inlining JS.
-  const csp = [
-    `default-src 'none'`,
-    `style-src ${webview.cspSource} 'unsafe-inline'`,
-    `script-src ${webview.cspSource}`,
-  ].join('; ');
-  return `<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="${csp}">
-<link rel="stylesheet" href="${styleUri}">
-</head>
-<body>
-<div class="header">
+  const body = `<div class="header">
   <h2>Run Lineage</h2>
   <select id="lineage-select" title="Pick a sub-lineage (chapter), or All Runs to see the full workspace scan."></select>
   <button id="new-lineage" title="Create a new empty sub-lineage and start adding runs to it.">+ New</button>
@@ -755,8 +441,11 @@ export function renderShellHtml(
   <button type="button" data-action="createRelation">Create relation…</button>
   <button type="button" data-action="addToLineage">Add to lineage…</button>
   <button type="button" data-action="removeFromLineage" hidden>Remove from this lineage</button>
-</div>
-<script src="${scriptUri}"></script>
-</body>
-</html>`;
+</div>`;
+  return buildWebviewShell(webview, {
+    styles: [styleUri],
+    scripts: [scriptUri],
+    body,
+    allowInlineStyle: true,
+  });
 }

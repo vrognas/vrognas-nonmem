@@ -9,6 +9,7 @@ import {
   promoteEstimates,
 } from '../../src/runtime/promote-estimates';
 import type { Runner } from '../../src/runner';
+import { quote } from '../../src/shell';
 
 describe('computeNextModelName', () => {
   // Build expectations through path.join so the test passes on both
@@ -41,7 +42,7 @@ describe('buildUpdateInitsCommand', () => {
     expect(cwd).toBe(path.dirname(modelPath));
     // Basename used as the positional arg (matches our `execute` invocation
     // pattern in run-model.ts) so PsN finds the sibling .lst.
-    expect(cmd).toBe(`'update_inits' 'run001.mod' -output_model='run002.mod'`);
+    expect(cmd).toBe(`${quote('update_inits')} ${quote('run001.mod')} -output_model=${quote('run002.mod')}`);
   });
 
   it('passes only the output basename to -output_model (PsN writes alongside the input)', () => {
@@ -52,7 +53,7 @@ describe('buildUpdateInitsCommand', () => {
       path.join('/somewhere', 'else', 'run002.mod'),
       'update_inits',
     );
-    expect(cmd).toContain(`-output_model='run002.mod'`);
+    expect(cmd).toContain(`-output_model=${quote('run002.mod')}`);
     expect(cmd).not.toContain('somewhere');
   });
 });

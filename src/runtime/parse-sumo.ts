@@ -10,17 +10,24 @@
 //   <Status label>                                            [  OK   ]
 //   <Status label>                                            [WARNING]
 //   <Status label>                                            [ ERROR ]
+//   Condition number                                          [  OK   ]   ← status row
 //   <Free-form info line>.
 //
 //   Total run time for model (hours:min:sec):           0:00:01
 //   Estimation time for subproblem, sum over $EST (seconds):   0.12
 //   Objective function value: 4.5310
-//   Condition number                                          3.245E+02
+//   Condition number: 420.3                                              ← value row (colon!)
 //   Number of observation records: 4
 //   Number of individuals: 2
 //
 //   <parameter table>
 //   -----------------------------------------------------------------
+//
+// Note: `Condition number` appears TWICE when $COV ran cleanly — once
+// as a STATUS row (`Condition number  [  OK  ]`) and once as a VALUE row
+// (`Condition number: 420.3`). The colon distinguishes them. Verified
+// empirically 2026-05-03 against PsN 5.3.1 — see test fixture in
+// `test/runtime/parse-sumo.test.ts` `it('parses condition number...`).
 //
 // The status block has a fixed shape: `<label>  [  <level>  ]` where
 // `<level>` is one of OK / WARNING / ERROR. Free-form info lines (no

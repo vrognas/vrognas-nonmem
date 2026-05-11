@@ -29,6 +29,7 @@
 
 import * as vscode from 'vscode';
 import type { InspectorPayload } from './fit-inspector-payload';
+import { buildWebviewShell } from './webview-shell';
 
 export class FitInspectorProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'positronNonmem.fitInspector';
@@ -103,42 +104,21 @@ export class FitInspectorProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Build the WebView HTML. Loads `media/fit-inspector/{client.js,style.css}`
-   * as webview-resource URIs. CSP locks scripts and styles to
-   * `webview.cspSource` (so only our extension-bundled resources
-   * load) — no remote sources, no inline scripts.
+   * Build the WebView HTML via the shared `buildWebviewShell` helper.
+   * Order matters: `formatters.js` and `transforms.js` define helper
+   * functions that `client.js` calls at top level, so they load first.
    */
   private renderHtml(webview: vscode.Webview): string {
-    const styleUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, 'media', 'fit-inspector', 'style.css'),
-    );
-    // Order matters: `formatters.js` and `transforms.js` define helper
-    // functions that `client.js` calls at top level. Loading them first
-    // guarantees the globals exist when client.js runs. All three are
-    // plain scripts (no module loaders, no CSP gymnastics) — same model
-    // as the lineage panel's bundled IIFE output.
-    const formattersUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, 'media', 'fit-inspector', 'formatters.js'),
-    );
-    const transformsUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, 'media', 'fit-inspector', 'transforms.js'),
-    );
-    const clientUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, 'media', 'fit-inspector', 'client.js'),
-    );
-    return `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src ${webview.cspSource};">
-<link rel="stylesheet" href="${styleUri}">
-</head>
-<body>
-<div id="root"></div>
-<script src="${formattersUri}"></script>
-<script src="${transformsUri}"></script>
-<script src="${clientUri}"></script>
-</body>
-</html>`;
+    const asset = (...parts: string[]): vscode.Uri =>
+      webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, ...parts));
+    return buildWebviewShell(webview, {
+      styles: [asset('media', 'fit-inspector', 'style.css')],
+      scripts: [
+        asset('media', 'fit-inspector', 'formatters.js'),
+        asset('media', 'fit-inspector', 'transforms.js'),
+        asset('media', 'fit-inspector', 'client.js'),
+      ],
+      body: '<div id="root"></div>',
+    });
   }
 }

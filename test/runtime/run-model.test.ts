@@ -9,6 +9,7 @@ import {
   type RunModelOptions,
 } from '../../src/runtime/run-model';
 import type { CommandResult, Runner } from '../../src/runner';
+import { quote } from '../../src/shell';
 
 class FakeRunner implements Runner {
   readonly runs: { command: string; cwd: string | undefined }[] = [];
@@ -96,9 +97,9 @@ describe('runModel', () => {
 
     expect(runner.runs).toHaveLength(1);
     expect(runner.runs[0].cwd).toBe(tmp);
-    expect(runner.runs[0].command).toMatch(/^'execute' /);
-    expect(runner.runs[0].command).toContain(`'colistin.mod'`);
-    expect(runner.runs[0].command).not.toContain(`'colistin.lst'`); // PsN renames; we don't pass the lst arg
+    expect(runner.runs[0].command.startsWith(`${quote('execute')} `)).toBe(true);
+    expect(runner.runs[0].command).toContain(quote('colistin.mod'));
+    expect(runner.runs[0].command).not.toContain(quote('colistin.lst')); // PsN renames; we don't pass the lst arg
     expect(runner.runs[0].command).toContain('echo EXIT=$?');
 
     expect(result.exitCode).toBe(0);
@@ -193,8 +194,8 @@ describe('runModel', () => {
 
     await runModel(makeOptions({ modelPath, runner, nmVersionLabel: '74' }));
 
-    expect(runner.runs[0].command).toContain("-nm_version='74'");
-    expect(runner.runs[0].command).toContain("'m.mod'");
+    expect(runner.runs[0].command).toContain(`-nm_version=${quote('74')}`);
+    expect(runner.runs[0].command).toContain(quote('m.mod'));
   });
 
   it("omits -nm_version when nmVersionLabel is undefined (PsN's bundled default applies)", async () => {
@@ -216,7 +217,7 @@ describe('runModel', () => {
 
     await runModel(makeOptions({ modelPath, runner }));
 
-    expect(runner.runs[0].command).toContain("-nm_output='ext,phi,cov,cor,coi,xml'");
+    expect(runner.runs[0].command).toContain(`-nm_output=${quote('ext,phi,cov,cor,coi,xml')}`);
   });
 
   it('omits -nm_output when nmOutputExtensions is an empty array (caller opts out)', async () => {
@@ -238,7 +239,7 @@ describe('runModel', () => {
 
     await runModel(makeOptions({ modelPath, runner, nmOutputExtensions: ['ext', 'phi'] }));
 
-    expect(runner.runs[0].command).toContain("-nm_output='ext,phi'");
+    expect(runner.runs[0].command).toContain(`-nm_output=${quote('ext,phi')}`);
   });
 
   it('returns the highest-N modelfit_dir<N> as modelfitDir when one (or more) exist', async () => {
@@ -287,7 +288,8 @@ describe('runModel', () => {
     fs.writeFileSync(path.join(tmp, "o'brien.lst"), '');
     const runner = new FakeRunner();
     await runModel(makeOptions({ modelPath, runner }));
-    // ' in the basename gets replaced by '\\'' (close-and-reopen idiom).
-    expect(runner.runs[0].command).toContain(`'o'\\''brien.mod'`);
+    // Embedded apostrophe gets the platform-specific quote treatment:
+    // POSIX → `'o'\\''brien.mod'`; Windows cmd → `"o'brien.mod"`.
+    expect(runner.runs[0].command).toContain(quote("o'brien.mod"));
   });
 });
