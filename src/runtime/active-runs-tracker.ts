@@ -37,6 +37,17 @@ export interface ActiveRun {
 
 type Listener = () => void;
 
+/**
+ * Cap on retained terminal (done / failed) entries. Once exceeded, the
+ * oldest terminal entries are pruned. Running entries are never evicted
+ * regardless of cap — they're load-bearing for live state.
+ *
+ * 100 is generous for typical pharmacometric workflows (iterative
+ * modelling rarely exceeds tens of runs per session) and small enough
+ * that 100 × ActiveRun (≈ small object) is trivial memory.
+ */
+const TERMINAL_HISTORY_CAP = 100;
+
 export class ActiveRunsTracker {
   private readonly runs = new Map<string, ActiveRun>();
   private readonly listeners = new Set<Listener>();
@@ -74,6 +85,7 @@ export class ActiveRunsTracker {
     run.modelfitDir = modelfitDir;
     run.lstPath = lstPath;
     run.finishedAt = Date.now();
+    this.evictOldestTerminals();
     this.fire();
   }
 
@@ -97,7 +109,27 @@ export class ActiveRunsTracker {
     run.state = 'failed';
     run.errorMessage = errorMessage;
     run.finishedAt = Date.now();
+    this.evictOldestTerminals();
     this.fire();
+  }
+
+  /**
+   * Bound `runs` to `TERMINAL_HISTORY_CAP` terminal entries by dropping
+   * the oldest done/failed by `finishedAt`. Running entries are never
+   * evicted. Called after each `markCompleted` / `markFailed`.
+   *
+   * O(n log n) per terminal transition but n is bounded by the cap +
+   * concurrent-running count; in practice this is dozens, not thousands.
+   */
+  private evictOldestTerminals(): void {
+    const terminals: ActiveRun[] = [];
+    for (const r of this.runs.values()) {
+      if (r.state !== 'running') terminals.push(r);
+    }
+    if (terminals.length <= TERMINAL_HISTORY_CAP) return;
+    terminals.sort((a, b) => (a.finishedAt ?? 0) - (b.finishedAt ?? 0));
+    const drop = terminals.length - TERMINAL_HISTORY_CAP;
+    for (let i = 0; i < drop; i++) this.runs.delete(terminals[i].id);
   }
 
   /** Snapshot, most-recent first. The view re-reads on every `onDidChange`. */

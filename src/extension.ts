@@ -675,8 +675,12 @@ function log(message: string): void {
  * `getParsedModel` API in a new JSON editor.
  */
 async function showNmtranParsedModel(): Promise<void> {
-  if (!resolveActiveModelPath()) return;
-  const editor = vscode.window.activeTextEditor!;
+  // Capture the editor BEFORE any awaits — VS Code dispatch can interleave,
+  // and `activeTextEditor` can become undefined between the resolve check
+  // and the next sync access. Non-null assertion on a stale reference would
+  // throw `TypeError`.
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || !resolveActiveModelPath()) return;
   const result = await getNmtranParsedModel(editor.document.uri);
   if (result === null) {
     await vscode.window.showErrorMessage(

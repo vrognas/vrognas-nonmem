@@ -227,7 +227,6 @@ body {
 /* Edge interactivity — keep the visible stroke 2px but expand the
    click target via stroke-width on hover; cursor signal so users
    discover the click affordance. */
-.edge { cursor: pointer; pointer-events: stroke; }
 .edge:hover { stroke-width: 4; }
 /* SVG host — `#cy` retained as the id for backward-compat with the
    shell HTML. The rendered SVG inside takes its own width/height
@@ -291,6 +290,8 @@ body {
 .edge {
   fill: none;
   stroke-width: 2;
+  cursor: pointer;
+  pointer-events: stroke;
 }
 /* Per-section header text + thin separator line. Only visible in
    "All Runs" mode where the lineage is grouped by dataset. */
@@ -345,7 +346,7 @@ body {
   border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border));
   border-radius: 4px;
   padding: 4px 0;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--vscode-widget-shadow, 0 2px 8px rgba(0, 0, 0, 0.25));
   display: flex;
   flex-direction: column;
   font-family: var(--vscode-font-family);

@@ -7,6 +7,23 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **fix: 6th-review follow-ups — TOCTOU + tracker eviction + CSS dedup + threshold operator (v0.0.200).** Closes v0.0.199's privacy-and-bug-sweep companion items.
+
+  - **TOCTOU fix in `showNmtranParsedModel`** (`src/extension.ts`): captured `activeTextEditor` BEFORE the `await` instead of using a non-null assertion after the resolve check. VS Code dispatch can interleave between sync calls; the bang on a stale undefined would have thrown `TypeError`.
+
+  - **Bounded `ActiveRunsTracker` history** (`src/runtime/active-runs-tracker.ts`): added `TERMINAL_HISTORY_CAP = 100` and an `evictOldestTerminals()` helper called from `markCompleted` / `markFailed`. Previously `runs: Map<string, ActiveRun>` grew unbounded for the session; iterative-modelling sessions with many done/failed runs would accumulate state indefinitely. Running entries are never evicted regardless of cap.
+
+  - **`>=` instead of `>` for threshold comparisons in `fmtRse` / `fmtShrinkage`** (`media/fit-inspector/formatters.js`): the `>` semantics meant a value exactly equal to the threshold (e.g. RSE exactly 100% or shrinkage exactly 30%) was NOT flagged. `fmtPVal` uses `<` correctly. The asymmetry was a latent inconsistency. Pharmacometric convention treats threshold values as already in-tier; the `>=` shape aligns with that. Now uniform across all three tiered formatters.
+
+  - **CSS dedup in `media/lineage/style.css`**: merged the two `.edge` rule blocks (cursor + pointer-events lived at line 230; fill + stroke-width at line 291). Same selector declared twice was confusing and would surprise anyone adding a property without noticing the other block.
+
+  - **CSS theme-aware shadow** (`media/lineage/style.css`): context-menu `box-shadow` now uses `var(--vscode-widget-shadow, 0 2px 8px rgba(0, 0, 0, 0.25))` so light themes pick up a lighter shadow if VS Code provides one. Falls back to the prior hardcoded shadow when the var isn't defined.
+
+  **Deferred (low-impact or larger):**
+  - **FIR5** — split `renderEstimationOptionsStep` (~200 LOC inline tooltip assembly) into a `buildEstAttrTip` helper. Real SOLID violation but no concrete bug; bigger refactor than the v0.0.200 window. Own ship.
+  - **FIR6** — `tuneGridColumns` rAF layout thrash. Real but ~20-param ceiling makes severity low. `ResizeObserver` is the right fix; deferring until a UI perf issue surfaces.
+  - **FIR7** — `shrinkSdByIndex[r.index - 1]` defensive guard. Speculative — depends on contract violations we haven't observed.
+
 - **fix: 6th-review privacy + bug sweep (v0.0.199).** 11 fixes across both WebView clients, extension entry-point, runtime loaders, and lineage panel. Closes the gap where v0.0.196's first privacy sweep missed several path-leak sites.
 
   **Privacy (CLAUDE.md blocker):**

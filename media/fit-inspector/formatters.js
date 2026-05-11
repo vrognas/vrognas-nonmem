@@ -91,9 +91,11 @@ function fmtRse(v, kind) {
   if (typeof v !== 'number' || !isFinite(v)) return null;
   const pct = v * 100;
   const text = pct.toFixed(2) + '%';
-  if (pct > thresholds.rseWarnPct) return badge(text, 'bad');
+  // `>=` rather than `>` so a value exactly at the threshold is flagged.
+  // Pharmacometric convention treats threshold values as already in-tier.
+  if (pct >= thresholds.rseWarnPct) return badge(text, 'bad');
   const warnAt = kind === 'theta' ? thresholds.rseThetaWarnPct : thresholds.rseOmegaWarnPct;
-  if (pct > warnAt) return badge(text, 'warn');
+  if (pct >= warnAt) return badge(text, 'warn');
   return text;
 }
 
@@ -124,8 +126,9 @@ function fmtPVal(v) {
 function fmtShrinkage(v) {
   if (typeof v !== 'number' || !isFinite(v)) return null;
   const text = v.toFixed(2) + '%';
-  if (v > thresholds.shrinkageWarnPct) return badge(text, 'bad');
-  if (v > thresholds.shrinkageBorderlineWarnPct) return badge(text, 'warn');
+  // `>=` to mirror p-value's `<` semantics: threshold-value is in-tier.
+  if (v >= thresholds.shrinkageWarnPct) return badge(text, 'bad');
+  if (v >= thresholds.shrinkageBorderlineWarnPct) return badge(text, 'warn');
   return text;
 }
 
