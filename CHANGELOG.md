@@ -7,6 +7,18 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **fix: 5th-review bug + leak sweep (v0.0.197).** Companion to v0.0.196 — same review pass, but the non-privacy items: real bugs in graph resolution, dispose lifecycles, and a race condition. 5 fixes shipped; one item (lineage picker scope when in a curated lineage view) deferred pending design clarification — the current "show all workspace runs" behaviour may be intentional for cross-lineage relation edits.
+
+  - **Duplicate run-number ambiguity** (`lineage-graph.ts:170-182`): when the workspace has e.g. `popPK/run001.mod` AND `popPD/run001.mod`, any `;; Based on: 1` previously wired silently to the first-iterated path. Now duplicate run numbers are **excluded from the `pathByRunNumber` lookup entirely** — affected children become unresolved-parent diagnostics and roots until the user adds an explicit `lineageOverride`. Multi-arm studies are common in pharmacometrics so this matters.
+
+  - **LineagePanel double-dispose pattern** (`lineage-panel.ts:586-606`): the panel's own `onDidDispose` handler IS `this.dispose()` (registered at constructor line 88). The previous body called `this.panel.dispose()` unconditionally, re-entering disposal. VS Code's `panel.dispose()` is currently idempotent so no breakage today, but the pattern was wrong. Added `_disposed` re-entrancy flag + dropped the redundant `this.panel.dispose()` call.
+
+  - **Editor-switch race in `refreshVariablesForEditor`** (`extension.ts`): the resolver fans out ~9 parallel async loads (sumo SSH alone takes 1–3 s). Rapid editor switches produced concurrent flights with last-to-land-wins ordering — could push a stale .lst's context after the user had already moved on. Added a monotonic `refreshGeneration` counter; stale flights drop their result on the floor instead of overwriting.
+
+  - **Tree-provider dispose missing** (`runs-tree-provider.ts`, `active-runs-tree-provider.ts`): neither provider had a `dispose()` method; both have private `EventEmitter`s. `ActiveRunsTreeProvider` additionally discarded the unsubscribe-fn returned by `tracker.onDidChange(...)` — leaked a back-reference into the tracker. Added `dispose()` on both, stored the tracker unsubscribe, wired through `context.subscriptions` in `extension.ts`.
+
+  - **`.lst` double-read in `LstFileDecorationProvider`** (`lst-decoration-provider.ts:117-127`): `loadSumoAndUpdate` was re-reading + re-parsing the `.lst` from disk after sumo returned, even though the same mtime guard already proved freshness. For multi-MB `.lst` files on a remote-mounted FS the double-read was measurable. Stashed `LstSummary` in `CacheEntry` on the fast path; reused in the slow path.
+
 - **fix: 5th-review privacy sweep (v0.0.196).** Cross-cutting privacy hygiene pass found by reviewers across the lineage, variables, tree-provider, and runner layers — places we missed in v0.0.193's first pass. CLAUDE.md treats this as a blocker; all of these would surface a remote-FS path or hostname into a user-visible UI surface, screenshot, log line, or Positron crash-reporter input.
 
   **`scrub.ts` — pattern coverage gaps closed:**

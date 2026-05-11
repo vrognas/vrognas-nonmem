@@ -12,12 +12,22 @@ import * as vscode from 'vscode';
 import { COMMAND } from '../constants';
 import type { ActiveRun, ActiveRunsTracker } from '../runtime/active-runs-tracker';
 
-export class ActiveRunsTreeProvider implements vscode.TreeDataProvider<ActiveRun> {
+export class ActiveRunsTreeProvider implements vscode.TreeDataProvider<ActiveRun>, vscode.Disposable {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+  /** Unsubscribe fn from `tracker.onDidChange` — vscode-free Listener pattern, not a vscode.Disposable. */
+  private readonly unsubscribeTracker: () => void;
 
   constructor(private readonly tracker: ActiveRunsTracker) {
-    tracker.onDidChange(() => this._onDidChangeTreeData.fire());
+    // Store the unsubscribe so dispose() can release the back-reference
+    // into the tracker. Otherwise a re-activated provider leaks the old
+    // instance through the tracker's listener list.
+    this.unsubscribeTracker = tracker.onDidChange(() => this._onDidChangeTreeData.fire());
+  }
+
+  dispose(): void {
+    this.unsubscribeTracker();
+    this._onDidChangeTreeData.dispose();
   }
 
   getChildren(element?: ActiveRun): ActiveRun[] {

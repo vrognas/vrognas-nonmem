@@ -31,6 +31,12 @@ interface CacheEntry {
   mtimeMs: number;
   decoration: vscode.FileDecoration | undefined;
   sumoLoaded: boolean;
+  /**
+   * Parsed `.lst` summary stashed on the fast path. Reused by
+   * `loadSumoAndUpdate` instead of re-reading + re-parsing the file
+   * from disk. Same mtime guard already protects freshness.
+   */
+  lst: LstSummary;
 }
 
 export class LstFileDecorationProvider implements vscode.FileDecorationProvider {
@@ -90,7 +96,7 @@ export class LstFileDecorationProvider implements vscode.FileDecorationProvider 
     }
     const lst = parseLst(lstText);
     const decoration = makeDecoration(lst, null);
-    this.cache.set(lstPath, { mtimeMs, decoration, sumoLoaded: false });
+    this.cache.set(lstPath, { mtimeMs, decoration, sumoLoaded: false, lst });
     void this.loadSumoAndUpdate(uri, mtimeMs);
     return decoration;
   }
@@ -114,15 +120,11 @@ export class LstFileDecorationProvider implements vscode.FileDecorationProvider 
     // File may have been rewritten while sumo ran — bail if mtime moved.
     const cached = this.cache.get(lstPath);
     if (!cached || cached.mtimeMs !== mtimeMs) return;
-    let lstText: string;
-    try {
-      lstText = await fs.readFile(lstPath, 'utf8');
-    } catch {
-      return;
-    }
-    const lst = parseLst(lstText);
-    const decoration = makeDecoration(lst, sumo);
-    this.cache.set(lstPath, { mtimeMs, decoration, sumoLoaded: true });
+    // Reuse the parsed LstSummary from the fast path (same mtime guard
+    // proves freshness). Previously we re-read the .lst from disk +
+    // re-parsed it, which doubled the IO cost per sumo cycle.
+    const decoration = makeDecoration(cached.lst, sumo);
+    this.cache.set(lstPath, { mtimeMs, decoration, sumoLoaded: true, lst: cached.lst });
     this._onDidChange.fire(uri);
   }
 

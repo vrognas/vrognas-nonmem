@@ -583,9 +583,22 @@ export class LineagePanel {
     }
   }
 
+  private _disposed = false;
   private dispose(): void {
+    // Re-entrancy guard: the panel's onDidDispose handler IS dispose()
+    // itself (constructor line 88). The previous body called
+    // this.panel.dispose() unconditionally — when triggered via the
+    // panel's own onDidDispose, this re-entered the disposal flow.
+    // VS Code's panel.dispose() is currently idempotent so no real
+    // breakage today, but the pattern was wrong and would bite any
+    // future change that made disposal non-idempotent.
+    if (this._disposed) return;
+    this._disposed = true;
     if (LineagePanel.current === this) LineagePanel.current = undefined;
-    this.panel.dispose();
+    // Don't call this.panel.dispose() — either the panel disposed
+    // itself (we're being called from onDidDispose) or someone else
+    // will (and our disposables include the onDidDispose subscription
+    // that would have re-entered us).
     while (this.disposables.length) {
       const d = this.disposables.pop();
       if (d) d.dispose();

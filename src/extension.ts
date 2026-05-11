@@ -97,6 +97,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   outputChannel.appendLine('[positron-nonmem] extension activated.');
 }
 
+// Monotonic generation counter for `refreshVariablesForEditor`. Each
+// call captures the count before awaiting the (slow, fan-out async)
+// `resolveVariablesContext`; if the user switches editors before the
+// await resolves, a fresher call has bumped the count and the stale
+// flight drops its result on the floor instead of overwriting the
+// active editor's context. sumo SSH alone takes 1-3s on a cold cache,
+// so editor-switch races are easy to trigger.
+let refreshGeneration = 0;
+
 async function refreshVariablesForEditor(editor: vscode.TextEditor | undefined): Promise<void> {
   // One context drives two views: Variables pane (declarations only)
   // and Fit Inspector (declarations + fit overlay + sumo summary).
@@ -107,11 +116,13 @@ async function refreshVariablesForEditor(editor: vscode.TextEditor | undefined):
   //     the Output channel to read logs blanks the panel, which is
   //     consistently surprising.
   //   - editor is a .mod/.ctl/.lst → resolve and update.
+  const gen = ++refreshGeneration;
   if (!editor) {
     pushVariables(null);
     return;
   }
   const ctx = await resolveVariablesContext(editor, { log: logVars, runner });
+  if (gen !== refreshGeneration) return; // stale — fresher flight has superseded us
   if (ctx === null) return; // unrecognised editor — keep last state
   pushVariables(ctx);
 }
@@ -308,6 +319,9 @@ function registerRunsTree(context: vscode.ExtensionContext, channel: vscode.Outp
   const watcher = vscode.workspace.createFileSystemWatcher('**/*.lst');
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider(VIEW_ID.runs, provider),
+    // registerTreeDataProvider's Disposable only unregisters; the
+    // provider owns its own EventEmitter and must be disposed too.
+    { dispose: () => provider.dispose() },
     vscode.commands.registerCommand(COMMAND.refreshRuns, () => provider.refresh()),
     watcher,
     watcher.onDidCreate(() => provider.refresh()),
@@ -355,6 +369,9 @@ function registerActiveRunsTree(
   });
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider(VIEW_ID.activeRuns, provider),
+    // registerTreeDataProvider's Disposable only unregisters; provider
+    // owns its EventEmitter + tracker subscription and must be disposed.
+    { dispose: () => provider.dispose() },
     watcher,
   );
   channel.appendLine('[positron-nonmem] registered active runs tree view + watcher.');

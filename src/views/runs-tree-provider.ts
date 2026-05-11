@@ -17,7 +17,7 @@ export type DiscoverFn = () => Promise<RunDir[]>;
 /** Discriminated union so getTreeItem can dispatch tree nodes vs status messages. */
 export type RunNode = { kind: 'tree'; node: RunsTreeNode } | MessageNode;
 
-export class RunsTreeProvider implements vscode.TreeDataProvider<RunNode> {
+export class RunsTreeProvider implements vscode.TreeDataProvider<RunNode>, vscode.Disposable {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<RunNode | undefined>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
@@ -32,6 +32,10 @@ export class RunsTreeProvider implements vscode.TreeDataProvider<RunNode> {
     this.cache = null;
     this.lastError = null;
     this._onDidChangeTreeData.fire(undefined);
+  }
+
+  dispose(): void {
+    this._onDidChangeTreeData.dispose();
   }
 
   getTreeItem(element: RunNode): vscode.TreeItem {

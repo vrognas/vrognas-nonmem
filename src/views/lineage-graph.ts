@@ -165,13 +165,24 @@ export function buildLineageGraph(
 
   // Parent-resolution lookup: runNumber → modelPath. Built from inputs
   // that have a runNumber; non-numbered models can't be referenced as
-  // a `;; Based on:` target. First-wins on duplicate run numbers
-  // (rare: same `run001.mod` in two subdirs).
+  // a `;; Based on:` target. Duplicate run numbers (e.g. `popPK/run001.mod`
+  // + `popPD/run001.mod` — common in multi-arm studies) are AMBIGUOUS:
+  // any `;; Based on: 1` could refer to either. Rather than silently
+  // wire to first-wins (the v0.0.196 behaviour) we exclude duplicates
+  // from the lookup entirely. Affected children get an unresolved-parent
+  // diagnostic and become roots until the user adds an explicit
+  // `lineageOverride`.
   const pathByRunNumber = new Map<number, string>();
+  const duplicateRunNumbers = new Set<number>();
   for (const i of byPath.values()) {
-    if (i.runNumber !== null && !pathByRunNumber.has(i.runNumber)) {
-      pathByRunNumber.set(i.runNumber, i.modelPath);
+    if (i.runNumber === null) continue;
+    if (duplicateRunNumbers.has(i.runNumber)) continue;
+    if (pathByRunNumber.has(i.runNumber)) {
+      pathByRunNumber.delete(i.runNumber);
+      duplicateRunNumbers.add(i.runNumber);
+      continue;
     }
+    pathByRunNumber.set(i.runNumber, i.modelPath);
   }
 
   const nodes: LineageNode[] = [...byPath.values()].map((i) => ({
