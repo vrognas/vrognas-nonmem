@@ -7,6 +7,7 @@
 // callers that only need one parse and don't care about sharing.
 
 import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import { errMsg, NOOP_LOGGER, type Logger } from '../log-utils';
 import { findExtFile } from './find-ext-file';
 
@@ -19,7 +20,7 @@ export async function readExtText(
   try {
     return await fs.readFile(extPath, 'utf8');
   } catch (e) {
-    log(`load-ext-text: read failed for ${extPath}: ${errMsg(e)}`);
+    log(`load-ext-text: read failed for ${path.basename(extPath)}: ${errMsg(e)}`);
     return null;
   }
 }

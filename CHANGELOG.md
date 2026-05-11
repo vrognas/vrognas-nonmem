@@ -7,6 +7,25 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **fix: 6th-review privacy + bug sweep (v0.0.199).** 11 fixes across both WebView clients, extension entry-point, runtime loaders, and lineage panel. Closes the gap where v0.0.196's first privacy sweep missed several path-leak sites.
+
+  **Privacy (CLAUDE.md blocker):**
+  - `webview-src/lineage/client.ts` nodeTooltip: dropped the full `modelPath` line — basename already sits at the top of the tooltip; absolute paths leak in screenshots.
+  - `webview-src/lineage/client.ts` renderError: now sends `e.message` only (was `e.stack ?? e.message` — Chromium stack frames embed `vscode-resource://` URIs and absolute paths).
+  - `media/fit-inspector/client.js` renderError: same fix as above (was `e && e.stack ? e.stack : String(e)`).
+  - New `sanitizeWebviewMessage()` exported from `webview-shell.ts` — shared by `fit-inspector-provider.ts` + `lineage-panel.ts`. Strips `vscode-resource://`, Windows `[A-Z]:\…` paths, and `/home/<user>/…` paths; caps at 500 chars. Removes the two ad-hoc inline sanitisers.
+  - `src/extension.ts`: `runModel` / `promoteEstimates` logs now `path.basename(...)` for `modelPath` / `lstPath` / `modelfitDir` / `outputModelPath` interpolations. `openRun` warning toast `action.path` → basename.
+  - `src/runtime/load-ext-text.ts` + `load-xml-text.ts`: log lines wrap interpolated paths in `path.basename(...)`.
+  - `src/views/lineage-relation-actions.ts`: cycle-refused log line now `path.basename(parentPath)`.
+
+  **WebView bugs:**
+  - `webview-src/lineage/client.ts` window-level error handlers added (`window.addEventListener('error', ...)` + `unhandledrejection`) — defense-in-depth for async errors escaping the in-render try/catch. Mirrors the pattern in `media/fit-inspector/client.js`.
+  - `webview-src/lineage/client.ts` `render()` now calls `cancelDrag()` first — if a graph refresh arrives mid-drag, the previously-stale `drag.dropTarget` reference could fire a bad `setParentDirect` action on mouseup.
+  - `webview-src/lineage/client.ts` `partitionByDataset` now sets `unresolvedParentCount` on derived sub-graphs (was missing — `LineageGraph` requires it; type lie, no runtime crash today).
+  - `webview-src/lineage/client.ts` `showCtxMenu` now uses `visibility: hidden` for the measurement pass so `getBoundingClientRect()` returns a non-zero box; the previous `hidden = false` + immediate measure could mis-clamp on first show.
+  - `media/fit-inspector/client.js` EVAL ONLY badge now triggers on `methodsShort.some(m => m.endsWith('-eval'))` for chained $EST — was only checking the scalar `methodShort` (last step). The OFV-headline path already had this fix (v0.0.194); the badge had drifted.
+  - `media/fit-inspector/client.js` removed dead `corrRedFlagThreshold` + `corrWarnThreshold` from the renderer's threshold defaults — they're consumed payload-side as `f.kind`, never read in the WebView. Keeping them in the defaults block was a drift risk.
+
 - **refactor: 5th-review remaining items — refactors + docstring fix (v0.0.198).** Closes out the 5th-review backlog with 4 items:
 
   - **DRY1 — shared `buildWebviewShell` helper** (new `src/views/webview-shell.ts`, 60 LOC). `fit-inspector-provider.ts` and `lineage-panel.ts` were each constructing their own DOCTYPE + CSP-meta + linked-styles + script-tags scaffold; CSP-construction-by-string-concat is exactly where security regressions hide. One helper, one place to audit. Both panels now pass `{ styles, scripts, body, allowInlineStyle? }` and receive the rendered shell. `allowInlineStyle` lifts `style-src` for the Cytoscape canvas — a knob, not a copy-paste decision.

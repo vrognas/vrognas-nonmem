@@ -402,7 +402,7 @@ function runCurrentModel(): void {
   // any stale done/failed rows for previous runs of the same .mod.
   // See reconcileCompletion for why this matters.
   const dispatchedAt = Date.now();
-  log(`runModel: launching for ${modelPath}${versionTag}`);
+  log(`runModel: launching for ${path.basename(modelPath)}${versionTag}`);
   void runModel({
     modelPath,
     runner,
@@ -412,8 +412,9 @@ function runCurrentModel(): void {
     (result) => {
       const exit = result.exitCode ?? 'unknown';
       const ofv = result.ofv !== null ? `, OFV=${result.ofv}` : '';
-      log(`runModel: EXIT=${exit}${ofv} -> ${result.lstPath}`);
-      if (result.modelfitDir) log(`runModel: aux files in ${result.modelfitDir}`);
+      log(`runModel: EXIT=${exit}${ofv} -> ${path.basename(result.lstPath)}`);
+      if (result.modelfitDir)
+        log(`runModel: aux files in ${path.basename(result.modelfitDir)}`);
       reconcileCompletion(activeRunsTracker, {
         modelPath,
         dispatchedAt,
@@ -493,7 +494,9 @@ async function openRun(runId: string): Promise<void> {
     const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(action.path));
     await vscode.window.showTextDocument(doc, { preview: false });
   } catch {
-    await vscode.window.showWarningMessage(`${prefix} could not open ${action.path}`);
+    await vscode.window.showWarningMessage(
+      `${prefix} could not open ${path.basename(action.path)}`,
+    );
   }
 }
 
@@ -538,14 +541,14 @@ async function promoteEstimatesCommand(arg?: ActiveRun): Promise<void> {
   });
   if (!newName) return;
 
-  log(`promoteEstimates: ${arg.modelPath} → ${newName}`);
+  log(`promoteEstimates: ${path.basename(arg.modelPath)} → ${newName}`);
   try {
     const { outputModelPath } = await promoteEstimates({
       modelPath: arg.modelPath,
       outputName: newName,
       runner,
     });
-    log(`promoteEstimates: wrote ${outputModelPath}`);
+    log(`promoteEstimates: wrote ${path.basename(outputModelPath)}`);
     const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(outputModelPath));
     await vscode.window.showTextDocument(doc, { preview: false });
     void vscode.commands.executeCommand(COMMAND.refreshRuns);

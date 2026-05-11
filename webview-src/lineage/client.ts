@@ -75,6 +75,20 @@ declare function acquireVsCodeApi(): VsCodeApi;
 // ---- DOM refs -------------------------------------------------------
 
 const vscode = acquireVsCodeApi();
+
+// Window-level error handlers — defense-in-depth for async errors that
+// escape outside the in-render try/catch (rogue Promise rejection from
+// d3 / SVG event handler / etc). Without these, an async exception in
+// the WebView script silently aborts and the panel goes empty with no
+// clue why. Mirrors the pattern established for the Fit Inspector.
+window.addEventListener('error', (ev) => {
+  vscode.postMessage({ type: 'renderError', message: ev.message });
+});
+window.addEventListener('unhandledrejection', (ev) => {
+  // `String(ev.reason)` returns `Error: <message>` for Error objects
+  // (not the stack), so paths embedded in stack frames don't leak.
+  vscode.postMessage({ type: 'renderError', message: String(ev.reason) });
+});
 const wrapEl = document.getElementById('canvas-wrap') as HTMLDivElement | null;
 const containerEl = document.getElementById('cy') as HTMLDivElement | null;
 const emptyEl = document.getElementById('empty') as HTMLDivElement | null;
@@ -253,7 +267,10 @@ window.addEventListener('message', (ev) => {
     } catch (e) {
       vscode.postMessage({
         type: 'renderError',
-        message: e instanceof Error ? (e.stack ?? e.message) : String(e),
+        // Don't send `e.stack` — Chromium stack frames include
+        // `vscode-resource://` URIs which embed the local extension path.
+        // The error message alone is enough; the receiver sanitises too.
+        message: e instanceof Error ? e.message : String(e),
       });
     }
     return;
@@ -319,13 +336,17 @@ function updateCtxMenuVisibility(): void {
 
 function showCtxMenu(clientX: number, clientY: number, s: CtxMenuState): void {
   ctxMenuState = s;
+  // Use `visibility: hidden` so the element has layout we can measure
+  // BEFORE the user sees it. `hidden` attribute would `display: none`
+  // and getBoundingClientRect() returns 0×0 in the same tick.
+  ctxMenuEl!.style.visibility = 'hidden';
   ctxMenuEl!.hidden = false;
-  // Clamp so the menu doesn't spill past the viewport edges.
   const rect = ctxMenuEl!.getBoundingClientRect();
   const maxX = window.innerWidth - rect.width - 4;
   const maxY = window.innerHeight - rect.height - 4;
   ctxMenuEl!.style.left = `${Math.min(clientX, maxX)}px`;
   ctxMenuEl!.style.top = `${Math.min(clientY, maxY)}px`;
+  ctxMenuEl!.style.visibility = '';
 }
 
 function hideCtxMenu(): void {
@@ -530,6 +551,11 @@ function applyZoom(z: number): void {
 
 function render(graph: LineageGraph): void {
   hideCtxMenu();
+  // Cancel any in-flight drag before tearing down the SVG. Otherwise
+  // mouseup on the detached scene would fire `onDragEnd` against a
+  // dangling drop-target reference and could post a stale
+  // `setParentDirect` action.
+  cancelDrag();
   // Clear prior SVG.
   while (containerEl!.firstChild) containerEl!.removeChild(containerEl!.firstChild);
 
@@ -771,6 +797,10 @@ function partitionByDataset(graph: LineageGraph): SectionInput[] {
         nodes: graph.nodes.filter((n) => g.paths.has(n.modelPath)),
         edges: graph.edges.filter((e) => g.paths.has(e.childModelPath)),
         roots: g.roots,
+        // Sub-graphs derived from a partition share the parent's
+        // diagnostic — the field is required by the LineageGraph type
+        // and downstream `layoutSection` reads it conservatively.
+        unresolvedParentCount: graph.unresolvedParentCount,
       },
     });
   }
@@ -968,7 +998,9 @@ function nodeTooltip(d: TreeDatum): string {
   else lines.push('· not run / status unknown');
   if (d.node.label) lines.push(`label: ${d.node.label}`);
   if (d.node.description) lines.push(d.node.description);
-  lines.push(d.node.modelPath);
+  // No full path here — `basename` already on the first line; absolute
+  // paths on a Remote SSH session encode the host layout and would leak
+  // in any tooltip screenshot. Matches runs-tree-provider tooltip rule.
   return lines.join('\n');
 }
 

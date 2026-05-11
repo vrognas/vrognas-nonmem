@@ -33,6 +33,23 @@ export interface WebviewShellOptions {
 }
 
 /**
+ * Sanitise a `renderError` message coming back from a WebView before
+ * logging it. Both `fit-inspector-provider.ts` and `lineage-panel.ts`
+ * need this — Chromium's `e.stack` (and occasionally `e.message`) can
+ * embed `vscode-resource://` URIs and absolute paths (POSIX
+ * `/home/<user>/…` or Windows `C:\Users\…`). The webview SHOULD send
+ * `e.message` only (defense-in-depth), but the receiver scrubs anyway.
+ * Caps to 500 chars so a runaway stack can't flood the Output channel.
+ */
+export function sanitizeWebviewMessage(raw: string): string {
+  return raw
+    .replace(/vscode-resource:\/\/\S+/g, '<resource>')
+    .replace(/[A-Za-z]:\\[^\s,;:]*/g, '<path>')
+    .replace(/\/home\/[^/\s]+\/\S*/g, '/home/<user>/<path>')
+    .slice(0, 500);
+}
+
+/**
  * Build the WebView HTML shell with a strict CSP. Locks script + style
  * sources to `webview.cspSource` (so only extension-bundled assets
  * load); no remote sources, no inline scripts. Inline styles allowed

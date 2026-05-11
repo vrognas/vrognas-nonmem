@@ -30,7 +30,7 @@ import {
   writeOverride,
   type RelationActionDeps,
 } from './lineage-relation-actions';
-import { buildWebviewShell } from './webview-shell';
+import { buildWebviewShell, sanitizeWebviewMessage } from './webview-shell';
 
 /** Special selector value meaning "show every run in the workspace". */
 const ALL_RUNS_SELECTION = '';
@@ -184,11 +184,7 @@ export class LineagePanel {
     } else if (m.type === 'ready') {
       void this.refresh();
     } else if (m.type === 'renderError' && typeof m.message === 'string') {
-      // Sanitise mirror of fit-inspector-provider: webview's
-      // String(ev.reason) can carry vscode-resource:// URIs or raw paths
-      // from nested Cytoscape errors. Strip + cap length.
-      const sanitized = m.message.replace(/vscode-resource:\/\/\S+/g, '<resource>').slice(0, 500);
-      this.log(`lineage-panel: client render error: ${sanitized}`);
+      this.log(`lineage-panel: client render error: ${sanitizeWebviewMessage(m.message)}`);
     } else if (
       m.type === 'requestEdgeIOfv' &&
       typeof m.parentModelPath === 'string' &&

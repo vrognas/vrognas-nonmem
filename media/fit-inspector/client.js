@@ -36,7 +36,9 @@ window.addEventListener('message', (ev) => {
       // the panel goes empty with no clue why.
       vscode.postMessage({
         type: 'renderError',
-        message: e && e.stack ? e.stack : String(e),
+        // Don't ship `e.stack` — Chromium frames include vscode-resource://
+        // URIs and absolute paths. Receiver sanitises too (defense-in-depth).
+        message: e && e.message ? e.message : String(e),
       });
       // Best-effort fallback: clear and show a one-line error so the
       // user knows something went wrong even if they don't check Output.
@@ -60,6 +62,13 @@ window.addEventListener('unhandledrejection', (ev) => {
 // renderers (which are pure helpers) can read them without threading
 // the payload through every call site. Default values match
 // `DEFAULT_THRESHOLDS` in fit-inspector-payload.ts.
+// WebView only reads thresholds it actually consumes; correlation
+// thresholds (corrRedFlagThreshold / corrWarnThreshold) are NOT here
+// because pair classification (`f.kind`) is done payload-side in
+// fit-inspector-payload.ts. If we ever ship a tooltip / message that
+// quotes the raw threshold, source it from the payload's `thresholds`
+// at point-of-use, NOT this defaults block — which would otherwise
+// drift from extension-host config defaults.
 let thresholds = {
   shrinkageWarnPct: 30,
   shrinkageBorderlineWarnPct: 20,
@@ -68,8 +77,6 @@ let thresholds = {
   rseOmegaWarnPct: 50,
   pValWarnThreshold: 0.1,
   pValBadThreshold: 0.05,
-  corrRedFlagThreshold: 0.95,
-  corrWarnThreshold: 0.9,
   condNumberBadThreshold: 1000,
   condNumberWarnThreshold: 100,
   nsigRequired: null,
@@ -1551,7 +1558,16 @@ function renderSummary(s) {
   // already gets a `-eval` suffix (e.g. `FO-eval`); this complementary
   // pill makes the special status unmissable for users skimming the
   // inspector. Detect via the suffix so we don't need a separate field.
-  if (s.lst && s.lst.methodShort && s.lst.methodShort.endsWith('-eval')) {
+  // Chained $EST: ANY step being MAXEVAL=0 makes this an init-only OFV,
+  // so the pill needs to surface from the multi-step array — same rule
+  // as the OFV-headline isEval in renderHeadline (v0.0.194 fix). The
+  // scalar `methodShort` only reflects the last step, so a FOCE → IMP
+  // EONLY chain (with MAXEVAL=0 in the IMP step) would have hidden the
+  // pill while the headline correctly showed "(at init)".
+  const methodsShortBadge = Array.isArray(s.lst && s.lst.methodsShort) ? s.lst.methodsShort : [];
+  const anyEval = methodsShortBadge.some((m) => typeof m === 'string' && m.endsWith('-eval'))
+    || (s.lst && s.lst.methodShort ? s.lst.methodShort.endsWith('-eval') : false);
+  if (anyEval) {
     const evalTag = document.createElement('span');
     evalTag.className = 'method method-eval';
     evalTag.textContent = 'EVAL ONLY';

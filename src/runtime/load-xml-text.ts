@@ -31,7 +31,7 @@ export async function readXmlText(
     try {
       return await fs.readFile(xmlPath, 'utf8');
     } catch (e) {
-      log(`load-xml-text: read failed for ${xmlPath}: ${errMsg(e)}`);
+      log(`load-xml-text: read failed for ${path.basename(xmlPath)}: ${errMsg(e)}`);
     }
   }
 
@@ -42,7 +42,9 @@ export async function readXmlText(
   // we pass the bare member name here.
   const extPath = await findExtFile(lstPath);
   if (!extPath) {
-    log(`load-xml-text: no .ext found near ${lstPath} — can't locate modelfit_dir for archive fallback`);
+    log(
+      `load-xml-text: no .ext found near ${path.basename(lstPath)} — can't locate modelfit_dir for archive fallback`,
+    );
     return null;
   }
   if (!runner) {
@@ -57,6 +59,8 @@ export async function readXmlText(
   });
   if (archived) return archived.content;
 
-  log(`load-xml-text: no .xml found for ${lstPath} (NM < 7.2, -xmloff, or archive missing/extract-failed)`);
+  log(
+    `load-xml-text: no .xml found for ${path.basename(lstPath)} (NM < 7.2, -xmloff, or archive missing/extract-failed)`,
+  );
   return null;
 }

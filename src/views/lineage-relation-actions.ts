@@ -62,7 +62,9 @@ export async function writeOverride(
     void vscode.window.showWarningMessage(
       `Positron NONMEM: setting that parent for ${childBasename} would create a cycle in the lineage. No change made.`,
     );
-    deps.log(`lineage-panel: refused cycle-creating override ${childBasename} → ${parentPath}`);
+    deps.log(
+      `lineage-panel: refused cycle-creating override ${childBasename} → ${path.basename(parentPath)}`,
+    );
     return;
   }
   const config = vscode.workspace.getConfiguration('nonmem');

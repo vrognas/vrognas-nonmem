@@ -29,7 +29,7 @@
 
 import * as vscode from 'vscode';
 import type { InspectorPayload } from './fit-inspector-payload';
-import { buildWebviewShell } from './webview-shell';
+import { buildWebviewShell, sanitizeWebviewMessage } from './webview-shell';
 
 export class FitInspectorProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'positronNonmem.fitInspector';
@@ -93,13 +93,9 @@ export class FitInspectorProvider implements vscode.WebviewViewProvider {
       return;
     }
     if (m.type === 'renderError') {
-      // Sanitise: webview's String(ev.reason) can occasionally carry
-      // vscode-resource:// URIs or raw paths from nested errors. Strip
-      // those and cap length so the Output channel can't leak the
-      // resolved local/remote path.
-      const raw = String(m.message ?? '<no message>');
-      const sanitized = raw.replace(/vscode-resource:\/\/\S+/g, '<resource>').slice(0, 500);
-      this.log(`fit-inspector: webview render error: ${sanitized}`);
+      this.log(
+        `fit-inspector: webview render error: ${sanitizeWebviewMessage(String(m.message ?? '<no message>'))}`,
+      );
     }
   }
 
