@@ -7,6 +7,12 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **refactor: 3rd-review fixes (v0.0.192).** Two targeted fixes from the third review pass; #3 (parse-lst god-module split) deferred to its own ship, #5 (trajectory header wrap) parked pending empirical evidence, #6 (BuildContext threshold wiring) was a false alarm — all 9 fields are wired via `cfg.get` in `extension.ts:143-151`.
+
+  (1) **ETABAR sub-window bounded by section headers**: tightened the `.lst` ETABAR-block scanner to stop at the next section boundary (`STANDARD ERROR OF ESTIMATE`, `EIGENVALUES OF COR MATRIX`, `(OMEGA|SIGMA) - (COV|CORR) MATRIX`) instead of a fixed 30-line lookahead. Defensive against chained-$EST .lst files where ETABAR and the start of the next $EST block could be < 30 lines apart.
+
+  (4) **Shared `parseExtBlocks` tokenizer**: extracted the low-level `.ext` block walker into `parse-ext-tokenizer.ts` (~100 LOC). `parseExtFit` (final estimates + SEs) and `parseExtTrajectory` (per-iteration values) now share `parseExtBlocks(text): ExtBlock[]` + `normalizeColumnName(token)`. Eliminates drift risk: previously the THETA1→THETA(1) rewrite lived in two functions (`rewriteHeader` vs `normalizeName`) — bit-for-bit identical. 9 new tokenizer tests; `parseExtTrajectory` shrunk from ~70 to ~30 lines.
+
 - **refactor: 5 review fixes (v0.0.191).** Big-scope cleanup from the second review pass.
 
   (1) **Dropped dead payload fields + `findPropagatedKeys` helper**: `xmlEstimationNonDefaults`, `xmlEstimationUserDriven`, `xmlEstimationPropagated` were computed every render and shipped over postMessage but consumed by nothing — the renderer reads only `xmlEstimationTiers`. Deleted them all + the `findPropagatedKeys` helper that was only fed by them + its 7-test block. The unified classifier (`classifyEstStep`) is now the only $EST tier producer.

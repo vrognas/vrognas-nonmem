@@ -655,15 +655,26 @@ function readEtabarBlock(lines: string[]): {
   if (etabarIdx === -1) {
     return { etabar: [], etabarSe: [], etaN: [], etaPVal: [] };
   }
-  // Sub-window of ~30 lines below the ETABAR header — enough for the
-  // SE / N / P VAL block plus possible continuation lines.
-  const winEnd = Math.min(lines.length, etabarIdx + 30);
+  // Sub-window from the start through the ETABAR block — enough for
+  // the SE / N / P VAL rows plus continuation lines, but stopping
+  // before the next .lst section. The 30-line cap is a fallback;
+  // section-boundary detection is the primary stop so a chained-$EST
+  // run's matrix-method `SE:` header (which lives further down in
+  // `STANDARD ERROR OF ESTIMATE` blocks) can't false-match for
+  // `readNumericRow`'s last-match scan.
+  let winEnd = Math.min(lines.length, etabarIdx + 30);
+  for (let i = etabarIdx + 1; i < winEnd; i++) {
+    const l = lines[i];
+    if (/^\s*STANDARD\s+ERROR\s+OF\s+ESTIMATE/i.test(l)
+        || /^\s*EIGENVALUES\s+OF\s+COR\s+MATRIX/i.test(l)
+        || /^\s*(OMEGA|SIGMA)\s+-\s+(COV|CORR)\s+MATRIX/i.test(l)) {
+      winEnd = i;
+      break;
+    }
+  }
   const window = lines.slice(0, winEnd);
   // For each label read positionally within the window using the same
-  // continuation-line rules as readNumericRow. The window starts at 0
-  // (so ETABAR at etabarIdx is in the window for `readNumericRow`'s
-  // last-match scan) and ends 30 lines later (so STANDARD ERROR OF
-  // ESTIMATE blocks further down can't be reached).
+  // continuation-line rules as readNumericRow.
   return {
     etabar: readNumericRow(window, 'ETABAR'),
     etabarSe: readNumericRow(window.slice(etabarIdx + 1), 'SE'),

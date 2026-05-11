@@ -71,7 +71,7 @@ In Positron:
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE).
+MIT — see the `LICENSE` file in the repo root.
 
 ## Inspirations
 

@@ -27,6 +27,8 @@
 // the row even when `$COV` was skipped or failed; rendering "SE 0" is
 // misleading, so we drop it and the caller renders "—" / hides SE.
 
+import { parseExtBlocks } from './parse-ext-tokenizer';
+
 const FINAL_SENTINEL = -1000000000;
 const SE_SENTINEL = -1000000001;
 const FINAL_STDCORR_SENTINEL = -1000000004;
@@ -94,7 +96,20 @@ export interface ExtEstimates {
  * `-1000000000` row (run aborted before convergence, or .ext truncated).
  */
 export function parseExtFit(extText: string): ExtEstimates | null {
-  let header: string[] | null = null;
+  // Use the LAST TABLE block whose header is present. This matches the
+  // "last $EST step wins" rule. If an earlier block emitted (e.g.)
+  // `-1000000004` but the last didn't, we naturally drop it because we
+  // only inspect the last block's rows.
+  const blocks = parseExtBlocks(extText);
+  const last = blocks.length > 0 ? blocks[blocks.length - 1] : null;
+  if (!last || !last.header) return null;
+  // Header in parseExtBlocks excludes the leading 'ITERATION' token,
+  // but the row-tokens here also exclude the leading iter column —
+  // matched indices. Build a synthetic "with iter" view that the rest
+  // of this code expects (legacy code used full token arrays with
+  // leading column).
+  const headerWithIter = ['ITERATION', ...last.header];
+
   let initRow: string[] | null = null;
   let finalRow: string[] | null = null;
   let seRow: string[] | null = null;
@@ -103,60 +118,36 @@ export function parseExtFit(extText: string): ExtEstimates | null {
   let fixFlagsRow: string[] | null = null;
   let termCodesRow: string[] | null = null;
 
-  for (const rawLine of extText.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    const tokens = line.split(/\s+/);
-    if (tokens[0] === 'TABLE') {
-      // Multi-$EST: each $EST emits its own TABLE / iteration block.
-      // Reset ALL captured rows on each new TABLE so the LAST table's
-      // values win (matches the "last $EST step" rule we use throughout).
-      // Without this, an earlier step that emitted e.g. `-1000000004`
-      // (stdcorr) but a later step that didn't would leak the earlier
-      // step's stdcorr forward as if it were the final-step's result.
-      initRow = null;
-      finalRow = null;
-      seRow = null;
-      stdcorrFinalRow = null;
-      stdcorrSeRow = null;
-      fixFlagsRow = null;
-      termCodesRow = null;
-      continue;
-    }
-    if (tokens[0] === 'ITERATION') {
-      header = tokens;
-      continue;
-    }
-    const iter = Number(tokens[0]);
-    if (!Number.isFinite(iter)) continue;
-    if (iter === INIT_ITER && initRow === null) initRow = tokens;
-    else if (iter === FINAL_SENTINEL) finalRow = tokens;
-    else if (iter === SE_SENTINEL) seRow = tokens;
-    else if (iter === FINAL_STDCORR_SENTINEL) stdcorrFinalRow = tokens;
-    else if (iter === SE_STDCORR_SENTINEL) stdcorrSeRow = tokens;
-    else if (iter === FIX_FLAGS_SENTINEL) fixFlagsRow = tokens;
-    else if (iter === TERM_CODES_SENTINEL) termCodesRow = tokens;
+  for (const { iter, tokens } of last.rows) {
+    const fullRow = [String(iter), ...tokens];
+    if (iter === INIT_ITER && initRow === null) initRow = fullRow;
+    else if (iter === FINAL_SENTINEL) finalRow = fullRow;
+    else if (iter === SE_SENTINEL) seRow = fullRow;
+    else if (iter === FINAL_STDCORR_SENTINEL) stdcorrFinalRow = fullRow;
+    else if (iter === SE_STDCORR_SENTINEL) stdcorrSeRow = fullRow;
+    else if (iter === FIX_FLAGS_SENTINEL) fixFlagsRow = fullRow;
+    else if (iter === TERM_CODES_SENTINEL) termCodesRow = fullRow;
   }
 
-  if (!header || !finalRow) return null;
+  if (!finalRow) return null;
 
-  const finals = pickRow(header, finalRow);
+  const finals = pickRow(headerWithIter, finalRow);
   const ofv = finals.get('OBJ');
   if (ofv === undefined) return null; // truncated .ext or missing OBJ column
   finals.delete('OBJ');
 
-  const inits = initRow ? pickRow(header, initRow) : new Map<string, number>();
+  const inits = initRow ? pickRow(headerWithIter, initRow) : new Map<string, number>();
   inits.delete('OBJ');
 
-  const standardErrors = pickSeRow(header, seRow);
+  const standardErrors = pickSeRow(headerWithIter, seRow);
   const finalsStdcorr = stdcorrFinalRow
-    ? withoutObj(pickRow(header, stdcorrFinalRow))
+    ? withoutObj(pickRow(headerWithIter, stdcorrFinalRow))
     : new Map<string, number>();
-  const standardErrorsStdcorr = pickSeRow(header, stdcorrSeRow);
+  const standardErrorsStdcorr = pickSeRow(headerWithIter, stdcorrSeRow);
 
   const fixedFlags = new Map<string, boolean>();
   if (fixFlagsRow) {
-    const flags = pickRow(header, fixFlagsRow);
+    const flags = pickRow(headerWithIter, fixFlagsRow);
     flags.delete('OBJ');
     for (const [name, v] of flags) fixedFlags.set(name, v === 1);
   }
@@ -203,24 +194,17 @@ function withoutObj(map: Map<string, number>): Map<string, number> {
 }
 
 /**
- * Zip header columns to row values, applying our access-key rewrite for
- * THETA columns (`THETA1` → `THETA(1)`). Off-by-one safe: if the row is
+ * Zip header columns to row values. Off-by-one safe: if the row is
  * shorter than the header (truncated file), missing columns are skipped.
+ * Header is pre-normalised by `parseExtBlocks` (THETA1 → THETA(1) etc.),
+ * so this function is now a pure zip.
  */
 function pickRow(header: string[], row: string[]): Map<string, number> {
   const out = new Map<string, number>();
   // Skip column 0 (`ITERATION` / iter sentinel).
   for (let i = 1; i < header.length && i < row.length; i++) {
-    const key = rewriteHeader(header[i]);
     const value = Number(row[i]);
-    if (Number.isFinite(value)) out.set(key, value);
+    if (Number.isFinite(value)) out.set(header[i], value);
   }
   return out;
-}
-
-function rewriteHeader(col: string): string {
-  // `THETA1` → `THETA(1)`. OMEGA(1,1) and SIGMA(1,1) pass through.
-  // OBJ passes through unchanged so the caller can extract it.
-  const m = col.match(/^THETA(\d+)$/);
-  return m ? `THETA(${m[1]})` : col;
 }
