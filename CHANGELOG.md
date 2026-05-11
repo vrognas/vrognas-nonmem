@@ -7,6 +7,19 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **fix: 4th-review batch — privacy + leak + bug fixes (v0.0.193).** Next-layer review covered the renderer JS layer (`media/fit-inspector/*.js`), the webview wiring layer (`fit-inspector-provider.ts`, `cnv-verdict.ts`, `correlation-redflags.ts`), and the runtime execution layer (`runtime-session.ts`, `runtime-manager.ts`, `active-runs-watcher.ts`, `run-model.ts`, `run-progress.ts`). 7 of 13 actionable items shipped in this batch; smaller dedup/SOLID fixes and R4 (which turned out to be a false-positive — `return` inside a `try` block does fire the `finally`) deferred.
+
+  **Privacy (CLAUDE.md blocker):**
+  - `extension.ts:213-217,249-256`: dropped `installDir` from the Output channel log lines (`registered NONMEM …` / `dropped psn.conf entry …`). Remote path fingerprints host layout; label alone is enough to identify the entry.
+  - `runtime/active-runs-watcher.ts:86-119`: replaced raw `uri.fsPath` / `modelfitDir` / `modelPath` interpolations with `path.basename(…)` in `log()` calls. Fs paths on a Remote SSH session are remote paths and must not surface in the Output channel.
+  - `views/fit-inspector-provider.ts:89`: `renderError` log now strips `vscode-resource://…` URIs from the webview-supplied `m.message` and caps to 500 chars. Defends against a nested error's stringified message embedding the resolved local path.
+
+  **Leak / bug fixes:**
+  - `views/fit-inspector-provider.ts:54-63`: captured `onDidReceiveMessage` + `onDidChangeVisibility` disposables and wired them to `view.onDidDispose`. Previously dropped → listeners accumulated across reload cycles.
+  - `runtime/runtime-session.ts`: new `currentExecuteId` private field tracked by `dispatch()`; `interrupt()` now emits a paired per-execution `Idle` for the in-flight id so the Console line redraws even when the SSH transport hangs and `dispatch()`'s `finally` never reaches the runner result.
+  - `views/cnv-verdict.ts:75-77`: `converged` now requires `paramTotal > 0`. With CTYPE=0 globally (every non-OFV α ≤ 0, nothing tested), the OFV-only `p ≥ α` check is not a full convergence verdict — flagging it green would mislead.
+  - `views/correlation-redflags.ts:65-71`: entry gate is now `Math.min(warn, bad)` instead of `warn`. When the user misconfigures `corrRedFlagThreshold < corrWarnThreshold`, the band `[bad, warn)` is now correctly classified as `'bad'` instead of silently dropped. Matches the comment's "degrades to single-tier" promise.
+
 - **refactor: 3rd-review fixes (v0.0.192).** Two targeted fixes from the third review pass; #3 (parse-lst god-module split) deferred to its own ship, #5 (trajectory header wrap) parked pending empirical evidence, #6 (BuildContext threshold wiring) was a false alarm — all 9 fields are wired via `cfg.get` in `extension.ts:143-151`.
 
   (1) **ETABAR sub-window bounded by section headers**: tightened the `.lst` ETABAR-block scanner to stop at the next section boundary (`STANDARD ERROR OF ESTIMATE`, `EIGENVALUES OF COR MATRIX`, `(OMEGA|SIGMA) - (COV|CORR) MATRIX`) instead of a fixed 30-line lookahead. Defensive against chained-$EST .lst files where ETABAR and the start of the next $EST block could be < 30 lines apart.

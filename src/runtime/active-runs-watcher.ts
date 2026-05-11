@@ -84,12 +84,13 @@ export class ActiveRunsWatcher implements vscode.Disposable {
    * start polling psn.ext for live iteration progress.
    */
   private async handlePsnModCreate(uri: vscode.Uri): Promise<void> {
-    this.log(`watcher: psn.mod created at ${uri.fsPath}`);
+    // Log basenames only — fsPath on Remote SSH is the remote path (privacy).
+    this.log(`watcher: psn.mod created (${path.basename(path.dirname(path.dirname(uri.fsPath)))})`);
     const modelfitDir = path.dirname(path.dirname(uri.fsPath));
     const meta = await readModelMetadata(modelfitDir);
     if (!meta) {
       this.log(
-        `watcher: skipped (no model name found in ${modelfitDir}/{model_NMrun_translation.txt,command.txt})`,
+        `watcher: skipped (no model name in ${path.basename(modelfitDir)}/{model_NMrun_translation.txt,command.txt})`,
       );
       return;
     }
@@ -103,7 +104,9 @@ export class ActiveRunsWatcher implements vscode.Disposable {
     } else {
       const modelDir = await findCallingCwd(modelfitDir, meta.basename);
       if (!modelDir) {
-        this.log(`watcher: skipped (could not find ${meta.basename} above ${modelfitDir})`);
+        this.log(
+          `watcher: skipped (could not find ${meta.basename} above ${path.basename(modelfitDir)})`,
+        );
         return;
       }
       modelPath = path.join(modelDir, meta.basename);
@@ -115,8 +118,9 @@ export class ActiveRunsWatcher implements vscode.Disposable {
       .list()
       .find((r) => r.modelPath === modelPath && r.state === 'running');
     const runId = existing ? existing.id : this.tracker.start(modelPath, modelfitDir);
-    if (existing) this.log(`watcher: matched existing tracker entry ${runId} for ${modelPath}`);
-    else this.log(`watcher: registered new tracker entry ${runId} for ${modelPath}`);
+    const modelBasename = path.basename(modelPath);
+    if (existing) this.log(`watcher: matched existing tracker entry ${runId} for ${modelBasename}`);
+    else this.log(`watcher: registered new tracker entry ${runId} for ${modelBasename}`);
     // PsN may fire `psn.mod` more than once per run (setup re-touches the
     // file, modelfit_dir<N> creation events arrive late). Tear down any
     // prior poller / stale-timeout for this runId before reinstalling so

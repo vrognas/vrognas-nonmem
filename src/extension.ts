@@ -211,9 +211,8 @@ async function registerRuntime(
     positron.runtime.registerLanguageRuntimeManager('nmtran', runtimeManager),
   );
   for (const e of nmVersions) {
-    channel.appendLine(
-      `[positron-nonmem] registered NONMEM ${e.version} (${e.label}) -> '${e.installDir}'.`,
-    );
+    // No installDir in logs — remote path encodes host layout (privacy hygiene).
+    channel.appendLine(`[positron-nonmem] registered NONMEM ${e.version} (${e.label}).`);
   }
 }
 
@@ -247,12 +246,12 @@ async function resolveNmVersions(channel: vscode.OutputChannel): Promise<NmVersi
         kept.push(entry);
       } else {
         channel.appendLine(
-          `[positron-nonmem] dropped psn.conf entry '${entry.label}' (path is not a directory): ${entry.installDir}`,
+          `[positron-nonmem] dropped psn.conf entry '${entry.label}' (path is not a directory).`,
         );
       }
     } catch {
       channel.appendLine(
-        `[positron-nonmem] dropped psn.conf entry '${entry.label}' (missing on disk): ${entry.installDir}`,
+        `[positron-nonmem] dropped psn.conf entry '${entry.label}' (missing on disk).`,
       );
     }
   }

@@ -51,12 +51,18 @@ export class FitInspectorProvider implements vscode.WebviewViewProvider {
     this.view = view;
     view.webview.options = { enableScripts: true, localResourceRoots: [this.extensionUri] };
     view.webview.html = this.renderHtml(view.webview);
-    view.webview.onDidReceiveMessage((msg: unknown) => this.onMessage(msg));
+    // Wire listener disposables to view.onDidDispose so they don't accumulate
+    // across reload cycles (VS Code re-resolves on window reload).
+    const msgSub = view.webview.onDidReceiveMessage((msg: unknown) => this.onMessage(msg));
     // postMessage on a hidden WebView is silently dropped, so we have
     // to replay the last payload whenever visibility flips back on.
-    view.onDidChangeVisibility(() => {
+    const visSub = view.onDidChangeVisibility(() => {
       this.log(`fit-inspector: visibility=${view.visible}`);
       if (view.visible) this.post({ type: 'update', payload: this.lastPayload });
+    });
+    view.onDidDispose(() => {
+      msgSub.dispose();
+      visSub.dispose();
     });
     this.log(`fit-inspector: resolveWebviewView fired (visible=${view.visible})`);
     this.post({ type: 'update', payload: this.lastPayload });
@@ -86,7 +92,13 @@ export class FitInspectorProvider implements vscode.WebviewViewProvider {
       return;
     }
     if (m.type === 'renderError') {
-      this.log(`fit-inspector: webview render error: ${String(m.message ?? '<no message>')}`);
+      // Sanitise: webview's String(ev.reason) can occasionally carry
+      // vscode-resource:// URIs or raw paths from nested errors. Strip
+      // those and cap length so the Output channel can't leak the
+      // resolved local/remote path.
+      const raw = String(m.message ?? '<no message>');
+      const sanitized = raw.replace(/vscode-resource:\/\/\S+/g, '<resource>').slice(0, 500);
+      this.log(`fit-inspector: webview render error: ${sanitized}`);
     }
   }
 

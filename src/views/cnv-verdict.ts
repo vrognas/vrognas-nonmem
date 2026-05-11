@@ -72,6 +72,10 @@ export function classifyCnv(table: CnvTable | null): CnvVerdict | null {
     }
   }
 
-  const converged = ofvP >= ofvAlpha && nonConvergedParams.length === 0;
+  // Require at least one tested non-OFV parameter — when CTYPE=0 globally
+  // (all α ≤ 0), paramTotal===0 and the OFV-only "p ≥ α" check alone isn't
+  // a full convergence verdict; flagging green would be misleading.
+  const converged =
+    ofvP >= ofvAlpha && nonConvergedParams.length === 0 && paramTotal > 0;
   return { converged, ofvP, ofvAlpha, paramConverged, paramTotal, nonConvergedParams };
 }

@@ -62,6 +62,11 @@ export function findCorrelationRedFlags(
   if (!table) return [];
   const warn = Math.max(0, warnThreshold);
   const bad = Math.max(0, redThreshold);
+  // Entry gate is the LOWER of the two thresholds. Otherwise misconfigured
+  // input (bad < warn) silently drops the [bad, warn) band — pairs that
+  // should classify as 'bad' wouldn't be seen at all. With the gate at
+  // min(warn,bad), the comment's "degrades to single-tier" promise holds.
+  const gate = Math.min(warn, bad);
   const flags: CorrelationRedFlag[] = [];
   const names = table.paramNames;
   for (let i = 0; i < names.length; i++) {
@@ -71,7 +76,7 @@ export function findCorrelationRedFlags(
       const r = inner.get(names[j]);
       if (typeof r !== 'number' || !Number.isFinite(r)) continue;
       const abs = Math.abs(r);
-      if (abs < warn) continue;
+      if (abs < gate) continue;
       const kind: 'warn' | 'bad' = abs >= bad ? 'bad' : 'warn';
       flags.push({ a: names[i], b: names[j], r, kind });
     }

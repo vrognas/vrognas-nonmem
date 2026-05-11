@@ -72,6 +72,13 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
   private currentParsedModel: NmtranParsedModel | null = null;
   /** URI of the editor that produced `currentParsedModel`; needed to resolve `view` RPCs back to the source file. */
   private currentSourceUri: vscode.Uri | null = null;
+  /**
+   * Execute id of the currently in-flight dispatch, or null when idle.
+   * interrupt() reads this to emit a paired per-execution Idle — otherwise
+   * the Console line stays marked Busy if the SSH transport hangs and the
+   * dispatch never reaches its finally.
+   */
+  private currentExecuteId: string | null = null;
 
   constructor(
     runtimeMetadata: positron.LanguageRuntimeMetadata,
@@ -128,6 +135,7 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
   }
 
   private async dispatch(code: string, id: string): Promise<void> {
+    this.currentExecuteId = id;
     try {
       if (isExecuteModelRun(code)) {
         // Model runs are tracked in the Active Runs view (FS-watcher-
@@ -179,6 +187,7 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
       // with the session-level Idle.
       this.emitOnlineState(id, this.positron.RuntimeOnlineState.Idle);
       this.transitionState(this.positron.RuntimeState.Idle);
+      if (this.currentExecuteId === id) this.currentExecuteId = null;
     }
   }
 
@@ -218,7 +227,15 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
     // We can't currently abort the in-flight transport.run(). Killing the
     // ssh / shell child needs a handle the Transport doesn't expose yet
     // (M3+ adds that when long NONMEM runs make it actually matter).
-    // For now, we just flip session state back to Idle so the UI unfreezes.
+    // For now, we flip session state back to Idle so the UI unfreezes,
+    // AND emit the per-execution Idle for the in-flight id so its Console
+    // line redraws. dispatch()'s own finally would do this eventually,
+    // but if the transport hangs (SSH connection drop) the finally may
+    // never fire — interrupt() needs to leave the Console in a sane state
+    // independent of the runner.
+    if (this.currentExecuteId) {
+      this.emitOnlineState(this.currentExecuteId, this.positron.RuntimeOnlineState.Idle);
+    }
     this.transitionState(this.positron.RuntimeState.Idle);
   }
 
