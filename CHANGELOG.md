@@ -7,6 +7,12 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **feat: configurable condition-number thresholds (v0.0.195).** The COR-matrix condition-number cell in the Fit Inspector's diagnostics block was previously hardcoded warn=100, bad=1000. Now driven by two settings:
+  - `nonmem.condNumberBadThreshold` (default 1000) — RED tier
+  - `nonmem.condNumberWarnThreshold` (default 100) — ORANGE tier
+
+  Wired through the same path as the other 9 threshold knobs: defaults live in `INSPECTOR_THRESHOLD_DEFAULTS` (single source of truth, exported from `fit-inspector-payload.ts`), `extension.ts` reads via `cfg.get` with the constant as fallback, payload `thresholds` ships the resolved values, and `client.js` reads `thresholds.condNumberBadThreshold` / `condNumberWarnThreshold` to colour the cell + build the tooltip. Set the warn threshold ≥ bad to disable the warn tier entirely.
+
 - **refactor: 4th-review deferred-batch follow-ups (v0.0.194).** Assessed the 13 items skipped from v0.0.193 and shipped 8. Five remain deferred with rationale.
 
   **Applied:**

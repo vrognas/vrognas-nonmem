@@ -190,6 +190,20 @@ export interface InspectorThresholds {
    * flagged pair becomes red).
    */
   corrWarnThreshold: number;
+  /**
+   * Condition number of the COR matrix above this is highlighted RED
+   * (`bad` tier — strongly ill-conditioned, suspect overparameterization).
+   * Pharmacometrics convention: 1000. User-configurable via
+   * `nonmem.condNumberBadThreshold`.
+   */
+  condNumberBadThreshold: number;
+  /**
+   * Condition number above this (and below `condNumberBadThreshold`) is
+   * highlighted ORANGE (`warn` tier — ill-conditioned; check for highly-
+   * correlated parameters). Default 100. Set ≥ `condNumberBadThreshold`
+   * to disable the warn tier.
+   */
+  condNumberWarnThreshold: number;
 }
 
 export interface InspectorRunNotes {
@@ -469,6 +483,10 @@ export interface BuildContext {
   corrRedFlagThreshold?: number;
   /** Pairwise correlation `|r|` warn (yellow) threshold. Default 0.90. */
   corrWarnThreshold?: number;
+  /** Condition-number red-bad threshold. Default 1000 (pharmacometrics convention). */
+  condNumberBadThreshold?: number;
+  /** Condition-number warn (orange) threshold. Default 100. */
+  condNumberWarnThreshold?: number;
 }
 
 /**
@@ -491,6 +509,8 @@ export const INSPECTOR_THRESHOLD_DEFAULTS = {
   pValBadThreshold: 0.05,
   corrRedFlagThreshold: 0.95,
   corrWarnThreshold: 0.9,
+  condNumberBadThreshold: 1000,
+  condNumberWarnThreshold: 100,
 } as const;
 
 const DEFAULT_THRESHOLDS: InspectorThresholds = {
@@ -634,6 +654,10 @@ export function buildInspectorPayload(
       nsigRequired: ctx.lst?.nsigRequired ?? null,
       corrRedFlagThreshold: ctx.corrRedFlagThreshold ?? DEFAULT_THRESHOLDS.corrRedFlagThreshold,
       corrWarnThreshold: ctx.corrWarnThreshold ?? DEFAULT_THRESHOLDS.corrWarnThreshold,
+      condNumberBadThreshold:
+        ctx.condNumberBadThreshold ?? DEFAULT_THRESHOLDS.condNumberBadThreshold,
+      condNumberWarnThreshold:
+        ctx.condNumberWarnThreshold ?? DEFAULT_THRESHOLDS.condNumberWarnThreshold,
     },
     trajectories: (ctx.trajectories ?? []).map(toTrajectoryWire),
   };

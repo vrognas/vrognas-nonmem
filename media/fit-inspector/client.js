@@ -70,6 +70,8 @@ let thresholds = {
   pValBadThreshold: 0.05,
   corrRedFlagThreshold: 0.95,
   corrWarnThreshold: 0.9,
+  condNumberBadThreshold: 1000,
+  condNumberWarnThreshold: 100,
   nsigRequired: null,
 };
 
@@ -724,11 +726,13 @@ function renderDiagnostics(d) {
     }
     if (typeof d.conditionNumber === 'number') {
       const c = d.conditionNumber;
-      const kind = c > 1000 ? 'bad' : c > 100 ? 'warn' : null;
+      const bad = thresholds.condNumberBadThreshold;
+      const warn = thresholds.condNumberWarnThreshold;
+      const kind = c > bad ? 'bad' : c > warn ? 'warn' : null;
       const tip = kind === 'bad'
-        ? 'Cond > 1000 — COR matrix strongly ill-conditioned; suspect overparameterization.'
+        ? 'Cond > ' + bad + ' — COR matrix strongly ill-conditioned; suspect overparameterization.'
         : kind === 'warn'
-          ? 'Cond > 100 — ill-conditioned COR matrix; check for highly-correlated parameters.'
+          ? 'Cond > ' + warn + ' — ill-conditioned COR matrix; check for highly-correlated parameters.'
           : null;
       if (d.eigenvalues) line.append(document.createTextNode(' · '));
       line.append(metaPart('Condition number: ' + fmtNum(c), kind, tip));

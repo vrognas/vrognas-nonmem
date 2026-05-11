@@ -2,7 +2,7 @@
   "name": "positron-nonmem",
   "displayName": "Positron NONMEM",
   "description": "NONMEM as a first-class Positron language runtime: local nmfe76 execution (or via Positron Remote SSH), run history tree, and pharmacometric workbench features. Companion to the vscode-nmtran language extension.",
-  "version": "0.0.194",
+  "version": "0.0.195",
   "publisher": "vrognas",
   "license": "MIT",
   "private": true,
@@ -223,6 +223,18 @@
           "minimum": 0,
           "maximum": 1,
           "description": "Pairwise parameter correlation |r| above this (and below `corrRedFlagThreshold`) is highlighted YELLOW (warn tier) in the Fit Inspector's diagnostics red-flag list. Default 0.9. Set ≥ corrRedFlagThreshold to disable the warn tier."
+        },
+        "nonmem.condNumberBadThreshold": {
+          "type": "number",
+          "default": 1000,
+          "minimum": 1,
+          "description": "COR-matrix condition number above this is highlighted RED (bad tier — strongly ill-conditioned; suspect overparameterization). Default 1000 (pharmacometrics convention; matches sumo / Pirana)."
+        },
+        "nonmem.condNumberWarnThreshold": {
+          "type": "number",
+          "default": 100,
+          "minimum": 1,
+          "description": "COR-matrix condition number above this (and below `condNumberBadThreshold`) is highlighted ORANGE (warn tier — ill-conditioned; check for highly-correlated parameters). Default 100. Set ≥ condNumberBadThreshold to disable the warn tier."
         },
         "nonmem.lineages": {
           "type": "object",

@@ -180,6 +180,14 @@ function pushVariables(ctx: VariablesContext | null): void {
         'corrWarnThreshold',
         INSPECTOR_THRESHOLD_DEFAULTS.corrWarnThreshold,
       ),
+      condNumberBadThreshold: cfg.get<number>(
+        'condNumberBadThreshold',
+        INSPECTOR_THRESHOLD_DEFAULTS.condNumberBadThreshold,
+      ),
+      condNumberWarnThreshold: cfg.get<number>(
+        'condNumberWarnThreshold',
+        INSPECTOR_THRESHOLD_DEFAULTS.condNumberWarnThreshold,
+      ),
     });
     fitInspector.update(payload, ctx?.modUri);
   }
