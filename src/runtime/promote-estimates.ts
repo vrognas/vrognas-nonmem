@@ -10,7 +10,7 @@
 //   3. RC ≠ 0 throws with stdout+stderr; RC = 0 but no file produced
 //      throws too (defensive — shouldn't happen empirically).
 //
-// Verified against PsN 5.3.1 on qphcmp03 — see docs/psn-notes.md
+// Verified against PsN 5.3.1 on primary — see docs/psn-notes.md
 // "update_inits" section.
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';

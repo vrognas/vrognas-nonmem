@@ -1336,8 +1336,11 @@ function buildCovAttrCell(ctx) {
 
   // MATRIX=R + SPECIAL quirk: NM silently suppresses SPECIAL when
   // MATRIX=R is in effect. The user typed it; NM ignored it.
+  // `(tip || '') +` guard mirrors all other tip-mutation sites — when
+  // classifyAttrTier produced no string (no tier hit + no synth match),
+  // raw `+=` would yield the literal "undefined" prefix in the tooltip.
   if (synthEntry !== undefined && synthEntry.isUserSet && k === 'special' && matrixIsR) {
-    tip += ' WARNING: NM silently ignores SPECIAL when MATRIX=R is used (empirically verified, NM 7.6.0; Bauer\'s docs warn against this combination). Setting has no effect.';
+    tip = (tip || '') + ' WARNING: NM silently ignores SPECIAL when MATRIX=R is used (empirically verified, NM 7.6.0; Bauer\'s docs warn against this combination). Setting has no effect.';
   }
 
   // Wire→runtime translation (sentinel values → resolved).

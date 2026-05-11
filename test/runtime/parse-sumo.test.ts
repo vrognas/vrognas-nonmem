@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { parseSumo } from '../../src/runtime/parse-sumo';
 
 // Representative sumo output (verified empirically against PsN 5.3.1 +
-// NONMEM 7.6.0 on qphcmp03 — see docs/psn-notes.md "sumo" section).
+// NONMEM 7.6.0 on the live host — see docs/psn-notes.md "sumo" section).
 const FULL = `-----------------------------------------------------------------------
 
 m.lst

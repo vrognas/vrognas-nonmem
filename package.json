@@ -2,7 +2,7 @@
   "name": "positron-nonmem",
   "displayName": "Positron NONMEM",
   "description": "NONMEM as a first-class Positron language runtime: local nmfe76 execution (or via Positron Remote SSH), run history tree, and pharmacometric workbench features. Companion to the vscode-nmtran language extension.",
-  "version": "0.0.203",
+  "version": "0.0.204",
   "publisher": "vrognas",
   "license": "MIT",
   "private": true,
@@ -243,7 +243,7 @@
             "type": "array",
             "items": { "type": "string" }
           },
-          "description": "Named sub-lineages — each entry maps a lineage name to its list of `.mod` absolute paths (the curated set of runs that appear when that lineage is selected in the panel). Edited via right-click → Add to lineage… in the Run Lineage panel; manual edits also work. The path-based parent overrides in `lineageOverrides` apply across all lineages."
+          "description": "Named sub-lineages — each entry maps a lineage name to its list of `.mod` paths (the curated set of runs that appear when that lineage is selected in the panel). Paths are stored workspace-relative when inside a workspace folder, absolute otherwise. Edited via right-click → Add to lineage… in the Run Lineage panel; manual edits also work. The path-based parent overrides in `lineageOverrides` apply across all lineages."
         },
         "nonmem.lineageOfvThreshold": {
           "type": "number",
@@ -258,7 +258,7 @@
           "additionalProperties": {
             "type": ["string", "null"]
           },
-          "description": "Workspace-side parent overrides for the Run Lineage view. Map of child .mod absolute path → parent .mod absolute path (or null to force the child to be a root regardless of any `;; Based on:` marker in the file). Set via right-click → Set parent… in the Run Lineage panel; manual edits also work. Lets you wire ANY two runs together, not just `run<NNN>` named ones."
+          "description": "Workspace-side parent overrides for the Run Lineage view. Map of child .mod path → parent .mod path (or null to force the child to be a root regardless of any `;; Based on:` marker in the file). Paths are stored workspace-relative when inside a workspace folder, absolute otherwise. Set via right-click → Set parent… in the Run Lineage panel; manual edits also work. Lets you wire ANY two runs together, not just `run<NNN>` named ones."
         }
       }
     }

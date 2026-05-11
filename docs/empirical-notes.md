@@ -14,7 +14,7 @@ Each entry: **Topic.** doc/expectation → probe → outcome.
 (unknown host); thereafter known_hosts suppresses it. So `ssh alias 'uname -a'` should
 return uname output and nothing else.
 
-**Probe.** Run via `SshTransport.run('uname -a')` against `qphcmp03`-class hosts on this
+**Probe.** Run via `SshTransport.run('uname -a')` against `primary`-class hosts on this
 network. Captured stdout is clean. Captured stderr always includes:
 
 ```
@@ -82,8 +82,8 @@ time Positron calls `validateRuntimeSession` on saved sessions our manager is av
 Errors appear:
 
 ```
-ERR Error getting manager for runtime positron-nonmem-qphcmp03 (...): No session
-    manager found for runtime positron-nonmem-qphcmp03 (...) (2 managers registered).
+ERR Error getting manager for runtime positron-nonmem-primary (...): No session
+    manager found for runtime positron-nonmem-primary (...) (2 managers registered).
 ```
 
 The "(2 managers registered)" reveals only R + Python managers are present at that

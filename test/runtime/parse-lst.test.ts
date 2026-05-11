@@ -255,7 +255,7 @@ describe('parseLst — diagnostics fields', () => {
   });
 
   it('reads per-parameter NUMSIGDIG (single line + continuation)', () => {
-    // Real-world fixture from probe-psn/slow on qphcmp03 — 4 THETAs +
+    // Real-world fixture from probe-psn/slow on the live host — 4 THETAs +
     // 10-element OMEGA BLOCK + 1 SIGMA = 15 values across two lines.
     const text = `
  #METH: First Order Conditional Estimation with Interaction

@@ -2,7 +2,7 @@
 
 Reference for the PsN toolbelt that backs positron-nonmem's commands.
 Mirrors `docs/empirical-notes.md`: each claim is tagged **DOC** (from the v5.3.1
-userguide / source) or **PROBE-NEEDED** (still to be verified on qphcmp03).
+userguide / source) or **PROBE-NEEDED** (still to be verified on primary).
 
 PsN is a toolbelt of ~30 CLI tools, not a single command. We integrate them
 incrementally; for now this doc is execute-deep, sumo/update_inits/vpc as
@@ -31,11 +31,11 @@ PsN tool instead.
 
 Reference for `execute` as the runner backing `positronNonmem.runModel`.
 
-> Verified empirically 2026-05-03 against PsN 5.3.1 + NONMEM 7.6.0 on qphcmp03.
+> Verified empirically 2026-05-03 against PsN 5.3.1 + NONMEM 7.6.0 on primary.
 
 ## Version pinning
 
-The host (qphcmp03) runs **PsN 5.3.1**. The latest PsN is 5.7.x; 5.4+ added
+The host (primary) runs **PsN 5.3.1**. The latest PsN is 5.7.x; 5.4+ added
 features (e.g. `$PSNCONFPATH` env override) that we **cannot rely on**. All
 references below are pinned to v5.3.1 unless explicitly noted.
 
@@ -327,7 +327,7 @@ in the runs glob to avoid double-counting `psn.lst` inside intermediates.
 
 ## Probe results 2026-05-03 (wider probe)
 
-Six probes ran in `~/positron-nonmem/probe-psn/<probe>/` on qphcmp03 + the
+Six probes ran in `~/positron-nonmem/probe-psn/<probe>/` on primary + the
 direct binary lookup. Outcomes:
 
 | # | Probe | Status | Key finding |
@@ -349,7 +349,7 @@ section for the corrected understanding.)
 ## Clean-level effects on file persistence (verified 2026-05-04)
 
 PsN's `-clean=N` flag controls how aggressively the run dir is cleaned
-up post-run. Empirical observation on qphcmp03 with our default
+up post-run. Empirical observation on primary with our default
 `-nm_output=ext,phi,cov,cor,coi`:
 
 | `-clean=` | `NM_run1/` post-run | `<basename>.lst` in cwd | `<basename>.lst` in modelfit_dir | `model_NMrun_translation.txt` | `command.txt` |
@@ -429,7 +429,7 @@ path-redacted to `/home/<user>/...` rather than leaving
 
 - Bare hostnames outside the `Manager Location` line — not seen
   empirically yet; if NONMEM's MPI / clustering output emits hostnames
-  separately, add a pattern then. Aliases (e.g. `qphcmp03`) chosen by
+  separately, add a pattern then. Aliases (e.g. `primary`) chosen by
   the user are deliberately not scrubbed.
 - License expiration date and other license-block fields — currently
   pass through; revisit if they prove sensitive.

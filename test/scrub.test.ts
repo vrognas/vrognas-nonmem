@@ -3,7 +3,7 @@ import { scrubPrivate } from '../src/scrub';
 
 describe('scrubPrivate', () => {
   it('redacts the Manager Location value but keeps the marker', () => {
-    expect(scrubPrivate('Manager Location qphcmp03//home/jane.doe@example.com/run1\n')).toBe(
+    expect(scrubPrivate('Manager Location example-host//home/jane.doe@example.com/run1\n')).toBe(
       'Manager Location <redacted>\n',
     );
   });
@@ -39,7 +39,7 @@ describe('scrubPrivate', () => {
     const raw =
       'Building NONMEM Executable\n' +
       'Starting MPI version of nonmem execution ...\n' +
-      'Manager Location qphcmp03//home/jane.doe@example.com/positron-nonmem/run1/modelfit_dir1/NM_run1\n' +
+      'Manager Location example-host//home/jane.doe@example.com/positron-nonmem/run1/modelfit_dir1/NM_run1\n' +
       'License Registered to: Acme Pharmaceuticals\n' +
       'Expiration Date:    14 JUL 2026\n';
     expect(scrubPrivate(raw)).toBe(
@@ -53,7 +53,7 @@ describe('scrubPrivate', () => {
 
   it('is idempotent (a second pass is a no-op)', () => {
     const raw =
-      'Manager Location qphcmp03//home/jane.doe@example.com/run\n' +
+      'Manager Location example-host//home/jane.doe@example.com/run\n' +
       'License Registered to: Acme\n' +
       'workdir /home/jane.doe/m1\n' +
       'reach jane.doe@example.com\n';

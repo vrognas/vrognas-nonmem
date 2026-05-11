@@ -20,7 +20,7 @@ describe('parseNmVersionsOutput', () => {
   });
 
   it('parses multi-entry output and sorts default first, then alphabetic', () => {
-    // Mirrors the actual qphcmp03 dump: 74, 75, default → default, 74, 75.
+    // Mirrors the actual host dump: 74, 75, default → default, 74, 75.
     const out = '74\t/opt/nm743,7.4\n75\t/opt/nm751,7.5\ndefault\t/opt/nm760,7.6\n';
     expect(parseNmVersionsOutput(out)).toEqual([
       { label: 'default', installDir: '/opt/nm760', version: '7.6' },
