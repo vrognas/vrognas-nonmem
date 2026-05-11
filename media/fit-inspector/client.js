@@ -1132,81 +1132,16 @@ function renderEstimationOptionsStep(step, stepNum, tierMap, methodKind, lstReco
     tdK.className = 'xml-options-key';
     tdK.textContent = k;
     const tdV = document.createElement('td');
-    let cls = 'xml-options-val';
-    let tip;
-    // v0.0.181 tier scheme: blue (explicit) / blue-italic
-    // (explicit-matches-default) / orange (implicit). The tier-map is
-    // computed payload-side via classifyEstStep — single source of truth.
-    const synthEntry = synthetic[k];
-    if (synthEntry !== undefined) {
-      // Synthesised invisible attrs — tier based on isUserSet, doc-default
-      // match, and method-applicability.
-      if (synthEntry.isUserSet) {
-        const matchesDocDefault = synthEntry.value === INVISIBLE_ATTR_DEFAULTS[k];
-        cls += matchesDocDefault
-          ? ' xml-options-val--explicit-default'
-          : ' xml-options-val--explicit';
-        tip = 'User-typed (NM never emits this to XML; synthesized from .lst echo). Default per Bauer: ' + INVISIBLE_ATTR_DEFAULTS[k] + (matchesDocDefault ? ' — matches default.' : '.');
-        if (synthEntry.inapplicable) {
-          // Method-applicability warning. POSTHOC's empirical claim
-          // (silently ignored on non-FO) is documented; CENTERING/
-          // NUMERICAL get the generic warning.
-          const applicableTo = INVISIBLE_ATTR_DEFS[k].applicable;
-          if (k === 'posthoc') {
-            tip += ' WARNING: POSTHOC/NOPOSTHOC only meaningfully apply to METHOD=ZERO (FO) or to MAXEVAL=0 evaluation runs. Empirically verified: other methods compute posthoc etas implicitly regardless of the option, NM 7.6.0.';
-          } else {
-            const allowedStr = Array.isArray(applicableTo)
-              ? applicableTo.map((x) => x.toUpperCase()).join('/')
-              : String(applicableTo).toUpperCase();
-            tip += ' WARNING: this option only applies to ' + allowedStr + ' methods; the current step uses ' + methodKind.toUpperCase() + '. NM silently ignores it.';
-          }
-        }
-      } else {
-        tip = 'Documented default per Bauer (NM never emits this to XML). Synthesized for visibility.';
-      }
-    } else {
-      const tier = tierMap[k];
-      if (tier === 'explicit') {
-        cls += ' xml-options-val--explicit';
-        tip = 'Explicitly set on this $EST line (.lst echo).';
-      } else if (tier === 'explicitDefault') {
-        cls += ' xml-options-val--explicit-default';
-        tip = 'Explicitly set on this $EST line, but the value matches the method default — has no effect vs. omitting it.';
-      } else if (tier === 'implicit') {
-        cls += ' xml-options-val--implicit';
-        tip = 'Implicitly set — value differs from default, but the user did NOT type it on this $EST line. Set by AUTO=N\'s per-method overrides or propagated from a prior $EST step.';
-      }
-    }
-    // Special-case `abort='no'`: XML conflates NOABORT/NOHABORT.
-    if (k === 'abort' && merged[k] === 'no') {
-      if (userWroteNohabort) {
-        tip = 'NOHABORT: positive definite correction at all levels of the estimation. More aggressive than NOABORT — can hide ill-posed problems. (XML wire: abort=\'no\' — same as NOABORT)';
-      } else if (userWroteNoabort) {
-        tip = 'NOABORT: theta-recovery + force most non-PD Hessian matrices to be PD. (XML wire: abort=\'no\' — same as NOHABORT)';
-      } else {
-        tip = (tip || '') + ' (XML wire abort=\'no\' is shared by NOABORT and NOHABORT; .lst echo absent — can\'t disambiguate.)';
-      }
-    }
-    // Wire-vs-runtime translation. ATOL='0' is a sentinel — display
-    // the resolved runtime ANRD from the .lst trace as the cell value.
-    // Tooltip preserves the wire format for transparency.
-    let displayValue = merged[k];
-    const resolved = resolveEstAttrFromLst(k, merged[k], tolerances);
-    if (resolved && resolved !== merged[k]) {
-      displayValue = resolved;
-      const note = ' (XML wire: \'' + merged[k] + '\' — sentinel for the built-in default; effective runtime value ' + resolved + ' from .lst trace.)';
-      tip = (tip || '') + note;
-    }
-    // PsN-wrapper detection on `file` attr: PsN's execute renames the
-    // FILE= option to psn.ext in the wrapped control stream. Annotate
-    // ONLY when the user did NOT explicitly type FILE= — i.e. tier is
-    // 'implicit'. If the user did write FILE=psn.ext intentionally
-    // (unusual but valid), it's their choice and the wrapper note
-    // would be wrong.
-    if (k === 'file' && /^psn\.ext$/i.test(merged[k]) && tierMap[k] === 'implicit') {
-      const note = ' (PsN\'s execute wrapper rewrites the FILE= option to psn.ext in the wrapped control stream — not the modeller\'s choice.)';
-      tip = (tip || '') + note;
-    }
+    const { cls, tip, displayValue } = buildEstAttrCell({
+      k,
+      merged,
+      synthetic,
+      tierMap,
+      methodKind,
+      userWroteNoabort,
+      userWroteNohabort,
+      tolerances,
+    });
     tdV.className = cls;
     tdV.textContent = fmtXmlOptionValue(displayValue);
     if (tip) tdV.title = tip;
@@ -1242,24 +1177,167 @@ function renderEstimationOptionsStep(step, stepNum, tierMap, methodKind, lstReco
 }
 
 /**
- * Per-`$COV`-record option dump from sibling `.xml`'s
+ * Tier-tip wording per scope ($EST vs $COV). Shared by `buildEstAttrCell`
+ * and `buildCovAttrCell` via `classifyAttrTier`. Tier values are
+ * computed payload-side (unified 3-tier scheme: explicit /
+ * explicitDefault / implicit).
+ *
+ * Per-`$COV`-record option dump comes from sibling `.xml`'s
  * `<nm:problem_options>` element's `cov_*` attrs. NM 7.6.0 does NOT
  * emit a dedicated `<nm:covariance_options>` element — empirically
  * confirmed by probing on host. Single-block (one $COV per problem),
- * not per-step like $EST. Closed by default.
- *
- * Four-tier classification (computed payload-side in xml-cov-defaults.ts;
- * absent keys render as default):
- *   userDriven  (green) : differs from `BLANK`/identity default
- *   propagated  (yellow): `-1` AND $EST sibling is non-default
- *   nonDefault  (blue)  : differs from empirical baseline
- *   (default, normal)   : matches baseline
+ * not per-step like $EST.
  */
-const COV_TIER_TIPS = {
-  userDriven: 'User-driven: differs from the not-set default (e.g. SIRSAMPLE was actually requested, FILE was set, SEED differs from 11456).',
-  propagated: 'Propagated: -1 sentinel AND the corresponding $EST option is user-customised. Effective value is whatever $EST says.',
-  nonDefault: 'Non-default: differs from the empirical baseline (probed against NM 7.6.0).',
+const TIER_TIPS = {
+  est: {
+    explicit: 'Explicitly set on this $EST line (.lst echo).',
+    explicitDefault:
+      'Explicitly set on this $EST line, but the value matches the method default — has no effect vs. omitting it.',
+    implicit:
+      'Implicitly set — value differs from default, but the user did NOT type it on this $EST line. Set by AUTO=N\'s per-method overrides or propagated from a prior $EST step.',
+    synthUserPrefix:
+      'User-typed (NM never emits this to XML; synthesized from .lst echo). Default per Bauer: ',
+    synthDoc: 'Documented default per Bauer (NM never emits this to XML). Synthesized for visibility.',
+  },
+  cov: {
+    explicit: 'Explicitly set on the $COV line (.lst echo).',
+    explicitDefault:
+      'Explicitly set on the $COV line, but value matches the default — no effect vs. omitting it.',
+    implicit:
+      'Implicitly set — value differs from default, but the user did NOT type it on the $COV line. Likely inherited from $EST or set by method-default (e.g. cov_posdef=3 for EM).',
+    synthUserPrefix:
+      'User-typed on $COV (NM didn\'t emit this to XML for this run; synthesized from .lst echo). Default per Bauer: ',
+    synthDoc:
+      'Documented default per Bauer (NM didn\'t emit this to XML). Synthesized for visibility.',
+  },
 };
+
+/**
+ * Classify a single attr cell — returns `{cls, tip}` based on whether
+ * the attr was synthesised (additive overlay from .lst tokens) vs
+ * present in XML (with a payload-side `tierMap[k]` of
+ * `explicit` / `explicitDefault` / `implicit`).
+ *
+ * Doesn't apply special-case decorations — callers decorate on top
+ * (NOABORT/NOHABORT, wire-vs-runtime, PsN-wrapper, MATRIX=R quirks).
+ */
+function classifyAttrTier(k, synthEntry, tierMap, docDefaultMap, scope) {
+  const tips = TIER_TIPS[scope];
+  let cls = 'xml-options-val';
+  let tip;
+  if (synthEntry !== undefined) {
+    if (synthEntry.isUserSet) {
+      const matchesDocDefault = synthEntry.value === docDefaultMap[k];
+      cls += matchesDocDefault
+        ? ' xml-options-val--explicit-default'
+        : ' xml-options-val--explicit';
+      tip = tips.synthUserPrefix + docDefaultMap[k] + (matchesDocDefault ? ' — matches default.' : '.');
+    } else {
+      tip = tips.synthDoc;
+    }
+    return { cls, tip };
+  }
+  const tier = tierMap && tierMap[k];
+  if (tier === 'explicit') {
+    cls += ' xml-options-val--explicit';
+    tip = tips.explicit;
+  } else if (tier === 'explicitDefault') {
+    cls += ' xml-options-val--explicit-default';
+    tip = tips.explicitDefault;
+  } else if (tier === 'implicit') {
+    cls += ' xml-options-val--implicit';
+    tip = tips.implicit;
+  }
+  return { cls, tip };
+}
+
+/**
+ * Build the `{cls, tip, displayValue}` for one $EST attr cell. Wraps
+ * `classifyAttrTier` with $EST-specific decorations: method-applicability
+ * warning for synthesised invisible attrs, NOABORT/NOHABORT
+ * disambiguation, wire→runtime translation for sentinel values, and
+ * the PsN-wrapper `FILE=psn.ext` annotation.
+ */
+function buildEstAttrCell(ctx) {
+  const { k, merged, synthetic, tierMap, methodKind, userWroteNoabort, userWroteNohabort, tolerances } = ctx;
+  const synthEntry = synthetic[k];
+  let { cls, tip } = classifyAttrTier(k, synthEntry, tierMap, INVISIBLE_ATTR_DEFAULTS, 'est');
+
+  // Synthesised user-set attrs: append method-applicability warning if
+  // the attr doesn't apply to the current method.
+  if (synthEntry !== undefined && synthEntry.isUserSet && synthEntry.inapplicable) {
+    const applicableTo = INVISIBLE_ATTR_DEFS[k].applicable;
+    if (k === 'posthoc') {
+      tip += ' WARNING: POSTHOC/NOPOSTHOC only meaningfully apply to METHOD=ZERO (FO) or to MAXEVAL=0 evaluation runs. Empirically verified: other methods compute posthoc etas implicitly regardless of the option, NM 7.6.0.';
+    } else {
+      const allowedStr = Array.isArray(applicableTo)
+        ? applicableTo.map((x) => x.toUpperCase()).join('/')
+        : String(applicableTo).toUpperCase();
+      tip += ' WARNING: this option only applies to ' + allowedStr + ' methods; the current step uses ' + methodKind.toUpperCase() + '. NM silently ignores it.';
+    }
+  }
+
+  // Special-case `abort='no'`: XML conflates NOABORT/NOHABORT — the
+  // .lst echo lets us disambiguate when the user typed either.
+  if (k === 'abort' && merged[k] === 'no') {
+    if (userWroteNohabort) {
+      tip = 'NOHABORT: positive definite correction at all levels of the estimation. More aggressive than NOABORT — can hide ill-posed problems. (XML wire: abort=\'no\' — same as NOABORT)';
+    } else if (userWroteNoabort) {
+      tip = 'NOABORT: theta-recovery + force most non-PD Hessian matrices to be PD. (XML wire: abort=\'no\' — same as NOHABORT)';
+    } else {
+      tip = (tip || '') + ' (XML wire abort=\'no\' is shared by NOABORT and NOHABORT; .lst echo absent — can\'t disambiguate.)';
+    }
+  }
+
+  // Wire→runtime translation. ATOL='0' is a sentinel — display the
+  // resolved runtime ANRD from the .lst trace as the cell value;
+  // tooltip preserves the wire format for transparency.
+  let displayValue = merged[k];
+  const resolved = resolveEstAttrFromLst(k, merged[k], tolerances);
+  if (resolved && resolved !== merged[k]) {
+    displayValue = resolved;
+    tip = (tip || '') + ' (XML wire: \'' + merged[k] + '\' — sentinel for the built-in default; effective runtime value ' + resolved + ' from .lst trace.)';
+  }
+
+  // PsN-wrapper detection on `file` attr: PsN's execute rewrites
+  // FILE= to psn.ext in the wrapped control stream. Annotate ONLY
+  // when the user did NOT explicitly type it (tier === 'implicit')
+  // — a user who genuinely typed FILE=psn.ext (unusual but valid)
+  // shouldn't see the wrapper note.
+  if (k === 'file' && /^psn\.ext$/i.test(merged[k]) && tierMap[k] === 'implicit') {
+    tip = (tip || '') + ' (PsN\'s execute wrapper rewrites the FILE= option to psn.ext in the wrapped control stream — not the modeller\'s choice.)';
+  }
+
+  return { cls, tip, displayValue };
+}
+
+/**
+ * Build the `{cls, tip, displayValue}` for one $COV attr cell. Wraps
+ * `classifyAttrTier` with $COV-specific decorations: the MATRIX=R +
+ * SPECIAL quirk warning and the wire→runtime translation. No NOABORT
+ * / PsN-wrapper analogue — $COV doesn't have those special cases.
+ */
+function buildCovAttrCell(ctx) {
+  const { k, merged, synthetic, tiersMap, resolvedMap, lstTolerances, matrixIsR } = ctx;
+  const synthEntry = synthetic[k];
+  let { cls, tip } = classifyAttrTier(k, synthEntry, tiersMap, INVISIBLE_COV_DEFAULTS, 'cov');
+
+  // MATRIX=R + SPECIAL quirk: NM silently suppresses SPECIAL when
+  // MATRIX=R is in effect. The user typed it; NM ignored it.
+  if (synthEntry !== undefined && synthEntry.isUserSet && k === 'special' && matrixIsR) {
+    tip += ' WARNING: NM silently ignores SPECIAL when MATRIX=R is used (empirically verified, NM 7.6.0; Bauer\'s docs warn against this combination). Setting has no effect.';
+  }
+
+  // Wire→runtime translation (sentinel values → resolved).
+  let displayValue = merged[k];
+  const resolved = resolvedMap[k] || resolveCovAttrFromLst(k, merged[k], lstTolerances);
+  if (resolved && resolved !== merged[k]) {
+    displayValue = resolved;
+    tip = (tip || '') + ' (XML wire: \'' + merged[k] + '\' — sentinel; effective runtime value ' + resolved + ' — inherited from $EST / $SUBROUTINES / method default.)';
+  }
+
+  return { cls, tip, displayValue };
+}
 
 // Doc-default values for $COV options that NM never (or conditionally)
 // emits to XML. Boolean-toggle pairs use the NMTRAN `[FLAG|NOFLAG]`
@@ -1350,53 +1428,15 @@ function renderCovarianceOptions(opts, tiersMap, resolvedMap, lstTolerances, lst
     tdK.className = 'xml-options-key';
     tdK.textContent = k;
     const tdV = document.createElement('td');
-    let cls = 'xml-options-val';
-    let tip;
-
-    // Unified tier scheme (explicit/explicitDefault/implicit) mirroring
-    // $EST. Synthesised invisible-options use their own matches-doc-
-    // default path. The synthetic map only contains keys NOT already in
-    // XML (additive-by-construction), so `synthEntry !== undefined`
-    // unambiguously means "XML lacked this key, we filled it from tokens".
-    const synthEntry = synthetic[k];
-    if (synthEntry !== undefined) {
-      if (synthEntry.isUserSet) {
-        const matchesDocDefault = synthEntry.value === INVISIBLE_COV_DEFAULTS[k];
-        cls += matchesDocDefault
-          ? ' xml-options-val--explicit-default'
-          : ' xml-options-val--explicit';
-        tip = 'User-typed on $COV (NM didn\'t emit this to XML for this run; synthesized from .lst echo). Default per Bauer: ' + INVISIBLE_COV_DEFAULTS[k] + (matchesDocDefault ? ' — matches default.' : '.');
-        // MATRIX=R + SPECIAL quirk: NM silently suppresses SPECIAL when
-        // MATRIX=R is in effect. The user typed it; NM ignored it.
-        // Bauer warns "MATRIX=R should not be used with SPECIAL".
-        if (k === 'special' && matrixIsR) {
-          tip += ' WARNING: NM silently ignores SPECIAL when MATRIX=R is used (empirically verified, NM 7.6.0; Bauer\'s docs warn against this combination). Setting has no effect.';
-        }
-      } else {
-        tip = 'Documented default per Bauer (NM didn\'t emit this to XML). Synthesized for visibility.';
-      }
-    } else {
-      const tier = tiersMap && tiersMap[k];
-      if (tier === 'explicit') {
-        cls += ' xml-options-val--explicit';
-        tip = 'Explicitly set on the $COV line (.lst echo).';
-      } else if (tier === 'explicitDefault') {
-        cls += ' xml-options-val--explicit-default';
-        tip = 'Explicitly set on the $COV line, but value matches the default — no effect vs. omitting it.';
-      } else if (tier === 'implicit') {
-        cls += ' xml-options-val--implicit';
-        tip = 'Implicitly set — value differs from default, but the user did NOT type it on the $COV line. Likely inherited from $EST or set by method-default (e.g. cov_posdef=3 for EM).';
-      }
-    }
-
-    // Wire→runtime translation (sentinel values → resolved).
-    let displayValue = merged[k];
-    const resolved = resolvedMap[k] || resolveCovAttrFromLst(k, merged[k], lstTolerances);
-    if (resolved && resolved !== merged[k]) {
-      displayValue = resolved;
-      const note = ' (XML wire: \'' + merged[k] + '\' — sentinel; effective runtime value ' + resolved + ' — inherited from $EST / $SUBROUTINES / method default.)';
-      tip = (tip || '') + note;
-    }
+    const { cls, tip, displayValue } = buildCovAttrCell({
+      k,
+      merged,
+      synthetic,
+      tiersMap,
+      resolvedMap,
+      lstTolerances,
+      matrixIsR,
+    });
     tdV.className = cls;
     tdV.textContent = fmtXmlOptionValue(displayValue);
     if (tip) tdV.title = tip;

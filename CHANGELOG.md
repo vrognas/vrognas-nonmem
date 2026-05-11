@@ -7,6 +7,16 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **refactor: FIR5 — extract `buildEstAttrCell` + `buildCovAttrCell` (v0.0.201).** Decomposed the ~155-LOC inner-loop tooltip-assembly in `renderEstimationOptionsStep` and the parallel ~60-LOC inner loop in `renderCovarianceOptions`. Both inner loops now collapse to ~15 lines (tr/td DOM build + one helper call); the SOLID single-responsibility violation flagged in the 6th review is addressed.
+
+  - New `TIER_TIPS = { est: {...}, cov: {...} }` constant — per-scope wording for the three-tier classification (explicit / explicitDefault / implicit) plus the synth-user / synth-doc strings. Single source of tier-tip text.
+  - New `classifyAttrTier(k, synthEntry, tierMap, docDefaultMap, scope)` → `{cls, tip}` — shared classifier covering BOTH the synthesised-from-tokens path and the XML-tier path. Replaces the ~25-LOC duplicated if/else cascade that previously lived in both render functions.
+  - New `buildEstAttrCell(ctx)` → `{cls, tip, displayValue}` — wraps `classifyAttrTier` with $EST-specific decorations: method-applicability WARNING for inapplicable POSTHOC / NUMERICAL / CENTERING, NOABORT/NOHABORT disambiguation, wire→runtime translation (ATOL sentinel), PsN-wrapper FILE=psn.ext annotation.
+  - New `buildCovAttrCell(ctx)` → `{cls, tip, displayValue}` — wraps `classifyAttrTier` with $COV-specific decorations: MATRIX=R + SPECIAL quirk WARNING and wire→runtime translation.
+  - Removed dead `COV_TIER_TIPS` constant (declared but unused; stale 4-tier scheme commentary that pre-dated the unified 3-tier rewrite).
+
+  Trade-off: total client.js LOC grew 2113 → 2189 (mostly docstrings on the new helpers), but the cognitive load on the two render functions dropped substantially and the test surface is smaller (each helper has a clear `(ctx) → {cls, tip, displayValue}` contract suitable for future unit tests).
+
 - **fix: 6th-review follow-ups — TOCTOU + tracker eviction + CSS dedup + threshold operator (v0.0.200).** Closes v0.0.199's privacy-and-bug-sweep companion items.
 
   - **TOCTOU fix in `showNmtranParsedModel`** (`src/extension.ts`): captured `activeTextEditor` BEFORE the `await` instead of using a non-null assertion after the resolve check. VS Code dispatch can interleave between sync calls; the bang on a stale undefined would have thrown `TypeError`.
