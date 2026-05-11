@@ -200,7 +200,7 @@ export async function resolveVariablesContext(
   const fsPath = editor.document.uri.fsPath;
   const ext = path.extname(fsPath).toLowerCase();
   const langId = editor.document.languageId;
-  log(`activeEditor: ${fsPath} langId=${langId} ext=${ext}`);
+  log(`activeEditor: ${path.basename(fsPath)} langId=${langId} ext=${ext}`);
 
   if (ext === '.lst') return resolveLstMode(editor.document.uri, log, deps.runner);
   if (ext === '.mod' || ext === '.ctl' || langId === 'nmtran') {
@@ -216,7 +216,7 @@ async function resolveModMode(
 ): Promise<VariablesContext | null> {
   const model = await getNmtranParsedModel(uri);
   if (!model) {
-    log(`mod-mode: vscode-nmtran returned null parsedModel for ${uri.fsPath}`);
+    log(`mod-mode: vscode-nmtran returned null parsedModel for ${path.basename(uri.fsPath)}`);
     return null;
   }
   log(`mod-mode: parsedModel ok — ${parsedModelStatsLine(model)}`);
@@ -244,7 +244,7 @@ async function resolveLstMode(
   runner: Runner | undefined,
 ): Promise<VariablesContext | null> {
   const fsPath = lstUri.fsPath;
-  log(`lst-mode: resolving for ${fsPath}`);
+  log(`lst-mode: resolving for ${path.basename(fsPath)}`);
 
   // Read the .lst once: drives both the parsed-model (from embedded
   // control stream) and the LstSummary parse. Without it, lst-mode
@@ -253,7 +253,7 @@ async function resolveLstMode(
   try {
     lstText = await fs.readFile(fsPath, 'utf8');
   } catch (e) {
-    log(`lst-mode: read failed for ${fsPath}: ${errMsg(e)}`);
+    log(`lst-mode: read failed for ${path.basename(fsPath)}: ${errMsg(e)}`);
     return null;
   }
 
@@ -447,12 +447,12 @@ async function readArtifactText(
   try {
     const result = await runner.run(cmd, path.dirname(archivePath));
     if (result.code !== 0) {
-      log(`lst-mode: 7z extraction returned ${result.code} for ${archivePath}`);
+      log(`lst-mode: 7z extraction returned ${result.code} for ${path.basename(archivePath)}`);
       return null;
     }
     return result.stdout;
   } catch (e) {
-    log(`lst-mode: 7z extraction threw for ${archivePath}: ${errMsg(e)}`);
+    log(`lst-mode: 7z extraction threw for ${path.basename(archivePath)}: ${errMsg(e)}`);
     return null;
   }
 }

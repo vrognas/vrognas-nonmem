@@ -77,7 +77,10 @@ function treeNodeToItem(node: RunsTreeNode): vscode.TreeItem {
   if (node.run) {
     const lstUri = vscode.Uri.file(`${node.run.dirPath}/${node.run.primaryLst}`);
     item.description = node.run.primaryLst;
-    item.tooltip = `${node.run.dirPath}\n${node.run.lstFiles.length} .lst file${node.run.lstFiles.length === 1 ? '' : 's'}`;
+    // Workspace-relative path keeps the tooltip useful while not leaking
+    // the remote-FS prefix into any screenshot. RunDir already carries
+    // `relativePath` (computed at discovery).
+    item.tooltip = `${node.run.relativePath || node.run.primaryLst}\n${node.run.lstFiles.length} .lst file${node.run.lstFiles.length === 1 ? '' : 's'}`;
     item.contextValue = 'positronNonmem.run';
     item.resourceUri = vscode.Uri.file(node.run.dirPath);
     item.command = {

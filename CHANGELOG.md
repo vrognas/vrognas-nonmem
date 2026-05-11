@@ -7,6 +7,30 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **fix: 5th-review privacy sweep (v0.0.196).** Cross-cutting privacy hygiene pass found by reviewers across the lineage, variables, tree-provider, and runner layers — places we missed in v0.0.193's first pass. CLAUDE.md treats this as a blocker; all of these would surface a remote-FS path or hostname into a user-visible UI surface, screenshot, log line, or Positron crash-reporter input.
+
+  **`scrub.ts` — pattern coverage gaps closed:**
+  - Added `Manager Hostname=` redaction (distinct from `Manager Location`; NM 7.6.0 SSH-forwarded manager emits both)
+  - Added `Compiled by <user>@<host>` redaction (`user@host` is not email-shaped, so the existing email rule didn't catch it)
+  - Added `working directory: <path>` redaction (PsN + NONMEM both echo absolute cwd at startup)
+
+  **Lineage panel (`lineage-panel.ts`):**
+  - `renderError` log now strips `vscode-resource://` URIs and caps to 500 chars — mirrors the v0.0.193 fix in `fit-inspector-provider.ts`. The two webview hosts had drifted.
+  - `showInInspector failed for ...` log now uses `path.basename(lstPath)`
+  - `Failed to open ...` error toast now uses `path.basename(modelPath)`
+
+  **Variables resolver (`variables-context.ts`):**
+  - All `${fsPath}` / `${uri.fsPath}` / `${archivePath}` interpolations in `log(...)` calls now `path.basename(...)`. Four log sites touched via `replace_all`.
+
+  **Tree-provider tooltips:**
+  - `active-runs-tree-provider.ts` tooltip now shows `vscode.workspace.asRelativePath(modelPath)` and the relative `modelfitDir` instead of absolute remote paths.
+  - `runs-tree-provider.ts` tooltip now shows `node.run.relativePath` (already computed at discovery) instead of `dirPath`.
+
+  **Runner boundary:**
+  - `runtime-metadata.ts`: `runtimePath` no longer interpolates `installDir`. Positron stores `LanguageRuntimeMetadata` and may surface it to crash reporters; an `installDir` like `/home/<user>/nm760` would leak the user's home layout. Now a synthetic placeholder `/_psn-managed/<idTag>/run/nmfe<NN>`. Test updated to reflect the new contract.
+  - `promote-estimates.ts`: PsN `update_inits` stdout+stderr is now `scrubPrivate(...)` wrapped before being interpolated into the thrown `Error`. PsN's stderr commonly carries the model path, cwd, and license markers.
+  - `psn-conf.ts`: Perl/PsN introspection stderr now `scrubPrivate(...)` wrapped in the failure `Error`. Common leakage path was `use lib '/home/<user>/...'`.
+
 - **feat: configurable condition-number thresholds (v0.0.195).** The COR-matrix condition-number cell in the Fit Inspector's diagnostics block was previously hardcoded warn=100, bad=1000. Now driven by two settings:
   - `nonmem.condNumberBadThreshold` (default 1000) — RED tier
   - `nonmem.condNumberWarnThreshold` (default 100) — ORANGE tier

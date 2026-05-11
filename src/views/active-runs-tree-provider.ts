@@ -77,14 +77,17 @@ function describe(run: ActiveRun): string {
 }
 
 function tooltip(run: ActiveRun): string {
-  const lines = [
-    run.modelPath,
-    `state: ${run.state}`,
-    `started: ${formatTimestamp(run.startedAt)}`,
-  ];
+  // Show workspace-relative paths only — `modelPath` / `modelfitDir`
+  // are absolute on Remote SSH and would leak the remote layout into
+  // any screenshot of the Active Runs tooltip.
+  const relModel = vscode.workspace.asRelativePath(run.modelPath, false);
+  const lines = [relModel, `state: ${run.state}`, `started: ${formatTimestamp(run.startedAt)}`];
   if (run.finishedAt) lines.push(`finished: ${formatTimestamp(run.finishedAt)}`);
   if (typeof run.finalOfv === 'number') lines.push(`OFV: ${run.finalOfv}`);
-  if (run.modelfitDir) lines.push(`run dir: ${run.modelfitDir}`);
+  if (run.modelfitDir) {
+    const relDir = vscode.workspace.asRelativePath(run.modelfitDir, false);
+    lines.push(`run dir: ${relDir}`);
+  }
   if (run.errorMessage) lines.push(`error: ${run.errorMessage}`);
   return lines.join('\n');
 }

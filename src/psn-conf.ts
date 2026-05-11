@@ -22,6 +22,7 @@
 // authoritative source-level reference.
 
 import type { Runner } from './runner';
+import { scrubPrivate } from './scrub';
 
 export interface NmVersionEntry {
   /** psn.conf [nm_versions] key — passed to `execute -nm_version=<label>`. */
@@ -97,7 +98,9 @@ function byDefaultThenLabel(a: NmVersionEntry, b: NmVersionEntry): number {
 export async function fetchNmVersions(runner: Runner): Promise<NmVersionEntry[]> {
   const result = await runner.run(PSN_CONF_DUMP_SCRIPT);
   if (result.code !== 0) {
-    const reason = result.stderr.trim() || `exit ${result.code ?? '?'}`;
+    // Scrub: Perl/PsN stderr commonly carries `use lib '/home/<user>/...'`
+    // and other path-bearing lines.
+    const reason = scrubPrivate(result.stderr.trim()) || `exit ${result.code ?? '?'}`;
     throw new Error(`failed to read PsN config: ${reason}`);
   }
   return parseNmVersionsOutput(result.stdout);

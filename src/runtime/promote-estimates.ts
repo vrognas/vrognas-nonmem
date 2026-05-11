@@ -15,6 +15,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { Runner } from '../runner';
+import { scrubPrivate } from '../scrub';
 import { quote } from '../shell';
 import { setBasedOn } from './parse-runrecord';
 
@@ -103,10 +104,12 @@ export async function promoteEstimates(
   const result = await runner.run(cmd, cwd);
 
   if (result.code !== 0) {
-    const detail = [result.stdout, result.stderr]
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .join('\n');
+    // Scrub: PsN's update_inits stdout/stderr can include absolute
+    // paths, user@host markers, and license info. Surface the failure
+    // without leaking private layout into the toast / Output channel.
+    const detail = scrubPrivate(
+      [result.stdout, result.stderr].map((s) => s.trim()).filter(Boolean).join('\n'),
+    );
     throw new Error(`update_inits exited with code ${result.code}${detail ? `:\n${detail}` : ''}`);
   }
 
@@ -114,7 +117,9 @@ export async function promoteEstimates(
   try {
     await fs.access(outputModelPath);
   } catch {
-    throw new Error(`update_inits exited 0 but no output file produced: ${outputModelPath}`);
+    throw new Error(
+      `update_inits exited 0 but no output file produced: ${path.basename(outputModelPath)}`,
+    );
   }
 
   // Annotate the new .mod with PsN runrecord-style parent linkage

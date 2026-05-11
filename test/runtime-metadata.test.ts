@@ -50,12 +50,17 @@ describe('buildRuntimeMetadata', () => {
     expect(named.runtimeShortName).toBe('NONMEM 7.5');
   });
 
-  it('runtimePath is the canonical nmfe<NN> for display only — PsN resolves via the label', () => {
+  it('runtimePath is a synthetic placeholder — installDir is privacy-sensitive and never surfaced', () => {
     const meta = buildRuntimeMetadata({
       ...enums,
-      nmVersion: { label: 'default', installDir: '/opt/nm760', version: '7.6' },
+      nmVersion: { label: 'default', installDir: '/home/alice/nm760', version: '7.6' },
     });
-    expect(meta.runtimePath).toBe('/opt/nm760/run/nmfe76');
+    // Must NOT contain the real installDir — Positron may surface
+    // LanguageRuntimeMetadata to crash reporters / logs.
+    expect(meta.runtimePath).not.toContain('/home/alice');
+    expect(meta.runtimePath).not.toContain('/opt/nm760');
+    // Should be anchored on the synthetic prefix + label-derived idTag.
+    expect(meta.runtimePath).toBe('/_psn-managed/default/run/nmfe76');
   });
 
   it('targets the nmtran languageId (companion to vscode-nmtran)', () => {

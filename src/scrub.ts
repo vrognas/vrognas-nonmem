@@ -19,6 +19,16 @@
 const REDACTIONS: Array<{ pattern: RegExp; replacement: string }> = [
   // Manager Location <hostname>//home/<user>/...  → marker preserved, value gone.
   { pattern: /^(\s*Manager Location)\s+\S.*$/gm, replacement: '$1 <redacted>' },
+  // Manager Hostname=<hostname>  → marker preserved, value gone. Distinct
+  // from `Manager Location` — NM 7.6.0 SSH-forwarded manager emits both.
+  { pattern: /^(\s*Manager Hostname\s*=)\s*\S.*$/gm, replacement: '$1<redacted>' },
+  // Compiled by <user>@<host> on <date>  → drop everything after the marker.
+  // Reveals username + hostname in a single line; not caught by the email
+  // rule because `user@host` (no TLD) doesn't look like an email.
+  { pattern: /^(\s*Compiled by)\s+\S.*$/gm, replacement: '$1 <redacted>' },
+  // Working directory: /home/<user>/...  → drop the path entirely. PsN
+  // and NONMEM both echo the absolute cwd at startup.
+  { pattern: /(working directory[:\s]+)\S.*$/gim, replacement: '$1<redacted>' },
   // License Registered to: <org>  → marker preserved, value gone.
   { pattern: /^(\s*License Registered to:)\s*.*$/gm, replacement: '$1 <redacted>' },
   // User-named path components: /home/<user>/...  → /home/<user>/...

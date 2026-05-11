@@ -27,13 +27,23 @@ export interface BuildMetadataDeps {
  * createSession and flows through to runModel as `-nm_version=<label>`.
  */
 export function buildRuntimeMetadata(deps: BuildMetadataDeps): positron.LanguageRuntimeMetadata {
-  const { label, installDir, version } = deps.nmVersion;
+  const { label, version } = deps.nmVersion;
   const idTag = idTagFromLabel(label);
   const nameSuffix = label === 'default' ? '' : ` (${label})`;
   // runtimePath has no operational role under PsN — `psn execute`
-  // resolves the binary via the label — but we set it to the canonical
-  // nmfe path so Positron's picker shows something meaningful.
-  const runtimePath = path.posix.join(installDir, 'run', `nmfe${nmfeSuffixFromVersion(version)}`);
+  // resolves the binary via the label. We previously interpolated the
+  // real `installDir` here, but Positron stores LanguageRuntimeMetadata
+  // and may surface it to crash reporters / logs; an `installDir` like
+  // `/home/<user>/nm760` would leak the user's home layout. Use a
+  // synthetic placeholder anchored on the label instead — keeps the
+  // picker's "show path" affordance non-empty without disclosing the
+  // host's real layout.
+  const runtimePath = path.posix.join(
+    '/_psn-managed',
+    idTag,
+    'run',
+    `nmfe${nmfeSuffixFromVersion(version)}`,
+  );
   return {
     runtimePath,
     runtimeId: `positron-nonmem-${idTag}`,

@@ -182,7 +182,11 @@ export class LineagePanel {
     } else if (m.type === 'ready') {
       void this.refresh();
     } else if (m.type === 'renderError' && typeof m.message === 'string') {
-      this.log(`lineage-panel: client render error: ${m.message}`);
+      // Sanitise mirror of fit-inspector-provider: webview's
+      // String(ev.reason) can carry vscode-resource:// URIs or raw paths
+      // from nested Cytoscape errors. Strip + cap length.
+      const sanitized = m.message.replace(/vscode-resource:\/\/\S+/g, '<resource>').slice(0, 500);
+      this.log(`lineage-panel: client render error: ${sanitized}`);
     } else if (
       m.type === 'requestEdgeIOfv' &&
       typeof m.parentModelPath === 'string' &&
@@ -290,7 +294,7 @@ export class LineagePanel {
       try {
         await this.showInInspector(lstPath);
       } catch (e) {
-        this.log(`lineage-panel: showInInspector failed for ${lstPath}: ${errMsg(e)}`);
+        this.log(`lineage-panel: showInInspector failed for ${path.basename(lstPath)}: ${errMsg(e)}`);
       }
       return;
     }
@@ -310,7 +314,9 @@ export class LineagePanel {
       const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(modelPath));
       await vscode.window.showTextDocument(doc, { preview: false });
     } catch (e) {
-      void vscode.window.showErrorMessage(`Failed to open ${modelPath}: ${errMsg(e)}`);
+      void vscode.window.showErrorMessage(
+        `Failed to open ${path.basename(modelPath)}: ${errMsg(e)}`,
+      );
     }
   }
 
