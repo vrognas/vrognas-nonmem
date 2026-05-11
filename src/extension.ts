@@ -30,7 +30,10 @@ import { ActiveRunsTreeProvider } from './views/active-runs-tree-provider';
 import { discoverRuns } from './views/runs-discovery';
 import { RunsTreeProvider } from './views/runs-tree-provider';
 import { FitInspectorProvider } from './views/fit-inspector-provider';
-import { buildInspectorPayload } from './views/fit-inspector-payload';
+import {
+  buildInspectorPayload,
+  INSPECTOR_THRESHOLD_DEFAULTS,
+} from './views/fit-inspector-payload';
 import { LineagePanel } from './views/lineage-panel';
 import { LstFileDecorationProvider } from './views/lst-decoration-provider';
 
@@ -140,15 +143,43 @@ function pushVariables(ctx: VariablesContext | null): void {
       lstTolerances: ctx?.lstTolerances,
       hasOde: ctx?.hasOde,
       hasLevel: ctx?.hasLevel,
-      shrinkageWarnPct: cfg.get<number>('shrinkageWarnPct', 30),
-      shrinkageBorderlineWarnPct: cfg.get<number>('shrinkageBorderlineWarnPct', 20),
-      rseWarnPct: cfg.get<number>('rseWarnPct', 100),
-      rseThetaWarnPct: cfg.get<number>('rseThetaWarnPct', 30),
-      rseOmegaWarnPct: cfg.get<number>('rseOmegaWarnPct', 50),
-      pValWarnThreshold: cfg.get<number>('pValWarnThreshold', 0.1),
-      pValBadThreshold: cfg.get<number>('pValBadThreshold', 0.05),
-      corrRedFlagThreshold: cfg.get<number>('corrRedFlagThreshold', 0.95),
-      corrWarnThreshold: cfg.get<number>('corrWarnThreshold', 0.9),
+      // Defaults imported from INSPECTOR_THRESHOLD_DEFAULTS so config-fallback
+      // values and payload-side fallbacks (`?? DEFAULT_THRESHOLDS.x`) stay
+      // in lockstep — previously the same numbers were spelled out in both
+      // places and could drift.
+      shrinkageWarnPct: cfg.get<number>(
+        'shrinkageWarnPct',
+        INSPECTOR_THRESHOLD_DEFAULTS.shrinkageWarnPct,
+      ),
+      shrinkageBorderlineWarnPct: cfg.get<number>(
+        'shrinkageBorderlineWarnPct',
+        INSPECTOR_THRESHOLD_DEFAULTS.shrinkageBorderlineWarnPct,
+      ),
+      rseWarnPct: cfg.get<number>('rseWarnPct', INSPECTOR_THRESHOLD_DEFAULTS.rseWarnPct),
+      rseThetaWarnPct: cfg.get<number>(
+        'rseThetaWarnPct',
+        INSPECTOR_THRESHOLD_DEFAULTS.rseThetaWarnPct,
+      ),
+      rseOmegaWarnPct: cfg.get<number>(
+        'rseOmegaWarnPct',
+        INSPECTOR_THRESHOLD_DEFAULTS.rseOmegaWarnPct,
+      ),
+      pValWarnThreshold: cfg.get<number>(
+        'pValWarnThreshold',
+        INSPECTOR_THRESHOLD_DEFAULTS.pValWarnThreshold,
+      ),
+      pValBadThreshold: cfg.get<number>(
+        'pValBadThreshold',
+        INSPECTOR_THRESHOLD_DEFAULTS.pValBadThreshold,
+      ),
+      corrRedFlagThreshold: cfg.get<number>(
+        'corrRedFlagThreshold',
+        INSPECTOR_THRESHOLD_DEFAULTS.corrRedFlagThreshold,
+      ),
+      corrWarnThreshold: cfg.get<number>(
+        'corrWarnThreshold',
+        INSPECTOR_THRESHOLD_DEFAULTS.corrWarnThreshold,
+      ),
     });
     fitInspector.update(payload, ctx?.modUri);
   }
@@ -181,6 +212,12 @@ async function registerRuntime(
   context: vscode.ExtensionContext,
   channel: vscode.OutputChannel,
 ): Promise<void> {
+  // Defensive double-register guard. Activate is normally called once per
+  // window, but reload cycles in dev (F5) or future refactors that wire a
+  // psn.conf-change reload could re-enter — leaking the prior manager's
+  // emitters and registering a second nmtran runtime alongside the first.
+  // See commit 95c50c5 docs on the (2 managers registered) limit.
+  if (runtimeManager) return;
   let positron;
   try {
     positron = getPositron();

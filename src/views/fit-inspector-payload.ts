@@ -471,7 +471,17 @@ export interface BuildContext {
   corrWarnThreshold?: number;
 }
 
-const DEFAULT_THRESHOLDS: InspectorThresholds = {
+/**
+ * Single source of truth for the 9 user-configurable inspector
+ * thresholds. Exported so `extension.ts` can use the same numbers as
+ * its `cfg.get(key, default)` fallbacks AND the payload builder can
+ * use them when callers (mostly tests) don't pass thresholds at all.
+ * Changing a value here updates both ends in lockstep.
+ *
+ * `nsigRequired` is intentionally excluded — it's .lst-derived
+ * (echoed by NONMEM from `$EST NSIG=`), not config-driven.
+ */
+export const INSPECTOR_THRESHOLD_DEFAULTS = {
   shrinkageWarnPct: 30,
   shrinkageBorderlineWarnPct: 20,
   rseWarnPct: 100,
@@ -479,9 +489,13 @@ const DEFAULT_THRESHOLDS: InspectorThresholds = {
   rseOmegaWarnPct: 50,
   pValWarnThreshold: 0.1,
   pValBadThreshold: 0.05,
-  nsigRequired: null,
   corrRedFlagThreshold: 0.95,
   corrWarnThreshold: 0.9,
+} as const;
+
+const DEFAULT_THRESHOLDS: InspectorThresholds = {
+  ...INSPECTOR_THRESHOLD_DEFAULTS,
+  nsigRequired: null,
 };
 
 export function buildInspectorPayload(

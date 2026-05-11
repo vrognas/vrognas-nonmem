@@ -68,6 +68,9 @@ let thresholds = {
   rseOmegaWarnPct: 50,
   pValWarnThreshold: 0.1,
   pValBadThreshold: 0.05,
+  corrRedFlagThreshold: 0.95,
+  corrWarnThreshold: 0.9,
+  nsigRequired: null,
 };
 
 // Last payload retained so the toggles can re-render without a round
@@ -104,7 +107,14 @@ function render(payload) {
   // the user doesn't read it as a fitted value.
   if (hasFit && payload.summary && typeof payload.summary.ofv === 'number') {
     const lst = payload.summary.lst;
-    const isEval = lst && lst.methodShort ? lst.methodShort.endsWith('-eval') : false;
+    // isEval: ANY step (not just the last) being MAXEVAL=0 makes the OFV
+    // an init-evaluation, not a fitted value. Chained $EST runs (e.g.
+    // FOCE → IMP EONLY with MAXEVAL=0 in the IMP step) would otherwise
+    // hide the "(at init)" suffix when methodShort reflects only the
+    // last step.
+    const methodsShort = Array.isArray(lst && lst.methodsShort) ? lst.methodsShort : [];
+    const isEval = methodsShort.some((m) => typeof m === 'string' && m.endsWith('-eval'))
+      || (lst && lst.methodShort ? lst.methodShort.endsWith('-eval') : false);
     const sigDigits = lst && typeof lst.sigDigits === 'number' ? lst.sigDigits : null;
     const nsigRequired = lst && typeof lst.nsigRequired === 'number' ? lst.nsigRequired : null;
     root.append(renderOfvHeadline(payload.summary.ofv, isEval, sigDigits, nsigRequired));
@@ -1016,10 +1026,12 @@ function extractValue(match, extract) {
  */
 function synthesizeInvisibleAttrs(userTokens, methodKind, hasLevel) {
   const applies = (attr) => attrAppliesToContext(attr, methodKind, hasLevel);
-  const defaults = Object.fromEntries(
-    Object.entries(INVISIBLE_ATTR_DEFS).map(([k, v]) => [k, v.default]),
+  return synthesizeFromTokens(
+    userTokens,
+    INVISIBLE_ATTR_PATTERNS,
+    applies,
+    INVISIBLE_ATTR_DEFAULTS,
   );
-  return synthesizeFromTokens(userTokens, INVISIBLE_ATTR_PATTERNS, applies, defaults);
 }
 
 /**
@@ -1281,9 +1293,13 @@ function synthesizeInvisibleCovAttrs(covTokens, existingKeys) {
   // All $COV invisibles currently apply unconditionally; method/level
   // gating not needed today.
   const applies = () => true;
-  // Adapter for entries that don't carry the `inapplicable` field.
-  const raw = synthesizeFromTokens(covTokens, INVISIBLE_COV_PATTERNS, applies, INVISIBLE_COV_DEFAULTS, existingKeys);
-  return raw;
+  return synthesizeFromTokens(
+    covTokens,
+    INVISIBLE_COV_PATTERNS,
+    applies,
+    INVISIBLE_COV_DEFAULTS,
+    existingKeys,
+  );
 }
 
 function renderCovarianceOptions(opts, tiersMap, resolvedMap, lstTolerances, lstCovRecord, hasOde) {

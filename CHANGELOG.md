@@ -7,6 +7,25 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **refactor: 4th-review deferred-batch follow-ups (v0.0.194).** Assessed the 13 items skipped from v0.0.193 and shipped 8. Five remain deferred with rationale.
+
+  **Applied:**
+  - `media/fit-inspector/client.js:107`: `isEval` now derived from `methodsShort.some(m => m.endsWith('-eval'))` — chained $EST with MAXEVAL=0 in a non-last step now flags the OFV headline "(at init)" correctly.
+  - `media/fit-inspector/client.js:63-74`: init `thresholds` literal extended with `corrRedFlagThreshold`, `corrWarnThreshold`, `nsigRequired`. Pre-payload completeness; `nsigRequired` is read by `fmtNsd` (formatters.js:141).
+  - `media/fit-inspector/client.js:1019-1023`: `synthesizeInvisibleAttrs` now reuses the module-level `INVISIBLE_ATTR_DEFAULTS` constant instead of recomputing the same `Object.fromEntries(...)` inline. Pure DRY.
+  - `media/fit-inspector/client.js:1284-1293`: dropped redundant `const raw = ...; return raw;` indirection in `synthesizeInvisibleCovAttrs`.
+  - `src/extension.ts:189-194`: double-register guard `if (runtimeManager) return;` at the top of `registerRuntime`. Defensive belt-and-suspenders against future refactors that re-enter the path; doesn't fix the F5-reload-across-activations limit (that's a Positron-side quirk, see commit 95c50c5 docs).
+  - `src/runtime/runtime-manager.ts:85-94`: `dispose()` now iterates `liveSessions` and calls `session.dispose()` on each (which disposes its 4 emitters), then clears the set. Previously leaked emitters on extension deactivate.
+  - `src/runtime/active-runs-watcher.ts`: `setTimeout` retry handle in `handleLstCreate` now tracked in `retryTimers: Set<Timeout>` and cleared on dispose. Closes the 1-second window where a late retry could fire on a torn-down watcher.
+  - `src/views/fit-inspector-payload.ts:474-493` + `src/extension.ts:143-178`: new exported `INSPECTOR_THRESHOLD_DEFAULTS` constant is the single source of truth for the 9 user-configurable threshold defaults. `extension.ts` imports it and uses each value as the `cfg.get(key, default)` fallback; the payload builder keeps a thin `DEFAULT_THRESHOLDS` wrapper that spreads `INSPECTOR_THRESHOLD_DEFAULTS` + adds `nsigRequired: null` (which is .lst-derived, not config-driven). Previously the same 9 numbers were duplicated in two files and could drift.
+
+  **Deferred (with rationale):**
+  - `client.js` god-module split (2113 LOC): no concrete near-term work on this file; M11 lineage is in `media/lineage/`; refactor risk > reward today.
+  - Condition-number thresholds 100/1000 hardcoded: pharm consensus stable, not user-configurable elsewhere.
+  - `transforms.js` test-exports: only matters if we add shrinkage tests; currently no demand.
+  - `run-progress.ts` per-tick `findLatestModelfitDir` cost: phantom — watcher already injects `findModelfitDir`, so production callers don't pay this cost.
+  - Variables `version: 0` hardcoded: not a bug today; only becomes one when incremental Variables-pane updates land (M3+).
+
 - **fix: 4th-review batch — privacy + leak + bug fixes (v0.0.193).** Next-layer review covered the renderer JS layer (`media/fit-inspector/*.js`), the webview wiring layer (`fit-inspector-provider.ts`, `cnv-verdict.ts`, `correlation-redflags.ts`), and the runtime execution layer (`runtime-session.ts`, `runtime-manager.ts`, `active-runs-watcher.ts`, `run-model.ts`, `run-progress.ts`). 7 of 13 actionable items shipped in this batch; smaller dedup/SOLID fixes and R4 (which turned out to be a false-positive — `return` inside a `try` block does fire the `finally`) deferred.
 
   **Privacy (CLAUDE.md blocker):**

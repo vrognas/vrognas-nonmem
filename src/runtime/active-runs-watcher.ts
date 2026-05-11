@@ -36,6 +36,8 @@ export class ActiveRunsWatcher implements vscode.Disposable {
   private readonly disposables: vscode.Disposable[] = [];
   private readonly tracker: ActiveRunsTracker;
   private readonly log: (message: string) => void;
+  /** Pending setTimeout handles from handleLstCreate's perRunReady retry — cleared on dispose so a late retry can't fire on a torn-down watcher. */
+  private readonly retryTimers = new Set<ReturnType<typeof setTimeout>>();
 
   constructor(deps: ActiveRunsWatcherDeps) {
     this.tracker = deps.tracker;
@@ -61,6 +63,8 @@ export class ActiveRunsWatcher implements vscode.Disposable {
     for (const id of [...this.pollers.keys()]) {
       this.stopRunSideEffects(id);
     }
+    for (const t of this.retryTimers) clearTimeout(t);
+    this.retryTimers.clear();
     for (const d of this.disposables) d.dispose();
   }
 
@@ -174,7 +178,11 @@ export class ActiveRunsWatcher implements vscode.Disposable {
     const perRunLst = run.modelfitDir ? path.join(run.modelfitDir, lstBasename) : null;
     const perRunReady = perRunLst ? await pathExists(perRunLst) : false;
     if (perRunLst && !perRunReady && !retried) {
-      setTimeout(() => void this.handleLstCreate(uri, true), 1000);
+      const t = setTimeout(() => {
+        this.retryTimers.delete(t);
+        void this.handleLstCreate(uri, true);
+      }, 1000);
+      this.retryTimers.add(t);
       return;
     }
     this.stopRunSideEffects(run.id);

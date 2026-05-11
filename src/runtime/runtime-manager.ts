@@ -83,6 +83,14 @@ export class NonmemRuntimeManager implements positron.LanguageRuntimeManager {
   }
 
   dispose(): void {
+    // Dispose every live session so their per-session emitters
+    // (_onDidReceiveRuntimeMessage / _onDidChangeRuntimeState /
+    // _onDidEndSession / _onDidUpdateResourceUsage — 4 per session)
+    // don't leak when the manager is disposed during deactivate or after
+    // the double-register guard kicks in. Sessions also handle this
+    // themselves on shutdown, but defensive belt-and-suspenders.
+    for (const session of this.liveSessions) session.dispose();
+    this.liveSessions.clear();
     this._onDidDiscoverRuntime.dispose();
   }
 
