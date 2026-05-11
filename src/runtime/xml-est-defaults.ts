@@ -397,26 +397,45 @@ function userWroteAttr(attr: string, tokens: readonly string[]): boolean {
 }
 
 /**
- * Sorted list of attribute keys at `currentStep` whose values match
- * `prevStep`'s same-key value AND were NOT explicitly written by the
- * user on `currentStep`'s $EST line. Kept for backward compat /
- * tests; the unified `classifyEstStep` is the new entry point.
+ * EM-method labels emitted by NM 7.6.0 as `estimation_method` attr
+ * values. The single source of truth — `deriveMethodKind` consults
+ * this; the TS payload + JS renderer + termination-code label both
+ * read the resulting kind off the payload, so this Set is the only
+ * place the list lives.
  */
-export function findPropagatedKeys(
-  currentStep: EstimationOptionsStep,
-  prevStep: EstimationOptionsStep | null,
-  tokens: readonly string[],
-): string[] {
-  if (!prevStep) return [];
-  const nonDefault = new Set(findNonDefaultKeys(currentStep));
-  const out: string[] = [];
-  for (const k of nonDefault) {
-    if (userWroteAttr(k, tokens)) continue;
-    if (prevStep[k] !== undefined && prevStep[k] === currentStep[k]) {
-      out.push(k);
-    }
+export const EM_METHODS: ReadonlySet<string> = new Set([
+  'imp', 'impmap', 'saem', 'its', 'direct',
+  'bayes', 'nuts', 'mcmc', 'chain', 'sir',
+]);
+
+/**
+ * Method-kind label used for option-applicability gating and
+ * sentinel-resolution (e.g. `cov_posdef='-1'` → 0 classical / 3 EM).
+ * Four-way granularity covers the option-applicability cases:
+ *   - `'fo'`      : METHOD=ZERO / classical with no cond_estim
+ *   - `'foce'`    : METHOD=COND (with cond_estim='yes')
+ *   - `'laplace'` : classical with laplace='yes'
+ *   - `'em'`      : any of `EM_METHODS`
+ * Plus `'foce-eval'` for MAXEVAL=0 evaluation runs of classical
+ * conditional methods — POSTHOC is documented for this case (Bauer
+ * line 3082: "also specify MAXEVAL=0 ... omits the Estimation Step")
+ * even though base FOCE is silently ignoring POSTHOC.
+ */
+export type MethodKind = 'fo' | 'foce' | 'foce-eval' | 'laplace' | 'em';
+
+/**
+ * Derive the method-kind label for a step from its XML attrs.
+ * `maxfn='0'` discriminates the MAXEVAL=0 evaluation-only case
+ * from a normal classical-conditional run.
+ */
+export function deriveMethodKind(step: EstimationOptionsStep): MethodKind {
+  const m = (step.estimation_method ?? '').toLowerCase();
+  if (EM_METHODS.has(m)) return 'em';
+  if (step.laplace === 'yes') return 'laplace';
+  if (step.cond_estim === 'yes') {
+    return step.maxfn === '0' ? 'foce-eval' : 'foce';
   }
-  return out.sort();
+  return step.maxfn === '0' ? 'foce-eval' : 'fo';
 }
 
 /**

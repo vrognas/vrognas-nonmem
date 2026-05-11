@@ -7,6 +7,20 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **refactor: 5 review fixes (v0.0.191).** Big-scope cleanup from the second review pass.
+
+  (1) **Dropped dead payload fields + `findPropagatedKeys` helper**: `xmlEstimationNonDefaults`, `xmlEstimationUserDriven`, `xmlEstimationPropagated` were computed every render and shipped over postMessage but consumed by nothing — the renderer reads only `xmlEstimationTiers`. Deleted them all + the `findPropagatedKeys` helper that was only fed by them + its 7-test block. The unified classifier (`classifyEstStep`) is now the only $EST tier producer.
+
+  (2) **Single source of truth for method-kind**: 3 copies of the EM-method list (TS payload IIFE binary 'em'/'classical'; JS `deriveMethodKind` 4-way; JS `classifyEstimationMethodKind` in formatters.js 2-way) collapsed into one. New `EM_METHODS` `ReadonlySet` + `MethodKind` type + `deriveMethodKind` exported from `xml-est-defaults.ts`. Payload ships per-step `xmlEstimationMethodKinds: MethodKind[]`. JS renderer + trajectory renderer read from payload directly; `classifyEstimationMethodKind` retired. 4 new tests for `deriveMethodKind`.
+
+  (3) **POSTHOC applicable widened to handle MAXEVAL=0 evaluation runs**: new `MethodKind` includes `'foce-eval'` for `MAXEVAL=0` runs of classical-conditional methods (detected via `step.maxfn === '0'`). `INVISIBLE_ATTR_DEFS.posthoc.applicable = ['fo', 'foce-eval']` per Bauer line 3082 ("also specify MAXEVAL=0 ... omits the Estimation Step"). Other-method runs still get the WARNING tooltip. `applicable` field now uniformly a `MethodKind[]` array (or string `'all'`) — older single-string form widened to array.
+
+  (4) **Single `synthesizeFromTokens` helper for $EST + $COV**: extracted the common synthesis algorithm. Both invisible-option overlay builders now share a unified pattern-descriptor shape `{re, extract: 'kv'|'toggle'|<literal>}`. `KV_INVISIBLE_PATTERNS` + `BOOLEAN_TOGGLE_PATTERNS` collapsed into a single `INVISIBLE_ATTR_PATTERNS`. ~50 lines saved.
+
+  (5) **$COV synthesis is now additive-by-construction**: `synthesizeInvisibleCovAttrs(tokens, existingKeys)` only emits entries for keys NOT in `existingKeys`. Drops the `filledBySynthesis` Set + the dual-condition gate (`synthEntry !== undefined && filledBySynthesis.has(k)`) from the renderer. `synthEntry !== undefined` now unambiguously means "XML lacked this key, we filled it from tokens".
+
+  Plus housekeeping: dropped 3 legacy CSS classes (`--non-default`, `--user-driven`, `--propagated-est`) no longer assigned by the renderer.
+
 - **refactor: 3 review fixes from the v0.0.189 review (v0.0.190).**
 
   (1) **Dropped legacy V1 $COV tier classifier**: `classifyCovKeys` + `CovKeyTier` + `PROPAGATION_SOURCES` + `USER_DRIVEN_KEYS` + `findCovNonDefaultKeys` / `findCovPropagatedKeys` / `findCovUserDrivenKeys` removed from `xml-cov-defaults.ts`. The renderer was already only using the v0.0.185 V2 classifier (`classifyCovStep`). Renamed `xmlCovarianceTiersV2` → `xmlCovarianceTiers` (the only one now). Dropped the dead `tierMap` arg from `renderCovarianceOptions`. 13 obsolete tests deleted; suite to 437/437.

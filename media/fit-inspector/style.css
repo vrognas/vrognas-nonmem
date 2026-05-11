@@ -323,23 +323,6 @@ body {
   color: var(--vscode-editorWarning-foreground);
   font-weight: 600;
 }
-/* $COV-specific propagated tier: `cov_*='-1'` inheriting from $EST
-   when the $EST sibling is itself non-default. Renders yellow to
-   match the "inherited" semantic in the $COV section. Distinct from
-   the $EST `--implicit` orange because the inheritance source
-   (cross-record $EST→$COV) differs. */
-.xml-options-val--propagated {
-  color: var(--vscode-charts-yellow);
-  font-weight: 600;
-}
-/* Legacy classes — kept so older renders don't break on stale
-   payloads, but the new tier-map drives all new $EST coloring. */
-.xml-options-val--non-default,
-.xml-options-val--user-driven,
-.xml-options-val--propagated-est {
-  color: var(--vscode-charts-blue);
-  font-weight: 600;
-}
 /* Invisible-to-XML user-typed tokens (PRINT, POSTHOC, etc.) surfaced
    from the .lst echo. Small caption-style row under each step's table. */
 .xml-options-invisible {

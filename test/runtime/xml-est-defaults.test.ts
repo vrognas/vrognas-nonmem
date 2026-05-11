@@ -3,7 +3,6 @@ import {
   classifyEstStep,
   findDefaultsForStep,
   findNonDefaultKeys,
-  findPropagatedKeys,
   findUserDrivenKeys,
 } from '../../src/runtime/xml-est-defaults';
 
@@ -194,77 +193,6 @@ describe('findUserDrivenKeys', () => {
   });
 });
 
-describe('findPropagatedKeys', () => {
-  it('returns empty array for step 0 / no prev step', () => {
-    const step = { estimation_method: 'imp', ctype: '3', isample: '300' };
-    expect(findPropagatedKeys(step, null, [])).toEqual([]);
-  });
-
-  it('flags non-default attrs that match prev step AND user did NOT type on this step', () => {
-    // SAEM step 1 with explicit CTYPE=3, NOPRIOR=1.
-    // IMP step 2 inherits both (user wrote nothing on step 2's $EST line).
-    const prev = { estimation_method: 'saem', ctype: '3', noprior: '1' };
-    const curr = { estimation_method: 'imp', ctype: '3', noprior: '1', isample: '300' };
-    const tokens = ['METHOD=IMP', 'EONLY=1', 'NITER=5'];
-    const propagated = findPropagatedKeys(curr, prev, tokens);
-    // ctype and noprior matched prev AND not in tokens → propagated.
-    expect(propagated).toContain('ctype');
-    expect(propagated).toContain('noprior');
-    // isample is in IMP defaults at 300, so not flagged non-default → not propagated.
-  });
-
-  it('does NOT flag attrs the user explicitly typed on the current step', () => {
-    // User wrote CTYPE=3 explicitly on step 2; same value as step 1 → still NOT propagated.
-    const prev = { estimation_method: 'saem', ctype: '3' };
-    const curr = { estimation_method: 'imp', ctype: '3', isample: '300' };
-    const tokens = ['METHOD=IMP', 'CTYPE=3', 'ISAMPLE=300'];
-    expect(findPropagatedKeys(curr, prev, tokens)).not.toContain('ctype');
-  });
-
-  it('alias: METHOD=COND on tokens prevents cond_estim from being flagged propagated', () => {
-    // FOCE step 1 → another FOCE step 2 with explicit METHOD=COND.
-    const prev = { cond_estim: 'yes', epseta_interaction: 'yes' };
-    const curr = { cond_estim: 'yes', epseta_interaction: 'yes' };
-    const tokens = ['METHOD=COND', 'INTER'];
-    const propagated = findPropagatedKeys(curr, prev, tokens);
-    // METHOD=COND token covers cond_estim (and fo_model_app);
-    // INTER token covers epseta_interaction.
-    expect(propagated).not.toContain('cond_estim');
-    expect(propagated).not.toContain('epseta_interaction');
-  });
-
-  it('alias: NOABORT token prevents abort=no from being flagged propagated', () => {
-    const prev = { abort: 'no' };
-    const curr = { abort: 'no' };
-    expect(findPropagatedKeys(curr, prev, ['METHOD=COND', 'NOABORT'])).not.toContain('abort');
-    expect(findPropagatedKeys(curr, prev, ['METHOD=COND', 'NOHABORT'])).not.toContain('abort');
-    // No NOABORT/NOHABORT token → propagated
-    expect(findPropagatedKeys(curr, prev, ['METHOD=COND'])).toContain('abort');
-  });
-
-  it('does NOT flag user-driven keys (niter, isample, seed, etc.) — they have their own tier', () => {
-    const prev = { estimation_method: 'saem', niter: '100', seed: '42' };
-    const curr = { estimation_method: 'imp', niter: '100', seed: '42', isample: '300' };
-    // User-driven keys are excluded from findNonDefaultKeys, so propagated also skips them.
-    const propagated = findPropagatedKeys(curr, prev, ['METHOD=IMP']);
-    expect(propagated).not.toContain('niter');
-    expect(propagated).not.toContain('seed');
-  });
-
-  it('does NOT flag attrs that differ from prev step', () => {
-    const prev = { estimation_method: 'saem', ctype: '3' };
-    const curr = { estimation_method: 'imp', ctype: '0' }; // ctype differs
-    expect(findPropagatedKeys(curr, prev, ['METHOD=IMP'])).not.toContain('ctype');
-  });
-
-  it('returns sorted output', () => {
-    const prev = { estimation_method: 'saem', ctype: '3', noprior: '1', mceta: '5' };
-    const curr = { estimation_method: 'imp', ctype: '3', noprior: '1', mceta: '5', isample: '300' };
-    const propagated = findPropagatedKeys(curr, prev, ['METHOD=IMP']);
-    expect(propagated).toEqual([...propagated].sort());
-  });
-});
-
 describe('classifyEstStep (v0.0.181 tier scheme)', () => {
   it('user-typed + differs from default → "explicit"', () => {
     // SAEM with user-set CTYPE=3 (default 0). Token CTYPE=3 → explicit.
@@ -362,5 +290,32 @@ describe('classifyEstStep (v0.0.181 tier scheme)', () => {
     const step = { estimation_method: 'saem', ctype: '3' };
     const tiers = classifyEstStep(step, []);
     expect(tiers.ctype).toBe('implicit');
+  });
+});
+
+describe('deriveMethodKind', () => {
+  // Imported alongside classifyEstStep above.
+  it('em-method labels → "em"', async () => {
+    const { deriveMethodKind } = await import('../../src/runtime/xml-est-defaults');
+    for (const m of ['imp', 'impmap', 'saem', 'its', 'direct', 'bayes', 'nuts', 'mcmc', 'chain', 'sir']) {
+      expect(deriveMethodKind({ estimation_method: m })).toBe('em');
+    }
+  });
+
+  it('classical with laplace=yes → "laplace"', async () => {
+    const { deriveMethodKind } = await import('../../src/runtime/xml-est-defaults');
+    expect(deriveMethodKind({ cond_estim: 'yes', laplace: 'yes' })).toBe('laplace');
+  });
+
+  it('classical with cond_estim=yes → "foce" (and "foce-eval" when maxfn=0)', async () => {
+    const { deriveMethodKind } = await import('../../src/runtime/xml-est-defaults');
+    expect(deriveMethodKind({ cond_estim: 'yes' })).toBe('foce');
+    expect(deriveMethodKind({ cond_estim: 'yes', maxfn: '0' })).toBe('foce-eval');
+  });
+
+  it('classical with no cond_estim → "fo" (or "foce-eval" when maxfn=0)', async () => {
+    const { deriveMethodKind } = await import('../../src/runtime/xml-est-defaults');
+    expect(deriveMethodKind({})).toBe('fo');
+    expect(deriveMethodKind({ maxfn: '0' })).toBe('foce-eval');
   });
 });

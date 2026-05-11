@@ -140,7 +140,8 @@ function render(payload) {
     // FOCE which uses arbitrary FORTRAN error numbers).
     const xmlResults = (payload.diagnostics && payload.diagnostics.xmlEstimationResults) || [];
     const xmlOpts = (payload.diagnostics && payload.diagnostics.xmlEstimationOptions) || [];
-    root.append(renderTrajectories(payload.trajectories, xmlResults, xmlOpts));
+    const methodKinds = (payload.diagnostics && payload.diagnostics.xmlEstimationMethodKinds) || [];
+    root.append(renderTrajectories(payload.trajectories, xmlResults, xmlOpts, methodKinds));
   }
   if (
     payload.diagnostics &&
@@ -155,7 +156,8 @@ function render(payload) {
     const d = payload.diagnostics;
     const tiers = d.xmlEstimationTiers || [];
     const lstRecords = d.lstEstRecords || [];
-    root.append(renderEstimationOptions(d.xmlEstimationOptions, tiers, lstRecords, d.lstTolerances, !!d.hasOde, !!d.hasLevel));
+    const methodKinds = d.xmlEstimationMethodKinds || [];
+    root.append(renderEstimationOptions(d.xmlEstimationOptions, tiers, methodKinds, lstRecords, d.lstTolerances, !!d.hasOde, !!d.hasLevel));
   }
   if (payload.diagnostics && payload.diagnostics.xmlCovarianceOptions) {
     // $COV options from `<nm:problem_options>`'s `cov_*` attrs. Single
@@ -265,7 +267,7 @@ function renderRunNotes(notes) {
  * full SVG up-front (no on-demand expansion) — payloads are small
  * (a few hundred points × ~20 params).
  */
-function renderTrajectories(trajectories, xmlResults, xmlOpts) {
+function renderTrajectories(trajectories, xmlResults, xmlOpts, methodKinds) {
   const wrap = document.createElement('details');
   wrap.className = 'convergence';
   wrap.open = trajectories.length === 1;
@@ -275,12 +277,13 @@ function renderTrajectories(trajectories, xmlResults, xmlOpts) {
   wrap.append(summaryEl);
   for (let i = 0; i < trajectories.length; i++) {
     const stepOpts = (xmlOpts && xmlOpts[i]) || null;
-    wrap.append(renderTrajectoryStep(trajectories[i], xmlResults[i] || null, stepOpts));
+    const methodKind = (methodKinds && methodKinds[i]) || null;
+    wrap.append(renderTrajectoryStep(trajectories[i], xmlResults[i] || null, stepOpts, methodKind));
   }
   return wrap;
 }
 
-function renderTrajectoryStep(t, xmlResult, stepOpts) {
+function renderTrajectoryStep(t, xmlResult, stepOpts, methodKind) {
   const block = document.createElement('div');
   block.className = 'convergence-step';
   const heading = document.createElement('div');
@@ -301,16 +304,14 @@ function renderTrajectoryStep(t, xmlResult, stepOpts) {
       // Method-aware termination labels: EM uses NM73+ documented
       // codes (0/8 = completed, 1/9 = ran out of iters, ...);
       // classical methods use arbitrary FORTRAN error numbers.
-      // `classifyEstimationMethodKind` from formatters.js routes by
-      // the XML estimation_method attr.
-      const methodKind = stepOpts
-        ? classifyEstimationMethodKind(stepOpts.estimation_method)
-        : null;
+      // methodKind comes from payload (xml-est-defaults.ts is the
+      // single source of truth for the EM-method list).
+      // Collapse to binary for terminationCodeLabel which expects
+      // 'em' | 'classical'.
+      const codeMethodKind = methodKind === 'em' ? 'em' : methodKind ? 'classical' : null;
       const code = xmlResult.terminationStatus;
-      // EM: codes 0 and 8 are both "completed" (success). Classical:
-      // anything but 0 + non-negative is a failure of some kind.
-      const ok = methodKind === 'em' ? (code === 0 || code === 8) : code === 0;
-      const label = terminationCodeLabel(code, methodKind);
+      const ok = codeMethodKind === 'em' ? (code === 0 || code === 8) : code === 0;
+      const label = terminationCodeLabel(code, codeMethodKind);
       const span = document.createElement('span');
       span.className = ok ? 'meta-good' : 'meta-bad';
       span.textContent = 'termination: ' + label;
@@ -849,7 +850,7 @@ function renderPrderr(prderr) {
  * NONMEM emitted them — no type coercion, so the user sees the
  * verbatim wire format.
  */
-function renderEstimationOptions(steps, tiersPerStep, lstEstRecords, lstTolerances, hasOde, hasLevel) {
+function renderEstimationOptions(steps, tiersPerStep, methodKindsPerStep, lstEstRecords, lstTolerances, hasOde, hasLevel) {
   const outer = document.createElement('details');
   outer.className = 'xml-options';
   const sumOuter = document.createElement('summary');
@@ -858,8 +859,12 @@ function renderEstimationOptions(steps, tiersPerStep, lstEstRecords, lstToleranc
   outer.append(sumOuter);
   for (let i = 0; i < steps.length; i++) {
     const tiers = (tiersPerStep && tiersPerStep[i]) || {};
+    // methodKind comes from the payload (single source of truth in
+    // xml-est-defaults.ts:deriveMethodKind). Defaults to 'fo' for
+    // older payloads / when undefined.
+    const methodKind = (methodKindsPerStep && methodKindsPerStep[i]) || 'fo';
     const lstRecord = (lstEstRecords && lstEstRecords[i]) || null;
-    outer.append(renderEstimationOptionsStep(steps[i], i + 1, tiers, lstRecord, lstTolerances, hasOde, hasLevel));
+    outer.append(renderEstimationOptionsStep(steps[i], i + 1, tiers, methodKind, lstRecord, lstTolerances, hasOde, hasLevel));
   }
   return outer;
 }
@@ -891,23 +896,22 @@ function isInvisibleToken(token) {
  *   - CENTERING: FOCE-only (line 2380: "May only be used with METHOD=1")
  *   - PARAFILE, PARAFPRINT, FPARAFILE: universal (parallel-processing knobs)
  */
+// `applicable` semantics: either the string 'all' (universal), or a
+// Set-like array of MethodKind labels (see xml-est-defaults.ts). POSTHOC
+// applies to FO and to MAXEVAL=0 evaluation runs of classical-conditional
+// methods per Bauer line 3082 — the latter is the 'foce-eval' method kind.
 const INVISIBLE_ATTR_DEFS = {
   print:        { default: '9999', applicable: 'all' },
-  // POSTHOC is FO-only per Bauer line 3082 ("This option may be used when
-  // the FO method is used") and the user's empirical experience. Pending
-  // a probe (task #94 to verify across methods).
-  posthoc:      { default: 'no',   applicable: 'fo' },
+  posthoc:      { default: 'no',   applicable: ['fo', 'foce-eval'] },
   etabarcheck:  { default: 'no',   applicable: 'all' },
-  numerical:    { default: 'no',   applicable: 'laplace' },
-  centering:    { default: 'no',   applicable: 'foce' },
+  numerical:    { default: 'no',   applicable: ['laplace'] },
+  centering:    { default: 'no',   applicable: ['foce'] },
   parafile:     { default: 'OFF',  applicable: 'all' },
   parafprint:   { default: '1',    applicable: 'all' },
   fparafile:    { default: 'OFF',  applicable: 'all' },
   // LEVCENTER/LEVOBJTYPE/LEVWT require $LEVEL record. Bauer says
   // "There is no default. Required with $LEVEL and $ESTIMATION" — so we
-  // show empty value when $LEVEL present + user didn't type. The
-  // `requiresLevel: true` flag tells the synthesiser to skip when no
-  // $LEVEL record is in the control stream.
+  // show empty value when $LEVEL present + user didn't type.
   levcenter:    { default: '',     applicable: 'all', requiresLevel: true },
   levobjtype:   { default: '',     applicable: 'all', requiresLevel: true },
   levwt:        { default: '',     applicable: 'all', requiresLevel: true },
@@ -919,49 +923,30 @@ const INVISIBLE_ATTR_DEFAULTS = Object.fromEntries(
 );
 
 /**
- * NMTRAN boolean toggle pairs — `[FLAG|NOFLAG]` syntax. NO-prefixed
- * token sets the value to 'no'; bare token sets to 'yes'.
+ * Pattern list per invisible attr (v0.0.191+ unified shape, used for
+ * both $EST and $COV). Each attr maps to one-or-more pattern
+ * descriptors `{re, extract}`. `extract` is one of:
+ *   - `'kv'`      → user-token is KEY=VALUE; extract the RHS.
+ *   - `'toggle'`  → token may have a NO- prefix; matched flag → 'no'
+ *                   if prefix present, 'yes' otherwise.
+ *   - literal str → the matched token unconditionally sets the attr
+ *                   to this fixed value (e.g. SPECIAL → 'yes',
+ *                   UNCONDITIONAL → 'no').
+ * First matching pattern in the list wins.
  */
-const BOOLEAN_TOGGLE_PATTERNS = {
-  posthoc: /^(NO)?POSTHOC$/i,
-  etabarcheck: /^(NO)?ETABARCHECK$/i,
-  numerical: /^(NO)?NUMERICAL$/i,
-  centering: /^(NO)?CENTERING$/i,
+const INVISIBLE_ATTR_PATTERNS = {
+  print:       [{ re: /^PRINT=/i, extract: 'kv' }],
+  posthoc:     [{ re: /^(NO)?POSTHOC$/i, extract: 'toggle' }],
+  etabarcheck: [{ re: /^(NO)?ETABARCHECK$/i, extract: 'toggle' }],
+  numerical:   [{ re: /^(NO)?NUMERICAL$/i, extract: 'toggle' }],
+  centering:   [{ re: /^(NO)?CENTERING$/i, extract: 'toggle' }],
+  parafile:    [{ re: /^PARAFILE=/i, extract: 'kv' }],
+  parafprint:  [{ re: /^PARAFPRINT=/i, extract: 'kv' }],
+  fparafile:   [{ re: /^FPARAFILE=/i, extract: 'kv' }],
+  levcenter:   [{ re: /^LEVCENTER=/i, extract: 'kv' }],
+  levobjtype:  [{ re: /^LEVOBJTYPE=/i, extract: 'kv' }],
+  levwt:       [{ re: /^LEVWT=/i, extract: 'kv' }],
 };
-
-/**
- * KEY=VALUE-style invisibles. Token regex matches `KEY=...`; value is
- * the user-supplied right-hand side.
- */
-const KV_INVISIBLE_PATTERNS = {
-  print: /^PRINT=/i,
-  parafile: /^PARAFILE=/i,
-  parafprint: /^PARAFPRINT=/i,
-  fparafile: /^FPARAFILE=/i,
-  levcenter: /^LEVCENTER=/i,
-  levobjtype: /^LEVOBJTYPE=/i,
-  levwt: /^LEVWT=/i,
-};
-
-/**
- * Derive the method-kind label for a step from its XML attrs. Used to
- * gate method-conditional synthesised options.
- *   - 'em'      : estimation_method is one of the EM/MCMC labels
- *   - 'laplace' : classical with laplace='yes' (LAPLACIAN was specified)
- *   - 'foce'    : classical with cond_estim='yes' (METHOD=1 / FOCE)
- *   - 'fo'      : classical with no cond_estim (METHOD=0 / FO)
- */
-function deriveMethodKind(step) {
-  const m = (step.estimation_method ?? '').toLowerCase();
-  if (m === 'imp' || m === 'impmap' || m === 'saem' || m === 'its'
-      || m === 'direct' || m === 'bayes' || m === 'nuts'
-      || m === 'mcmc' || m === 'chain' || m === 'sir') {
-    return 'em';
-  }
-  if (step.laplace === 'yes') return 'laplace';
-  if (step.cond_estim === 'yes') return 'foce';
-  return 'fo';
-}
 
 /**
  * Whether a synthesised attr applies to the given context (method +
@@ -969,64 +954,72 @@ function deriveMethodKind(step) {
  *   - the attr's method-applicability doesn't match (e.g. CENTERING
  *     when methodKind is 'em')
  *   - the attr requires $LEVEL but the model has no $LEVEL record
+ * `methodKind` is the canonical 5-way label from
+ * `xml-est-defaults.ts:MethodKind`, shipped per-step on the payload as
+ * `xmlEstimationMethodKinds[i]`.
  */
 function attrAppliesToContext(attr, methodKind, hasLevel) {
   const def = INVISIBLE_ATTR_DEFS[attr];
   if (!def) return true;
   if (def.requiresLevel && !hasLevel) return false;
   if (def.applicable === 'all') return true;
-  return def.applicable === methodKind;
+  // applicable is an array of allowed method-kinds.
+  return def.applicable.indexOf(methodKind) !== -1;
 }
 
 /**
- * Build a synthetic-attr overlay for the step from the user's verbatim
- * $EST tokens. Returns {value, isUserSet, inapplicable} per attr.
- * Method-conditional attrs (NUMERICAL/CENTERING) are skipped from the
- * overlay when inapplicable to the current method AND the user didn't
- * type them. When inapplicable AND user typed → included with
- * `inapplicable: true` so the renderer can flag the warning.
+ * Generic synthesis walker. For each attr in `attrPatterns`, scan user
+ * tokens for a matching pattern. First match wins. Produces
+ * `{value, isUserSet, inapplicable}` entries when the attr applies to
+ * the current context OR was user-typed. Additive-by-construction:
+ * skips attrs already present in `existingKeys`.
  */
-function synthesizeInvisibleAttrs(userTokens, methodKind, hasLevel) {
+function synthesizeFromTokens(userTokens, attrPatterns, appliesFn, defaultsMap, existingKeys) {
   const out = {};
-  // KV-style: PRINT, PARAFILE, PARAFPRINT, FPARAFILE, LEVCENTER, ...
-  for (const [attr, re] of Object.entries(KV_INVISIBLE_PATTERNS)) {
-    const match = userTokens.find((t) => re.test(t));
-    const applies = attrAppliesToContext(attr, methodKind, hasLevel);
-    if (match) {
-      out[attr] = {
-        value: match.split('=')[1] || '',
-        isUserSet: true,
-        inapplicable: !applies,
-      };
-    } else if (applies) {
-      out[attr] = {
-        value: INVISIBLE_ATTR_DEFS[attr].default,
-        isUserSet: false,
-        inapplicable: false,
-      };
+  for (const [attr, patternList] of Object.entries(attrPatterns)) {
+    if (existingKeys && existingKeys.has(attr)) continue;
+    const applies = appliesFn(attr);
+    let matched = null;
+    for (const p of patternList) {
+      const match = userTokens.find((t) => p.re.test(t));
+      if (match) {
+        matched = { value: extractValue(match, p.extract), isUserSet: true, inapplicable: !applies };
+        break;
+      }
     }
-    // else: not user-typed AND inapplicable → skip the row entirely.
-  }
-  // Boolean toggles.
-  for (const [attr, re] of Object.entries(BOOLEAN_TOGGLE_PATTERNS)) {
-    const match = userTokens.find((t) => re.test(t));
-    const applies = attrAppliesToContext(attr, methodKind, hasLevel);
-    if (match) {
-      const isNegated = /^NO/i.test(match);
-      out[attr] = {
-        value: isNegated ? 'no' : 'yes',
-        isUserSet: true,
-        inapplicable: !applies,
-      };
+    if (matched) {
+      out[attr] = matched;
     } else if (applies) {
-      out[attr] = {
-        value: INVISIBLE_ATTR_DEFS[attr].default,
-        isUserSet: false,
-        inapplicable: false,
-      };
+      out[attr] = { value: defaultsMap[attr], isUserSet: false, inapplicable: false };
     }
+    // else: not user-typed AND inapplicable → skip the row.
   }
   return out;
+}
+
+/**
+ * Extract the synthesised value from a matched user token per the
+ * pattern descriptor's `extract` field. See `INVISIBLE_ATTR_PATTERNS`
+ * for the supported flavours.
+ */
+function extractValue(match, extract) {
+  if (extract === 'kv') return match.split('=')[1] || '';
+  if (extract === 'toggle') return /^NO/i.test(match) ? 'no' : 'yes';
+  return extract; // literal string
+}
+
+/**
+ * Build a synthetic-attr overlay for the $EST step from user tokens.
+ * Method-conditional attrs (NUMERICAL/CENTERING) are skipped when
+ * inapplicable AND not user-typed; user-typed-inapplicable surfaces
+ * with `inapplicable: true` for the renderer's WARNING tooltip.
+ */
+function synthesizeInvisibleAttrs(userTokens, methodKind, hasLevel) {
+  const applies = (attr) => attrAppliesToContext(attr, methodKind, hasLevel);
+  const defaults = Object.fromEntries(
+    Object.entries(INVISIBLE_ATTR_DEFS).map(([k, v]) => [k, v.default]),
+  );
+  return synthesizeFromTokens(userTokens, INVISIBLE_ATTR_PATTERNS, applies, defaults);
 }
 
 /**
@@ -1068,7 +1061,7 @@ function resolveCovAttrFromLst(key, value, tolerances) {
   return null;
 }
 
-function renderEstimationOptionsStep(step, stepNum, tierMap, lstRecord, lstTolerances, hasOde, hasLevel) {
+function renderEstimationOptionsStep(step, stepNum, tierMap, methodKind, lstRecord, lstTolerances, hasOde, hasLevel) {
   const inner = document.createElement('details');
   inner.className = 'xml-options-step';
   const sumInner = document.createElement('summary');
@@ -1090,8 +1083,7 @@ function renderEstimationOptionsStep(step, stepNum, tierMap, lstRecord, lstToler
   // Synthesize doc-defaulted invisible attrs into the merged option
   // set. Method-aware: NUMERICAL/CENTERING skipped for inapplicable
   // methods unless user explicitly typed them. Effective view =
-  // XML attrs ∪ synthesised.
-  const methodKind = deriveMethodKind(step);
+  // XML attrs ∪ synthesised. methodKind comes from payload.
   const synthetic = synthesizeInvisibleAttrs(userTokens, methodKind, !!hasLevel);
   const userWroteAtol = userTokens.some((t) => /^ATOL=/i.test(t));
   const merged = { ...step };
@@ -1133,14 +1125,17 @@ function renderEstimationOptionsStep(step, stepNum, tierMap, lstRecord, lstToler
           : ' xml-options-val--explicit';
         tip = 'User-typed (NM never emits this to XML; synthesized from .lst echo). Default per Bauer: ' + INVISIBLE_ATTR_DEFAULTS[k] + (matchesDocDefault ? ' — matches default.' : '.');
         if (synthEntry.inapplicable) {
-          // Method-applicability warning (e.g. CENTERING typed on SAEM —
-          // doc says METHOD=1 only; POSTHOC on non-FO — empirically
-          // verified silently ignored).
+          // Method-applicability warning. POSTHOC's empirical claim
+          // (silently ignored on non-FO) is documented; CENTERING/
+          // NUMERICAL get the generic warning.
           const applicableTo = INVISIBLE_ATTR_DEFS[k].applicable;
           if (k === 'posthoc') {
-            tip += ' WARNING: POSTHOC/NOPOSTHOC only meaningfully apply to METHOD=ZERO (FO). Empirically verified: other methods compute posthoc etas implicitly regardless of the option, NM 7.6.0.';
+            tip += ' WARNING: POSTHOC/NOPOSTHOC only meaningfully apply to METHOD=ZERO (FO) or to MAXEVAL=0 evaluation runs. Empirically verified: other methods compute posthoc etas implicitly regardless of the option, NM 7.6.0.';
           } else {
-            tip += ' WARNING: this option only applies to ' + applicableTo.toUpperCase() + ' methods; the current step uses ' + methodKind.toUpperCase() + '. NM silently ignores it.';
+            const allowedStr = Array.isArray(applicableTo)
+              ? applicableTo.map((x) => x.toUpperCase()).join('/')
+              : String(applicableTo).toUpperCase();
+            tip += ' WARNING: this option only applies to ' + allowedStr + ' methods; the current step uses ' + methodKind.toUpperCase() + '. NM silently ignores it.';
           }
         }
       } else {
@@ -1261,46 +1256,34 @@ const INVISIBLE_COV_DEFAULTS = {
   special: 'no',          // suppressed from XML when MATRIX=R; surface here
 };
 
-const INVISIBLE_COV_TOKEN_PATTERNS = {
+// Same `INVISIBLE_ATTR_PATTERNS` shape as $EST. First-match wins.
+// CONDITIONAL/UNCONDITIONAL share the `conditional` attr (toggle pair
+// with explicit values rather than NO-prefix).
+const INVISIBLE_COV_PATTERNS = {
   conditional: [
-    { re: /^CONDITIONAL$/i, value: 'yes' },
-    { re: /^UNCONDITIONAL$/i, value: 'no' },
+    { re: /^CONDITIONAL$/i, extract: 'yes' },
+    { re: /^UNCONDITIONAL$/i, extract: 'no' },
   ],
-  parafile: [{ re: /^PARAFILE=/i, value: null /* extract from `=` */ }],
-  parafprint: [{ re: /^PARAFPRINT=/i, value: null }],
-  special: [{ re: /^SPECIAL$/i, value: 'yes' }],
+  parafile:   [{ re: /^PARAFILE=/i, extract: 'kv' }],
+  parafprint: [{ re: /^PARAFPRINT=/i, extract: 'kv' }],
+  special:    [{ re: /^SPECIAL$/i, extract: 'yes' }],
 };
 
 /**
- * Build synthetic-attr overlay for the $COV step. Surfaces options NM
- * never emits to XML (CONDITIONAL, PARAFILE, PARAFPRINT) with their
- * documented defaults or the user's value when typed. Includes
- * `special` (conditionally emitted: suppressed by MATRIX=R per NM
- * 7.6.0 empirical).
- *
- * Caller decides whether to merge additively (only fill missing keys)
- * or overwrite — see `renderCovarianceOptions`.
+ * Build a synthetic-attr overlay for the $COV step. Surfaces options
+ * NM never emits to XML (CONDITIONAL, PARAFILE, PARAFPRINT) plus
+ * `special` (conditionally emitted: suppressed when MATRIX=R per NM
+ * 7.6.0 empirical). `existingKeys` makes the merge additive — keys
+ * already in XML are skipped, so XML-emitted values always win over
+ * synthesised defaults.
  */
-function synthesizeInvisibleCovAttrs(covTokens) {
-  const out = {};
-  for (const [attr, patterns] of Object.entries(INVISIBLE_COV_TOKEN_PATTERNS)) {
-    let matched = false;
-    for (const p of patterns) {
-      const match = covTokens.find((t) => p.re.test(t));
-      if (match) {
-        const value = p.value !== null
-          ? p.value
-          : (match.split('=')[1] || '');
-        out[attr] = { value, isUserSet: true };
-        matched = true;
-        break;
-      }
-    }
-    if (!matched) {
-      out[attr] = { value: INVISIBLE_COV_DEFAULTS[attr], isUserSet: false };
-    }
-  }
-  return out;
+function synthesizeInvisibleCovAttrs(covTokens, existingKeys) {
+  // All $COV invisibles currently apply unconditionally; method/level
+  // gating not needed today.
+  const applies = () => true;
+  // Adapter for entries that don't carry the `inapplicable` field.
+  const raw = synthesizeFromTokens(covTokens, INVISIBLE_COV_PATTERNS, applies, INVISIBLE_COV_DEFAULTS, existingKeys);
+  return raw;
 }
 
 function renderCovarianceOptions(opts, tiersMap, resolvedMap, lstTolerances, lstCovRecord, hasOde) {
@@ -1308,27 +1291,23 @@ function renderCovarianceOptions(opts, tiersMap, resolvedMap, lstTolerances, lst
   outer.className = 'xml-options';
   const sumOuter = document.createElement('summary');
 
-  // Synthesize invisible $COV options. ADDITIVE merge — only fills
-  // keys missing from XML (e.g. cov_special when MATRIX=R suppresses
-  // it). When XML carries the key, trust the wire value.
-  const covTokens = lstCovRecord && lstCovRecord.tokens ? lstCovRecord.tokens : [];
-  const synthetic = synthesizeInvisibleCovAttrs(covTokens);
-  const userWroteAtolCov = covTokens.some((t) => /^ATOL=/i.test(t));
-  const userWroteTolCov = covTokens.some((t) => /^TOL=/i.test(t));
-  const merged = { ...opts };
   // Filter cov_atol/cov_tol when ODE not used AND user didn't type them
   // on $COV. NM emits cov_atol='-1' regardless; for non-ODE models the
   // value is irrelevant.
+  const covTokens = lstCovRecord && lstCovRecord.tokens ? lstCovRecord.tokens : [];
+  const userWroteAtolCov = covTokens.some((t) => /^ATOL=/i.test(t));
+  const userWroteTolCov = covTokens.some((t) => /^TOL=/i.test(t));
+  const merged = { ...opts };
   if (!hasOde && !userWroteAtolCov && merged.atol === '-1') delete merged.atol;
   if (!hasOde && !userWroteTolCov && merged.tol === '-1') delete merged.tol;
-  // Track which keys were FILLED by synthesis (vs. present in XML) so
-  // the renderer can decide whether to apply quirk annotations.
-  const filledBySynthesis = new Set();
+  // Synthesize invisible $COV options. Additive-by-construction —
+  // synthesizeInvisibleCovAttrs only returns entries for keys not
+  // already in `merged`, so the synthetic-tier branch in the loop
+  // below is unambiguous (`synthEntry !== undefined` iff XML lacked
+  // the key, e.g. cov_special when MATRIX=R suppresses it).
+  const synthetic = synthesizeInvisibleCovAttrs(covTokens, new Set(Object.keys(merged)));
   for (const k of Object.keys(synthetic)) {
-    if (!(k in merged)) {
-      merged[k] = synthetic[k].value;
-      filledBySynthesis.add(k);
-    }
+    merged[k] = synthetic[k].value;
   }
   const matrixIsR = merged.matrix === 'r';
   const count = Object.keys(merged).length;
@@ -1348,15 +1327,12 @@ function renderCovarianceOptions(opts, tiersMap, resolvedMap, lstTolerances, lst
     let tip;
 
     // Unified tier scheme (explicit/explicitDefault/implicit) mirroring
-    // $EST. Synthesised invisible-options use their own
-    // matches-doc-default classification path; XML-emitted attrs use
-    // the `tiersMap` (produced by `classifyCovStep`).
+    // $EST. Synthesised invisible-options use their own matches-doc-
+    // default path. The synthetic map only contains keys NOT already in
+    // XML (additive-by-construction), so `synthEntry !== undefined`
+    // unambiguously means "XML lacked this key, we filled it from tokens".
     const synthEntry = synthetic[k];
-    // Apply synthesis-tier only when XML didn't already carry this key
-    // (additive merge). For `special` specifically, XML carries it
-    // unless MATRIX=R suppresses it; in the present-in-XML case fall
-    // through to the tier-map.
-    if (synthEntry !== undefined && filledBySynthesis.has(k)) {
+    if (synthEntry !== undefined) {
       if (synthEntry.isUserSet) {
         const matchesDocDefault = synthEntry.value === INVISIBLE_COV_DEFAULTS[k];
         cls += matchesDocDefault

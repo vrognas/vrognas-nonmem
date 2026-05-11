@@ -19,10 +19,9 @@ import type { ExtTrajectory } from '../runtime/parse-ext-trajectory';
 import type { EstimationOptionsStep } from '../runtime/parse-xml-options';
 import {
   classifyEstStep,
-  findNonDefaultKeys,
-  findPropagatedKeys,
-  findUserDrivenKeys,
+  deriveMethodKind,
   type EstTier,
+  type MethodKind,
 } from '../runtime/xml-est-defaults';
 import type { CovarianceOptions } from '../runtime/parse-xml-problem-options';
 import {
@@ -334,32 +333,6 @@ export interface InspectorDiagnostics {
    */
   xmlEstimationOptions: EstimationOptionsStep[];
   /**
-   * Per-step list of attribute keys whose values differ from the
-   * method's empirically-probed defaults (see
-   * `runtime/xml-est-defaults.ts`). Parallel-indexed with
-   * `xmlEstimationOptions` -- step `i`'s non-default keys at index
-   * `i`. Empty inner array when the method has no defaults table
-   * (BAYES, MAP, NM 7.7+ additions). Surfaced as blue text on the
-   * value cells in the option dump.
-   */
-  xmlEstimationNonDefaults: string[][];
-  /**
-   * Per-step list of attribute keys classified as "user-driven"
-   * (NONMEM requires user to set, OR per-run identity like seed /
-   * file / estimation_method). Disjoint from `xmlEstimationNonDefaults`.
-   * Surfaced as green text — separate visual tier from non-default
-   * blue, signalling "you typed this" rather than "you customised
-   * away from method default."
-   */
-  xmlEstimationUserDriven: string[][];
-  /**
-   * Per-step list of attribute keys that match the PREVIOUS step's
-   * value and were NOT explicitly written on THIS step's $EST line.
-   * Kept for backward compat with v0.0.179 payloads. The new (v0.0.181+)
-   * `xmlEstimationTiers` field is the primary source for tier-rendering.
-   */
-  xmlEstimationPropagated: string[][];
-  /**
    * Per-step tier-map: key → 'explicit' | 'explicitDefault' | 'implicit'.
    * Computed via `classifyEstStep`. Encodes the v0.0.181 coloring
    * scheme: blue for user-typed, orange for AUTO/propagation-set,
@@ -367,6 +340,13 @@ export interface InspectorDiagnostics {
    * full semantics.
    */
   xmlEstimationTiers: Record<string, EstTier>[];
+  /**
+   * Per-step method-kind label ('fo' / 'foce' / 'foce-eval' / 'laplace'
+   * / 'em'). Single source of truth for option-applicability gating
+   * (renderer-side) and posdef sentinel resolution (cov-side). EM-
+   * method list lives in `xml-est-defaults.ts:EM_METHODS`.
+   */
+  xmlEstimationMethodKinds: MethodKind[];
   /**
    * Per-`$EST`-step result fields from `<nm:estimation>` blocks.
    * Empty when no `.xml` was loaded. Surfaces termination_status +
@@ -941,24 +921,15 @@ function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnostics | nu
     xmlEstimationResults.length === 0 &&
     xmlCovarianceOptions === null;
   if (empty) return null;
-  // Legacy per-step lists (kept for back-compat with older payload
-  // consumers / tests). The new `xmlEstimationTiers` is the primary
-  // source for v0.0.181+ tier-rendering.
-  const xmlEstimationNonDefaults = xmlEstimationOptions.map(findNonDefaultKeys);
-  const xmlEstimationUserDriven = xmlEstimationOptions.map(findUserDrivenKeys);
-  const xmlEstimationPropagated = xmlEstimationOptions.map((step, i) => {
-    if (i === 0) return [];
-    const tokens = lstEstRecords[i]?.tokens ?? [];
-    return findPropagatedKeys(step, xmlEstimationOptions[i - 1], tokens);
-  });
-  // v0.0.181+ tier-map: per-step `key → tier`. Single source of truth
-  // for the inspector's coloring. Implicit tier covers BOTH AUTO-set
-  // and propagation cases (visually unified — both are "NM picked
-  // this, not the user").
+  // Per-step tier-map: `key → tier` (explicit/explicitDefault/implicit).
+  // Single source of truth for the inspector's $EST coloring; implicit
+  // tier covers both AUTO-set and propagation cases (visually unified —
+  // both are "NM picked this, not the user").
   const xmlEstimationTiers = xmlEstimationOptions.map((step, i) => {
     const tokens = lstEstRecords[i]?.tokens ?? [];
     return classifyEstStep(step, tokens, expectedDefaultFile);
   });
+  const xmlEstimationMethodKinds = xmlEstimationOptions.map(deriveMethodKind);
   // Unified $COV tier-map (explicit/explicitDefault/implicit) — same
   // scheme as $EST. Drives the inspector's $COV coloring via .lst $COV
   // tokens (user-typed vs. not).
@@ -969,20 +940,15 @@ function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnostics | nu
   const xmlCovarianceTiers: Record<string, CovTier> = xmlCovarianceOptions
     ? classifyCovStep(xmlCovarianceOptions, covTokens)
     : {};
-  // Per-key wire→runtime resolution for $COV sentinels (atol/tol/
-  // siglcov/siglocov/knuthsumoff/posdef/file/format/ranmethod when
-  // value is '-1' or 'BLANK'). Method discriminator for posdef
-  // (0 classical / 3 EM) derived from the last $EST step's
-  // estimation_method attr — empty/cond → classical; em-method labels
-  // → em. Empty result when no $COV present.
-  const methodKind: 'em' | 'classical' | null = (() => {
-    const m = (lastEst?.estimation_method ?? '').toLowerCase();
-    if (!m) return 'classical';
-    if (m === 'imp' || m === 'impmap' || m === 'saem' || m === 'its'
-        || m === 'direct' || m === 'bayes' || m === 'nuts'
-        || m === 'mcmc' || m === 'chain' || m === 'sir') return 'em';
-    return 'classical';
-  })();
+  // Per-key wire→runtime resolution for $COV sentinels. The posdef
+  // sentinel ('-1') resolves to 0 (classical) / 3 (EM) — collapse
+  // the 4-way methodKind to binary for that lookup.
+  const lastEstMethodKind = xmlEstimationMethodKinds.length > 0
+    ? xmlEstimationMethodKinds[xmlEstimationMethodKinds.length - 1]
+    : null;
+  const methodKind: 'em' | 'classical' | null = lastEstMethodKind === null
+    ? null
+    : lastEstMethodKind === 'em' ? 'em' : 'classical';
   const xmlCovarianceResolved: Record<string, string> = {};
   if (xmlCovarianceOptions) {
     for (const k of Object.keys(xmlCovarianceOptions)) {
@@ -1031,10 +997,8 @@ function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnostics | nu
     acceptanceRate: lst.acceptanceRate,
     correlationRedFlags,
     xmlEstimationOptions,
-    xmlEstimationNonDefaults,
-    xmlEstimationUserDriven,
-    xmlEstimationPropagated,
     xmlEstimationTiers,
+    xmlEstimationMethodKinds,
     xmlEstimationResults,
     xmlCovarianceOptions,
     xmlCovarianceTiers,

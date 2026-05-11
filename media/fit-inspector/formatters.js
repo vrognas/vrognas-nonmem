@@ -217,23 +217,11 @@ function terminationCodeLabel(c, methodKind) {
   return 'code ' + c;
 }
 
-/**
- * Classify an XML `estimation_method` attr value as 'em' or 'classical'.
- * Empty string / `'cond'` / unknown → 'classical' (FOCE family is the
- * baseline for absent methods). Returns null when the method should
- * be treated as fully unknown (e.g., undefined input).
- */
-function classifyEstimationMethodKind(method) {
-  if (method === undefined || method === null) return null;
-  const m = String(method).toLowerCase();
-  if (m === 'imp' || m === 'impmap' || m === 'saem' || m === 'its'
-      || m === 'direct' || m === 'bayes' || m === 'nuts'
-      || m === 'mcmc' || m === 'chain' || m === 'sir') {
-    return 'em';
-  }
-  // '' (FOCE classical), 'cond', and anything else default to classical.
-  return 'classical';
-}
+// `classifyEstimationMethodKind` retired in v0.0.191 — `methodKind`
+// per step is now shipped on the payload from `xml-est-defaults.ts:
+// deriveMethodKind` (single source of truth for the EM-method list).
+// Callers read `payload.diagnostics.xmlEstimationMethodKinds[i]`
+// directly and collapse to binary for `terminationCodeLabel`.
 
 /**
  * `.ext -1000000007` row codes — empirically-probed mapping against
