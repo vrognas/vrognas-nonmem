@@ -34,6 +34,7 @@ import { readXmlText } from '../runtime/load-xml-text';
 import { lastCnvTable, type CnvTable } from '../runtime/parse-cnv';
 import { lastCorTable, type CorTable } from '../runtime/parse-cor';
 import { parseExtFit } from '../runtime/parse-ext-fit';
+import { synthesizeFitFromLst } from '../runtime/parse-lst-finals';
 import { parseExtTrajectory, type ExtTrajectory } from '../runtime/parse-ext-trajectory';
 import {
   parseLstCovRecord,
@@ -328,7 +329,17 @@ async function resolveLstMode(
     loadCor(fsPath, log, runner),
     loadCnv(fsPath, log, runner),
   ]);
-  const fit = extText ? parseExtFit(extText) : null;
+  // Prefer `.ext` (authoritative, full-precision) but fall back to the
+  // .lst's FINAL PARAMETER ESTIMATE / STANDARD ERROR OF ESTIMATE
+  // tabular blocks when no .ext exists (the run completed but the .ext
+  // file wasn't preserved — e.g. .lst-only export, file moved). Without
+  // this fallback the Fit Inspector renders init-only columns even
+  // though the .lst clearly has converged estimates.
+  const fit = extText
+    ? parseExtFit(extText)
+    : lst
+      ? synthesizeFitFromLst(lstText, lst.objv)
+      : null;
   const trajectories = extText ? parseExtTrajectory(extText) : [];
   const xmlEstimationOptions = xmlText ? parseEstimationOptions(xmlText) : [];
   const xmlEstimationResults = xmlText ? parseEstimationResults(xmlText) : [];

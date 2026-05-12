@@ -7,6 +7,15 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **feat: lst-only fit fallback (v0.0.208).** When the Fit Inspector opens a `.lst` whose sibling `.ext` is missing (run was moved or copied without the auxiliary files), it previously rendered LB/IE/UB columns only — FE/SE/RSE were blank despite the `.lst` clearly carrying the converged estimates. Now parses NONMEM's `FINAL PARAMETER ESTIMATE` and `STANDARD ERROR OF ESTIMATE` tabular blocks directly and synthesises an `ExtEstimates`-shaped fallback fit so the inspector populates the same columns.
+
+  - New `src/runtime/parse-lst-finals.ts` (~220 LOC): `parseLstFinals` + `parseLstFinalsSe` walk the banner-delimited blocks and emit `{thetas, omegas, sigmas}` maps keyed by `THETA(i)` / `OMEGA(i,j)` / `SIGMA(i,j)`. Handles diagonal + BLOCK matrix forms, COV-vs-CORR section disambiguation (we surface COV only), and NONMEM's `.........` "not computed" marker for SE entries on fixed parameters.
+  - New `synthesizeFitFromLst(lstText, ofv)` → `ExtEstimates | null`: assembles the maps into a fit overlay; fields with no `.lst` source (`finalsStdcorr`, `terminationCodes`, etc.) stay empty — the inspector already has fallback math for those.
+  - `variables-context.ts`: `const fit = extText ? parseExtFit(extText) : synthesizeFitFromLst(lstText, lst.objv)`. The .ext path stays preferred (authoritative, full-precision); lst-only is the fallback.
+  - 9 new tests in `test/runtime/parse-lst-finals.test.ts` (508 → was 499). Covers banner-absent → null, THETA/OMEGA/SIGMA COV parsing, OMEGA CORR section skipped, `.........` SE marker → entry omitted.
+
+  Behavioural caveat: SE precision is limited to the `.lst`'s human-format (3 sig-digits as displayed). When `.ext` is present, the inspector still prefers it for its full-precision values. Lst-only fallback intentionally drops the all-zero / fixed-param SEs (mirrors the `.ext` SE-row drop rule) so the Fit Inspector doesn't render misleading "SE 0" cells.
+
 - **docs: note vscode-nmtran 0.4.22 fix for embedded-parse cache collision (v0.0.207).** The "4 OMEGA rows when the model has 1" bug reported 2026-05-12 — and the earlier $THETA off-by-one / $OMEGA BLOCK-labels-empty bug from the same review pass — both traced to a single cause: vscode-nmtran's `ParameterScanner.scanDocument` keyed its cache on `${uri}:${version}`, but the `nmtran/parseModelText` LSP path (used by our lst-mode for the embedded control stream) hardcoded URI `embedded://lst` + version `1` for every call. Distinct embedded contents collided on the same key — first-parsed result served for every subsequent call.
 
   Fix landed in vscode-nmtran 0.4.22 (`server/src/services/ParameterScanner.ts`): skip the cache for synthetic `embedded://` URIs; workspace-document caching unchanged. Two regression tests added there (cache collision + commented-`; $THETA` interleaved).
