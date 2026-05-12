@@ -487,6 +487,21 @@ tr.fixed-row td { color: var(--vscode-charts-blue); }
    shift nth-child positions and break alignment. */
 table.param-table td.col-label,
 table.param-table th.col-label { text-align: left; }
+/* Long parameter labels (e.g. `klebsiella_other vs acinetobacter_…`)
+   overflow into the LB/IE columns at narrow side-pane widths and
+   garble the table. Truncate to the column's allotted width with an
+   ellipsis; the full label is preserved in the cell's `title`
+   attribute (set in client.js `rowEl`) so hover shows it. The
+   `max-width: 0` is the standard fixed-layout-table trick to make
+   percentage column widths bind for ellipsis purposes; combined with
+   `table { width: 100% }` this re-truncates automatically when the
+   side pane is resized. */
+table.param-table td.col-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 0;
+}
 /* Fluid table layout: fill the inspector pane (no fixed pixel width
    wastes pane width) but keep `table-layout: fixed` so per-column
    widths are honoured. Class-based widths (.col-*) sum to ~100% across

@@ -2202,7 +2202,14 @@ function rowEl(cells, attrs, colClasses) {
     } else if (typeof c === 'number') {
       td.textContent = fmtNum(c);
     } else {
-      td.textContent = String(c);
+      const text = String(c);
+      td.textContent = text;
+      // Label column truncates with CSS ellipsis (style.css). Mirror the
+      // full text into `title` so hover shows it. Skip when the cell is
+      // empty / a single em-dash — no value in surfacing those.
+      if (colClasses && colClasses[i] === 'col-label' && text.length > 0) {
+        td.title = text;
+      }
     }
     tr.append(td);
   });
