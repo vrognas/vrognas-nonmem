@@ -2190,7 +2190,12 @@ function priorVarOrDfCell(r) {
       '. Prior SD = √PV = ' + fmtNum(sd) + '.' + rseLine +
       ' Smaller PV pulls the estimate toward P more strongly. ' +
       'PV ≥ 1e6 ≈ non-informative; PV ≤ (P·0.3)² ≈ tight (Chan Kwong 2020).';
-    return annotatedNumber(r.priorVariance, tip);
+    // Inline dim badge with the derived prior RSE — saves the user
+    // having to hover the tooltip for the most common follow-up
+    // question ("how tight is this prior?"). Single line; uses the
+    // existing `.dim` token so row height is unchanged.
+    const badge = priorRsePct !== null ? '(' + priorRsePct.toFixed(0) + '%)' : null;
+    return annotatedNumber(r.priorVariance, tip, badge);
   }
   if (typeof r.priorDf === 'number' && isFinite(r.priorDf)) {
     const tip =
@@ -2205,16 +2210,24 @@ function priorVarOrDfCell(r) {
 }
 
 /**
- * Render a numeric cell with a custom tooltip. Returns null for
- * non-finite input so the caller renders the standard `—` placeholder
- * via rowEl's null-handling branch.
+ * Render a numeric cell with a custom tooltip and an optional dim
+ * trailing badge (e.g. derived value shown alongside the raw). Returns
+ * null for non-finite input so the caller renders the standard `—`
+ * placeholder via rowEl's null-handling branch.
  */
-function annotatedNumber(value, tooltip) {
+function annotatedNumber(value, tooltip, dimBadge) {
   if (typeof value !== 'number' || !isFinite(value)) return null;
-  const span = document.createElement('span');
-  span.textContent = fmtNum(value);
-  span.title = tooltip;
-  return span;
+  const wrap = document.createElement('span');
+  wrap.title = tooltip;
+  wrap.append(document.createTextNode(fmtNum(value)));
+  if (dimBadge) {
+    const badge = document.createElement('span');
+    badge.className = 'dim';
+    badge.style.marginLeft = '0.4em';
+    badge.textContent = dimBadge;
+    wrap.append(badge);
+  }
+  return wrap;
 }
 
 // Hover-tooltips for the short column headers — pharmacometric

@@ -7,6 +7,10 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **feat: inline Prior RSE badge in the PV cell (v0.0.214).** The PV cell now renders `<value> (<rse%>)` — raw variance, plus the derived Prior RSE = `√PV/|P| × 100%` as a dim-tinted badge inline. Saves the user hovering the tooltip for the most common follow-up ("how tight is this prior?"). Same row height — single line; badge reuses the existing `.dim` token. Tooltip retains the full annotation with informativeness anchors (Chan Kwong 2020). Skipped when P is 0 / null to avoid div-by-zero noise.
+
+  `annotatedNumber(value, tooltip)` extended to `annotatedNumber(value, tooltip, dimBadge?)` — the optional badge is the inline-derived secondary view; any future cell needing a "raw + derived" pair can use the same helper.
+
 - **feat: P transforms with the toggles; PV/PD tooltip annotations (v0.0.213).** The display-scale toggles now extend to the **P** (prior mean / mode) column: `exp(θ)` transforms `$THETAP` on THETA rows; `√Ω/ρ` transforms `$OMEGAP` / `$SIGMAP` on OMEGA/SIGMA rows. P shares the same scale as the parameter, so when the user is reading on the SD scale (or natural θ scale) the prior values land alongside IE/FE consistently.
 
   **PV / PD stay raw** under any toggle — they're not parameter-scale quantities — but each cell now carries a tooltip annotating them:
