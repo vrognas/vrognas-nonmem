@@ -59,6 +59,12 @@ const PLUS_VALUES_RE = /^\s*\+\s*(.*)$/;
 const ROW_LABEL_RE = /^\s*(ETA|EPS)(\d+)\s*$/;
 // `         8.87E-01 -2.13E+00 ...` — bare numeric line (THETA values).
 const NUMERIC_LINE_RE = /^\s*[-+\d.]/;
+// FORTRAN form-feed marker — `1` in column 0 starts a new page in NONMEM
+// output. Appears between OMEGA-COV and OMEGA-CORR blocks; without this
+// check the continuation-line logic would treat the bare `1` as an extra
+// value for the previous ETA row (yielding a phantom OMEGA(1,2)=1).
+// Real matrix values always use scientific notation (`E±NN`).
+const PAGE_BREAK_RE = /^\s*1\s*$/;
 
 export interface LstFinalEstimates {
   /** 1-based THETA(i) → final value. Empty when block absent. */
@@ -273,6 +279,13 @@ function consumeMatrixSection(
     ) {
       if (currentRow) rows.push(currentRow);
       return { rows, cursor: i };
+    }
+    // Drop FORTRAN page-break markers — `1` at column 0 between sections.
+    // Must come BEFORE the continuation check (a bare `1` would otherwise
+    // be parsed as an extra matrix element).
+    if (PAGE_BREAK_RE.test(line)) {
+      i++;
+      continue;
     }
     const labelMatch = line.match(ROW_LABEL_RE);
     if (labelMatch) {

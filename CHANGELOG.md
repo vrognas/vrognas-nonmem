@@ -7,6 +7,8 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **fix: lst-finals parser ignores FORTRAN page-break marker (v0.0.209).** User-reported regression in v0.0.208's new lst-only fallback: a phantom `OMEGA(1,2) = 1` off-diagonal appeared in the Fit Inspector for a model with a single OMEGA. Root cause: NONMEM's `.lst` inserts a bare `1` line (FORTRAN form-feed page-break) between the `OMEGA - COV MATRIX` and `OMEGA - CORR MATRIX` sections. The matrix-section consumer's continuation-line branch treated this `1` as an extra value for the previous ETA row → `OMEGA(1,2) = 1`. Fixed by recognising the page-break pattern (`^\s*1\s*$`) before the continuation check; real matrix values always use scientific notation so the bare `1` is unambiguously a page break. New regression test in `parse-lst-finals.test.ts`.
+
 - **feat: lst-only fit fallback (v0.0.208).** When the Fit Inspector opens a `.lst` whose sibling `.ext` is missing (run was moved or copied without the auxiliary files), it previously rendered LB/IE/UB columns only — FE/SE/RSE were blank despite the `.lst` clearly carrying the converged estimates. Now parses NONMEM's `FINAL PARAMETER ESTIMATE` and `STANDARD ERROR OF ESTIMATE` tabular blocks directly and synthesises an `ExtEstimates`-shaped fallback fit so the inspector populates the same columns.
 
   - New `src/runtime/parse-lst-finals.ts` (~220 LOC): `parseLstFinals` + `parseLstFinalsSe` walk the banner-delimited blocks and emit `{thetas, omegas, sigmas}` maps keyed by `THETA(i)` / `OMEGA(i,j)` / `SIGMA(i,j)`. Handles diagonal + BLOCK matrix forms, COV-vs-CORR section disambiguation (we surface COV only), and NONMEM's `.........` "not computed" marker for SE entries on fixed parameters.

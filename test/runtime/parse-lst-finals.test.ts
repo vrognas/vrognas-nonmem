@@ -156,3 +156,53 @@ describe('parseLstFinalsSe', () => {
     expect(r.sigmas.get('SIGMA(1,1)')).toBeCloseTo(0.03, 3);
   });
 });
+
+describe('FORTRAN page-break (`1` in column 0)', () => {
+  // Reported via positron-nonmem 2026-05-12: a phantom OMEGA(1,2)=1.0
+  // off-diagonal appeared in the Fit Inspector for a model with a
+  // single OMEGA. Root cause: NONMEM's .lst inserts a bare `1` line
+  // (FORTRAN form-feed marker) between OMEGA-COV and OMEGA-CORR
+  // sections. The continuation-line logic was treating it as an
+  // extra value for the prior ETA row.
+  const WITH_PAGE_BREAK = `
+ ********************                             FINAL PARAMETER ESTIMATE                           ********************
+
+
+ THETA - VECTOR OF FIXED EFFECTS PARAMETERS   *********
+
+
+         TH 1
+
+         5.00E-01
+
+
+
+ OMEGA - COV MATRIX FOR RANDOM EFFECTS - ETAS  ********
+
+
+         ETA1
+
+ ETA1
++        1.00E-01
+
+1
+
+
+ OMEGA - CORR MATRIX FOR RANDOM EFFECTS - ETAS  *******
+
+
+         ETA1
+
+ ETA1
++        3.16E-01
+
+1
+`;
+
+  it('does NOT promote the page-break `1` into the prior ETA row as OMEGA(1,2)', () => {
+    const r = parseLstFinals(WITH_PAGE_BREAK)!;
+    expect(r.omegas.size).toBe(1);
+    expect(r.omegas.get('OMEGA(1,1)')).toBeCloseTo(0.1, 3);
+    expect(r.omegas.has('OMEGA(1,2)')).toBe(false);
+  });
+});
