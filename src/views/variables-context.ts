@@ -58,6 +58,7 @@ import {
 } from '../runtime/parse-xml-results';
 import type { ExtEstimates } from '../runtime/parse-ext-fit';
 import { parseLst, type LstSummary } from '../runtime/parse-lst';
+import { extractParameterLabels, type ParameterLabels } from '../runtime/parse-param-labels';
 import { parseRunrecord, type RunrecordTags } from '../runtime/parse-runrecord';
 import type { SumoSummary } from '../runtime/parse-sumo';
 import { readFmsg, type FmsgContent } from '../runtime/read-fmsg';
@@ -179,6 +180,15 @@ export interface VariablesContext {
    * slice.
    */
   hasLevel: boolean;
+  /**
+   * Pirana-style `; <label>` comments extracted directly from the
+   * control-stream source. Overrides vscode-nmtran's `comment` field
+   * which is unreliable (drops `$OMEGA BLOCK(N)` labels entirely;
+   * occasional off-by-one on `$THETA`). When both sources are present,
+   * the inspector uses ours; when ours doesn't have a label for an
+   * index, vscode-nmtran's value is the fallback.
+   */
+  parameterLabels: ParameterLabels;
 }
 
 /** Logger contract — every diagnostic line about the resolution path goes here. */
@@ -221,7 +231,24 @@ async function resolveModMode(
   }
   log(`mod-mode: parsedModel ok — ${parsedModelStatsLine(model)}`);
   const runrecord = await loadRunrecord(uri.fsPath, log);
-  return { model, modUri: uri, fit: null, sumo: null, lst: null, runrecord, prderr: null, fmsg: null, cor: null, cnv: null, trajectories: [], xmlEstimationOptions: [], xmlEstimationResults: [], xmlCovarianceOptions: null, lstEstRecords: [], lstTolerances: { baseNrd: null, baseAnrd: null, estNrd: null, estAnrd: null, covNrd: null, covAnrd: null, siglo: null, sigl: null }, lstCovRecord: null, hasOde: false, hasLevel: false };
+  // Extract our own parameter labels from the raw .mod source — vscode-nmtran's
+  // comment field is unreliable for `$OMEGA BLOCK(N)` rows and off-by-one
+  // on `$THETA` in some layouts (verified bug, 2026-05-12).
+  const parameterLabels = await extractLabelsFromModFile(uri.fsPath, log);
+  return { model, modUri: uri, fit: null, sumo: null, lst: null, runrecord, prderr: null, fmsg: null, cor: null, cnv: null, trajectories: [], xmlEstimationOptions: [], xmlEstimationResults: [], xmlCovarianceOptions: null, lstEstRecords: [], lstTolerances: { baseNrd: null, baseAnrd: null, estNrd: null, estAnrd: null, covNrd: null, covAnrd: null, siglo: null, sigl: null }, lstCovRecord: null, hasOde: false, hasLevel: false, parameterLabels };
+}
+
+async function extractLabelsFromModFile(
+  modPath: string,
+  log: VariablesLogger,
+): Promise<ParameterLabels> {
+  try {
+    const text = await fs.readFile(modPath, 'utf8');
+    return extractParameterLabels(text);
+  } catch (e) {
+    log(`mod-mode: label-extract read failed for ${path.basename(modPath)}: ${errMsg(e)}`);
+    return { thetas: new Map(), omegas: new Map(), sigmas: new Map() };
+  }
 }
 
 /**
@@ -322,6 +349,12 @@ async function resolveLstMode(
   // $LEVEL).
   const hasOde = lstTolerances.baseAnrd !== null;
   const hasLevel = ctrlStream ? /^\s*\$LEVEL\b/im.test(ctrlStream) : false;
+  // Our own label extraction from the embedded control stream — overrides
+  // vscode-nmtran's unreliable `comment` field (drops $OMEGA BLOCK rows;
+  // off-by-one on $THETA in some layouts).
+  const parameterLabels = ctrlStream
+    ? extractParameterLabels(ctrlStream)
+    : { thetas: new Map(), omegas: new Map(), sigmas: new Map() };
   if (!fit) {
     log(`lst-mode: no .ext / unparseable / no final row — pushing init-only`);
   } else {
@@ -353,6 +386,7 @@ async function resolveLstMode(
     lstCovRecord,
     hasOde,
     hasLevel,
+    parameterLabels,
   };
 }
 

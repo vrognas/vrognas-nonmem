@@ -473,6 +473,18 @@ export interface BuildContext {
   hasOde?: boolean;
   /** Whether the model has a `$LEVEL` record (gates LEVCENTER/LEVOBJTYPE/LEVWT synthesis). */
   hasLevel?: boolean;
+  /**
+   * Pirana-style `; <label>` comments extracted directly from the
+   * `.mod` / `.lst`-embedded control stream by `parse-param-labels.ts`.
+   * Overrides vscode-nmtran's `comment` field — empirically unreliable
+   * for `$OMEGA BLOCK(N)` (labels dropped entirely) and occasionally
+   * off-by-one for `$THETA`. Per-kind 1-based-index → label.
+   */
+  parameterLabels?: {
+    thetas: Map<number, string>;
+    omegas: Map<number, string>;
+    sigmas: Map<number, string>;
+  };
   /** User-configurable shrinkage warn threshold (percent). Default 30 (pharmacometrics convention). */
   shrinkageWarnPct?: number;
   /** Shrinkage borderline (yellow/warn) threshold. Default 20. */
@@ -570,6 +582,11 @@ export function buildInspectorPayload(
     (s) => `SIGMA(${s.index},${s.index})`,
   );
 
+  // Label fallback: our own extraction overrides vscode-nmtran's
+  // unreliable `.comment`; if our map has no entry, fall back to it.
+  const pickLabel = (kind: 'thetas' | 'omegas' | 'sigmas', idx: number, fallback?: string): string | null => {
+    return ctx.parameterLabels?.[kind].get(idx) ?? fallback ?? null;
+  };
   const thetas: InspectorRow[] = filteredThetas.map((t) => {
     const name = `THETA(${t.index})`;
     const final = fit?.finals.get(name) ?? null;
@@ -582,7 +599,7 @@ export function buildInspectorPayload(
     return {
       index: t.index,
       name,
-      label: t.comment ?? null,
+      label: pickLabel('thetas', t.index, t.comment),
       lower: t.lower ?? null,
       init: initPick.value,
       impliedInit: initPick.implicit,
@@ -607,8 +624,10 @@ export function buildInspectorPayload(
   // and the off-diagonal builders treat absence as "fall back further".
   const initialOmega = ctx.lst?.initialOmega ?? new Map();
   const initialSigma = ctx.lst?.initialSigma ?? new Map();
-  const omegas = mergeMatrixRows('OMEGA', filteredOmegas, fit, numSigDigByName, initialOmega);
-  const sigmas = mergeMatrixRows('SIGMA', filteredSigmas, fit, numSigDigByName, initialSigma);
+  const omegaLabels = ctx.parameterLabels?.omegas ?? new Map<number, string>();
+  const sigmaLabels = ctx.parameterLabels?.sigmas ?? new Map<number, string>();
+  const omegas = mergeMatrixRows('OMEGA', filteredOmegas, fit, numSigDigByName, initialOmega, omegaLabels);
+  const sigmas = mergeMatrixRows('SIGMA', filteredSigmas, fit, numSigDigByName, initialSigma, sigmaLabels);
 
   return {
     summary,
@@ -752,9 +771,10 @@ function mergeMatrixRows(
   fit: ExtEstimates | null,
   numSigDigByName: Map<string, number>,
   lstInitial: Map<string, number>,
+  labels: ReadonlyMap<number, string>,
 ): InspectorRow[] {
   const rows = diagonals.map((d) =>
-    buildOmegaSigmaRow(d, prefix, fit, numSigDigByName, lstInitial),
+    buildOmegaSigmaRow(d, prefix, fit, numSigDigByName, lstInitial, labels),
   );
   if (fit) rows.push(...offDiagonalRows(prefix, fit, numSigDigByName, lstInitial));
   rows.sort(compareMatrixRows);
@@ -1063,13 +1083,14 @@ function buildOmegaSigmaRow(
   fit: ExtEstimates | null,
   numSigDigByName: Map<string, number>,
   lstInitial: Map<string, number>,
+  labels: ReadonlyMap<number, string>,
 ): InspectorRow {
   const name = `${prefix}(${d.index},${d.index})`;
   const initPick = pickInit(d.value, name, fit, lstInitial);
   return makeOmegaSigmaRow({
     index: d.index,
     name,
-    label: d.comment ?? null,
+    label: labels.get(d.index) ?? d.comment ?? null,
     init: initPick.value,
     impliedInit: initPick.implicit,
     fix: d.fix,

@@ -154,6 +154,7 @@ function pushVariables(ctx: VariablesContext | null): void {
       lstTolerances: ctx?.lstTolerances,
       hasOde: ctx?.hasOde,
       hasLevel: ctx?.hasLevel,
+      parameterLabels: ctx?.parameterLabels,
       // Defaults imported from INSPECTOR_THRESHOLD_DEFAULTS so config-fallback
       // values and payload-side fallbacks (`?? DEFAULT_THRESHOLDS.x`) stay
       // in lockstep — previously the same numbers were spelled out in both

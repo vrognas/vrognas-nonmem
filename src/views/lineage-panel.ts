@@ -329,6 +329,12 @@ export class LineagePanel {
       runner: this.runner,
       lastGraph: this.lastGraph,
       currentLineage: this.currentLineage,
+      // Snapshot once per dispatch so the three downstream consumers
+      // (pickRunFromGraph priorityPaths derivation, addToLineage's
+      // existing-set, removeFromLineage's existing-set) all see the
+      // same view of `positronNonmem.lineages` and avoid 2-3 separate
+      // `getConfiguration(...).get(...)` round-trips per action.
+      namedLineages: readNamedLineages(),
       refresh: () => this.refresh(),
       setCurrentLineage: (name) => {
         this.currentLineage = name;

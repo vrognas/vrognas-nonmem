@@ -7,6 +7,16 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **fix: parameter-label override + 7th-review remaining items (v0.0.205).**
+
+  **Bug fix — user-reported.** `$THETA` labels were off-by-one (first row blank, others shifted down by one; last label dropped) and `$OMEGA BLOCK(N)` labels were entirely missing in the Fit Inspector. Root cause: vscode-nmtran's `NmtranThetaDecl.comment` / `NmtranOmegaSigmaDecl.comment` field is unreliable in the wild — drops `$OMEGA BLOCK(N)` row labels entirely and shifts THETA labels under some layouts. Rather than wait on a vscode-nmtran fix, the inspector now extracts the `; <label>` comments itself via a new `src/runtime/parse-param-labels.ts` (~120 LOC). The extractor handles diagonal `$OMEGA`/`$SIGMA`, `$OMEGA BLOCK(N)` rows (label attaches to the diagonal element on each row per the Pirana convention), and multi-record cases. Threaded through `VariablesContext` → `BuildContext` → `mergeMatrixRows`. vscode-nmtran's `.comment` remains a fallback when our extraction has no entry for that index.
+
+  **README rewrite (item 7 + item 4).** The previous README claimed the extension shells out to system `ssh` and described a `Test Connection` command + `positronNonmem.host.*` settings that haven't existed since the v0.0.23 SSH-layer drop. Rewrote to reflect current state: Positron Remote SSH only, `nm_versions` runtimes from PsN's psn.conf, `nonmem.*` threshold settings. Also rewrote `.vscode/settings.example.json` to show real `nonmem.*` keys (the 11 thresholds + lineage settings).
+
+  **Activation events (item 5).** Dropped `onStartupFinished` and `onLanguage:nmtran` from `activationEvents` — `"*"` already activates unconditionally on extension-host startup; the other two were entirely subsumed and inflated the manifest.
+
+  **`priorityPathsForLineage` hidden config read (item 6).** Added `namedLineages: ReadonlyMap<...>` to `RelationActionDeps` and populated it once per dispatch in `LineagePanel.actionDeps()`. `priorityPathsForLineage` is now a pure derivation; `addToLineage` / `removeFromLineage` consume `deps.namedLineages` instead of each firing their own `readNamedLineages()`. Two-or-three config round-trips per action collapse to one.
+
 - **fix: 7th-review blockers — privacy hostname purge + tooltip undefined-prefix + settings descriptions (v0.0.204).** Three blocker items from the 7th-review pass shipped together.
 
   **Privacy blocker — hostname scrub across docs, src, and tests:** the literal NONMEM host name `qphcmp03` was committed in `docs/psn-notes.md` (6 sites), `docs/empirical-notes.md` (3 sites), `src/runtime/promote-estimates.ts` (1 comment), `test/psn-conf.test.ts` (1 fixture comment), `test/runtime/parse-lst.test.ts` (1 fixture comment), `test/runtime/parse-sumo.test.ts` (1 docstring), and `test/scrub.test.ts` (3 test-input strings). CLAUDE.md privacy hygiene explicitly lists "test fixtures" as a forbidden surface. Replaced with the configured alias `primary` (or generic `example-host` / `live host` / `host` placeholders for test-input strings where the alias would be semantically wrong). Git history retains the prior commits — going forward the working tree is clean.

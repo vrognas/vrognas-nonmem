@@ -1,44 +1,42 @@
 # Positron NONMEM
 
-> Status: M0 + M1 (dev environment + Hello SSH). Active development.
+`positron-nonmem` makes NONMEM a first-class language runtime in
+[Positron](https://github.com/posit-dev/positron): pick a NONMEM version from
+the runtime picker, hit run, watch live iterations stream, click through a
+runs tree, and read a Fit Inspector that surfaces OFV, SE, shrinkage, $EST /
+$COV options, and a ΔOFV-coloured lineage graph. Companion to the
+[vscode-nmtran](https://github.com/vrognas/vscode-nmtran) language extension
+— language services (syntax / hover / diagnostics) live there; runtime and
+workbench live here.
 
-`positron-nonmem` turns the NONMEM model–compile–run–result loop into a first-class
-[Positron](https://github.com/posit-dev/positron) experience: SSH-based remote execution,
-live iteration streaming, run history with ΔOFV-coloured lineage, and Pirana / Improve-style
-workbench affordances. Companion to the existing
-[vscode-nmtran](https://github.com/vrognas/vscode-nmtran) language extension (syntax /
-hover / diagnostics) — they pair cleanly: language services in `vscode-nmtran`, runtime +
-workbench here.
-
-**Positron-only.** This extension hard-requires Positron via `engines.positron`. Use
-`vscode-nmtran` alone if you only need NMTRAN linting in plain VSCode.
-
-## Status / milestones
-
-The full design lives in `docs/design.md` (private — mirrored from the project plan). Current milestone:
-
-- ✅ **M0** — Repo scaffold, build pipeline, lint/test/format toolchain.
-- 🟡 **M1** — `Positron NONMEM: Test Connection` command. SSH transport reads the
-  configured host profile, runs `uname -a`, displays output. No NONMEM yet.
-- ⏳ **M2** — Run a minimal control stream remotely, parse OFV.
-- ⏳ **M3** — Live OFV in status bar (multiplexed remote-tail helper).
-- … and so on (M4–M11 in the plan).
+**Positron-only, Remote-SSH-only.** This extension hard-requires Positron
+via `engines.positron`. Production deployments run Positron in
+[Remote SSH](https://github.com/posit-dev/positron/wiki/Remote-SSH) mode
+against the NONMEM host so the extension host (and the NONMEM run) execute
+on the same machine; no in-extension SSH layer.
 
 ## Configure
 
-The extension shells out to your system `ssh` client, so **everything connection-related
-lives in `~/.ssh/config`** — `HostName`, `User`, `Port`, `IdentityFile`, `ProxyJump`,
-`ControlMaster`, etc. Whatever `ssh <alias>` does in your terminal, the extension does too.
+The extension reads `[nm_versions]` entries from PsN's own `psn.conf` via a
+Perl introspection probe — no per-extension setting points at NONMEM. Each
+entry becomes its own Positron runtime ("NONMEM 7.6", "NONMEM 7.5 (75)",
+etc.); the picker selects which one a session uses.
 
-1. Confirm your SSH config works at the terminal:
-   `ssh -o BatchMode=yes <alias> uname -a` should print `Linux …` without prompting.
-2. Copy `.vscode/settings.example.json` to `.vscode/settings.json` (latter is gitignored).
-3. Set the alias to whatever Host entry you want to dial:
-   ```jsonc
-   { "positronNonmem.host.alias": "primary" }
-   ```
+User-configurable settings (`nonmem.*` namespace in workspace / user
+settings) tune the Fit Inspector thresholds and the lineage view:
 
-That's it — no env vars, no hostname in workspace settings, no per-extension auth flow.
+- Shrinkage red / warn thresholds (`shrinkageWarnPct`, `shrinkageBorderlineWarnPct`)
+- RSE thresholds per parameter kind (`rseWarnPct`, `rseThetaWarnPct`, `rseOmegaWarnPct`)
+- P-value thresholds (`pValWarnThreshold`, `pValBadThreshold`)
+- Correlation flag thresholds (`corrRedFlagThreshold`, `corrWarnThreshold`)
+- Condition-number thresholds (`condNumberBadThreshold`, `condNumberWarnThreshold`)
+- Lineage ΔOFV threshold (`lineageOfvThreshold`)
+- Named sub-lineages + parent overrides (`lineages`, `lineageOverrides` —
+  edited via the Run Lineage panel, not by hand)
+
+Defaults match pharmacometric convention (30% shrinkage, 100% RSE,
+α=0.05, |r|≥0.95, cond>1000, ΔOFV=3.84). Search "nonmem" in the Settings UI
+for descriptions.
 
 ## Develop
 
@@ -54,20 +52,26 @@ In Positron:
 
 1. Open this folder.
 2. Press F5 → Extension Development Host launches.
-3. Cmd/Ctrl+Shift+P → `Positron NONMEM: Test Connection`.
-4. The "Positron NONMEM" Output channel shows
-   `[primary] connected. uname: Linux …`.
+3. Open an `.mod` file; pick a NONMEM runtime from the session picker;
+   `Positron NONMEM: Run Current Model` from the command palette.
 
 ## Privacy hygiene
 
-- All connection details (hostname, user, port, identity file, proxy hops) live in
-  `~/.ssh/config`, never in workspace settings or committed code.
-- The Output channel only ever displays the configured `alias` (default: `primary`).
-- `ssh -G <alias>` is run once at command time to learn the resolved `HostName`; that
-  value is cached in-process and used to scrub any subsequent `ssh` stderr (DNS or
-  connection-refused messages) before it lands in the channel or a toast.
-- `.vscode/settings.json` is gitignored; only `settings.example.json` is committed.
-- Run output mirrors live in `<workspace>/.positron-nonmem/` which is also gitignored.
+- The NONMEM host's name / IP / credentials never appear in committed
+  source, configs, README, error messages, log lines, test fixtures,
+  screenshots, telemetry, or commit messages. PsN's `nm_versions` entries
+  are read at runtime; the resolved `installDir` is kept in-process.
+- PsN / NONMEM stdout often embeds `Manager Hostname`, `Compiled by`,
+  `working directory`, email-shaped tokens, and `/home/<user>/…` paths;
+  `src/scrub.ts` redacts all of these before any Console / Output channel
+  emission.
+- WebView `renderError` messages route through `sanitizeWebviewMessage`
+  (`src/views/webview-shell.ts`) which strips `vscode-resource://`,
+  Windows `[A-Z]:\…`, and `/home/<user>/…` paths plus caps at 500 chars.
+- Run artefacts mirror into `<workspace>/.positron-nonmem/` — gitignored.
+- Lineage settings (`lineageOverrides`, `lineages`) store
+  workspace-relative paths when inside a workspace folder so
+  `settings.json` is shareable without leaking absolute paths.
 
 ## License
 
@@ -78,7 +82,5 @@ MIT — see the `LICENSE` file in the repo root.
 - [vscode-nmtran](https://github.com/vrognas/vscode-nmtran) — companion language extension.
 - [Pirana modelling workbench](https://www.certara.com/software/pirana-modeling-workbench/).
 - [Scinteco Improve](https://www.scinteco.com/) — provenance metadata + event-driven completion.
-- [Stan VSCode extension](https://github.com/wardbrian/vscode-stan-extension) — LSP pattern for
-  compiled-DSL tooling.
 - [Positron R extension](https://github.com/posit-dev/positron/tree/main/extensions/positron-r) —
   reference `LanguageRuntimeManager` / `LanguageRuntimeSession` implementation.

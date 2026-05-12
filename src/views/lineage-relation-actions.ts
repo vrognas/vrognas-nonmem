@@ -18,7 +18,7 @@ import { errMsg, type Logger } from '../log-utils';
 import type { Runner } from '../runner';
 import { computeNextModelName, promoteEstimates } from '../runtime/promote-estimates';
 import { scrubPrivate } from '../scrub';
-import { discoverLineage, readNamedLineages } from './lineage-discovery';
+import { discoverLineage } from './lineage-discovery';
 import { wouldOverrideCreateCycle, type LineageGraph } from './lineage-graph';
 import { toSettingPath } from './lineage-paths';
 
@@ -29,6 +29,13 @@ export interface RelationActionDeps {
   lastGraph: LineageGraph | null;
   /** Currently-active named lineage; the sentinel empty string means "All Runs". */
   currentLineage: string;
+  /**
+   * Snapshot of `positronNonmem.lineages` read once per dispatch by the
+   * panel. Threading it through deps keeps `priorityPathsForLineage`
+   * pure and avoids 2-3 independent `readNamedLineages()` round-trips
+   * for a single action that touches both pickers and lineage edits.
+   */
+  namedLineages: ReadonlyMap<string, readonly string[]>;
   /** Trigger a panel re-render after a state-mutating action. */
   refresh: () => void | Promise<void>;
   /** Switch the panel's active named lineage (called by addToLineage). */
@@ -96,7 +103,7 @@ export async function setParent(
     title: `Set parent of ${childBasename}`,
     placeHolder: 'Pick a parent run (or "none" to make this a root)',
     excludePath: childPath,
-    priorityPaths: priorityPathsForLineage(deps.currentLineage),
+    priorityPaths: priorityPathsForLineage(deps.currentLineage, deps.namedLineages),
     noneOption: {
       label: '$(circle-slash) (none — make this a root)',
       description: 'remove the parent link',
@@ -120,7 +127,7 @@ export async function createRelation(
     title: `Create relation: ${originBasename} ↔ …`,
     placeHolder: 'Pick the other run',
     excludePath: originPath,
-    priorityPaths: priorityPathsForLineage(deps.currentLineage),
+    priorityPaths: priorityPathsForLineage(deps.currentLineage, deps.namedLineages),
   });
   if (!partner || !partner.modelPath) return;
   interface DirectionItem extends vscode.QuickPickItem {
@@ -160,7 +167,7 @@ export async function addToLineage(
   modelPath: string,
   basename: string,
 ): Promise<void> {
-  const existing = readNamedLineages();
+  const existing = deps.namedLineages;
   interface Item extends vscode.QuickPickItem {
     // `kind` collides with VS Code's QuickPickItemKind union type;
     // use `mode` to side-step the structural-type clash.
@@ -201,7 +208,10 @@ export async function addToLineage(
   } else {
     target = pick.name!;
   }
-  const next = new Map(existing);
+  // Build a fresh mutable map for write — `existing` is readonly per
+  // RelationActionDeps' snapshot contract.
+  const next = new Map<string, string[]>();
+  for (const [n, runs] of existing) next.set(n, [...runs]);
   const list = next.get(target) ?? [];
   if (!list.includes(modelPath)) list.push(modelPath);
   next.set(target, list);
@@ -217,10 +227,12 @@ export async function removeFromLineage(
   basename: string,
 ): Promise<void> {
   if (!deps.currentLineage) return;
-  const existing = readNamedLineages();
+  const existing = deps.namedLineages;
   const list = existing.get(deps.currentLineage);
   if (!list) return;
-  const next = new Map(existing);
+  // Fresh mutable map for write — see addToLineage for rationale.
+  const next = new Map<string, string[]>();
+  for (const [n, runs] of existing) next.set(n, [...runs]);
   next.set(
     deps.currentLineage,
     list.filter((p) => p !== modelPath),
@@ -313,15 +325,15 @@ function quickPickItemForRun(n: {
 
 /**
  * Resolve the priority-path set for the current curated lineage.
- * Returns `undefined` when no lineage is active (sentinel empty string
- * = "All Runs") — picker shows the flat sorted list in that case.
- * Otherwise returns the set of modelPaths in the named lineage, used
- * by `pickRunFromGraph` to surface them above a Separator before the
- * rest of the workspace.
+ * Pure: takes the lineages snapshot, returns the set of member paths.
+ * `undefined` when no lineage is active (sentinel empty string = "All
+ * Runs") — picker shows the flat sorted list in that case.
  */
-function priorityPathsForLineage(currentLineage: string): ReadonlySet<string> | undefined {
+function priorityPathsForLineage(
+  currentLineage: string,
+  named: ReadonlyMap<string, readonly string[]>,
+): ReadonlySet<string> | undefined {
   if (!currentLineage) return undefined;
-  const named = readNamedLineages();
   const paths = named.get(currentLineage);
   return paths ? new Set(paths) : undefined;
 }
