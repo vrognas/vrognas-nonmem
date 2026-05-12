@@ -7,6 +7,11 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **feat: apply √Ω/ρ + exp(θ) toggles to the IE column too (v0.0.212).** The display-scale toggles previously transformed only the FE column. In mod-mode (no fit, no FE column) the toggle had no visible effect — confusing. In lst-mode, mixing variance-form IE with SD-form FE forced the reader to mental-math `√IE` to compare scales. Now both columns transform together.
+
+  - `client.js`: new `ieDiagBaseValues` lookup built from init values (separate from the final-based one used for FE) so `transformValue` can compute off-diagonal correlations on the init scale. In mod-mode the two maps coincide (no `final` data) so we reuse the existing one — no extra allocation.
+  - `transformValue` applied to `r.init` exactly the way it's applied to `r.final` in `renderValueCell`: diagonals → `sqrt(v)` (SD), off-diagonals → `cov / √(varᵢ · varⱼ)` (correlation), THETA → `exp(v)`. Implied-init muted styling preserved.
+
 - **feat: $PRIOR columns in Fit Inspector (v0.0.211).** Surfaces the six NWPRI records from `$PRIOR` — `$THETAP`, `$THETAPV`, `$OMEGAP`, `$OMEGAPD`, `$SIGMAP`, `$SIGMAPD` — as two new columns "P" (prior mean / mode) and "PV" (THETA variance, normal prior) / "PD" (OMEGA & SIGMA degrees of freedom, inverse-Wishart prior). Columns appear only when the model declares priors; they sit between UB and FE so the prior values land adjacent to IE (initial estimate) and FE (final estimate) for visual comparison. Column position is the same across all three sections so values line up vertically; the header just toggles between PV and PD per kind.
 
   - **Source**: vscode-nmtran 0.4.23 — new `ParsedModel` fields `thetaPriors`, `thetaPriorVariances`, `omegaPriors`, `omegaPriorDfs`, `sigmaPriors`, `sigmaPriorDfs` (each `PriorDecl[]`). Parses scalar / parenthesised-vector / `BLOCK(N)` / `BLOCK(N) SAME` / multi-value-per-line forms; `*PD` scalars expanded per-parameter so the consumer looks up by OMEGA(i) directly.

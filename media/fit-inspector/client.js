@@ -1913,6 +1913,13 @@ function renderSection(title, rows, hasFit, kind, showLabel = true, showPrior = 
       ? collectEpsShrinkages()
       : [];
   const diagBaseValues = buildDiagBaseValues(rows, hasFit);
+  // Separate init-based diagonal lookup for the IE-column transform.
+  // In lst-mode the FE column uses final-based diagonals (above); IE
+  // must use init-based ones so the transform applies consistently to
+  // BOTH columns regardless of which scale the user is comparing.
+  // In mod-mode the two maps are identical (hasFit=false → buildDiagBaseValues
+  // returns inits anyway), so reuse the existing one.
+  const ieDiagBaseValues = hasFit ? buildDiagBaseValues(rows, false) : diagBaseValues;
   // Implicit-bound display: when vscode-nmtran returns null (.mod omits
   // a bound), show NONMEM's actual implicit value muted with a tooltip
   // instead of em-dash. Empirically and per nmhelp.tingjieguo.com:
@@ -1943,9 +1950,17 @@ function renderSection(title, rows, hasFit, kind, showLabel = true, showPrior = 
     // NONMEM computed the midpoint, but also bare-form `$THETA 1` when
     // vscode-nmtran < 0.4.21 returned NaN). We render those values
     // muted with a tooltip so the user knows they aren't from .mod text.
-    const ie = r.impliedInit && typeof r.init === 'number' && isFinite(r.init)
-      ? impliedInitCell(r.init)
-      : r.init;
+    // Apply the active toggle (√Ω/ρ on OMEGA/SIGMA, exp(θ) on THETA) to
+    // IE as well as FE. Reasonable from a workflow perspective: when the
+    // user is reading the table on the SD scale, BOTH the initial and
+    // final estimates should be on that scale; mixing variance-form IE
+    // with SD-form FE would force the reader to mental-math `√IE` to
+    // compare. Also fixes mod-mode where the toggle previously had no
+    // visible effect (no FE column).
+    const ieTransformed = transformValue(r.init, kind, r.name, ieDiagBaseValues);
+    const ie = r.impliedInit && typeof ieTransformed === 'number' && isFinite(ieTransformed)
+      ? impliedInitCell(ieTransformed)
+      : ieTransformed;
     // Prior columns when in scope. The second column is THETA's PV
     // (variance) for theta rows and OMEGA/SIGMA's PD (degrees of
     // freedom) for matrix rows — picked per-row from the payload's
