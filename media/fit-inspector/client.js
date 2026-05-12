@@ -1961,12 +1961,20 @@ function renderSection(title, rows, hasFit, kind, showLabel = true, showPrior = 
     const ie = r.impliedInit && typeof ieTransformed === 'number' && isFinite(ieTransformed)
       ? impliedInitCell(ieTransformed)
       : ieTransformed;
-    // Prior columns when in scope. The second column is THETA's PV
-    // (variance) for theta rows and OMEGA/SIGMA's PD (degrees of
-    // freedom) for matrix rows — picked per-row from the payload's
-    // priorVariance / priorDf fields (always one of the two is null
-    // by construction).
-    const priorCells = showPrior ? [r.priorValue, r.priorVariance ?? r.priorDf] : [];
+    // Prior columns when in scope.
+    //  - **P** transforms with the active toggle: `exp(θ)` for THETA,
+    //    `√Ω/ρ` for OMEGA/SIGMA — the prior MEAN/MODE shares the same
+    //    scale as θ / OMEGA(i,i), so users on the SD scale see prior
+    //    SDs and final SDs together (consistent with IE/FE).
+    //  - **PV / PD** stay raw under any toggle:
+    //      * PV is a normal-prior variance, not a θ-scale value — no
+    //        natural `exp()`; we annotate the cell tooltip with the
+    //        derived SD (√PV) for readability.
+    //      * PD is degrees of freedom — dimensionless scalar; we
+    //        annotate the cell tooltip with the informativeness
+    //        anchors (m+1 = uninformative; ~N_subj = informative).
+    const pTransformed = transformValue(r.priorValue, kind, r.name, ieDiagBaseValues);
+    const priorCells = showPrior ? [pTransformed, priorVarOrDfCell(r)] : [];
     if (!hasFit) return [...head, lb, ie, ub, ...priorCells];
     const valueCell = renderValueCell(r, kind, hasFit, diagBaseValues);
     // RSE source: ALWAYS prefer NONMEM's authoritative SD/corr-form
@@ -2150,6 +2158,62 @@ function impliedInitCell(value) {
   span.textContent = fmtNum(value);
   span.title =
     'Empty init slot in $THETA — NONMEM computes the midpoint of bounds at PRED initialization.';
+  return span;
+}
+
+/**
+ * Build the PV-or-PD cell for a $PRIOR'd row. Picks PV (THETA) or PD
+ * (OMEGA/SIGMA) by which field is non-null, renders raw value, and
+ * attaches an informativeness-anchor tooltip:
+ *   - PV → "SD = √PV = X" plus Chan Kwong 2020 informativeness rule
+ *   - PD → "non-informative when m+1 ≤ df ≤ block_dim; very informative
+ *           when df ≈ N_subjects of prior study"
+ * Returns null when neither field is populated.
+ */
+function priorVarOrDfCell(r) {
+  if (typeof r.priorVariance === 'number' && isFinite(r.priorVariance) && r.priorVariance >= 0) {
+    const sd = Math.sqrt(r.priorVariance);
+    // Prior RSE = √PV / |P|. Same unitless tightness measure as the
+    // RSE column on the FE side; lets the user compare prior
+    // informativeness against the data-driven RSE at a glance.
+    // Omitted when P is 0 / null (division-by-zero noise).
+    const priorRsePct =
+      typeof r.priorValue === 'number' && isFinite(r.priorValue) && r.priorValue !== 0
+        ? (sd / Math.abs(r.priorValue)) * 100
+        : null;
+    const rseLine =
+      priorRsePct !== null
+        ? ' Prior RSE = √PV/|P| = ' + priorRsePct.toFixed(2) + '%.'
+        : '';
+    const tip =
+      'PV (prior variance, normal prior on θ) = ' + fmtNum(r.priorVariance) +
+      '. Prior SD = √PV = ' + fmtNum(sd) + '.' + rseLine +
+      ' Smaller PV pulls the estimate toward P more strongly. ' +
+      'PV ≥ 1e6 ≈ non-informative; PV ≤ (P·0.3)² ≈ tight (Chan Kwong 2020).';
+    return annotatedNumber(r.priorVariance, tip);
+  }
+  if (typeof r.priorDf === 'number' && isFinite(r.priorDf)) {
+    const tip =
+      'PD (prior degrees of freedom, inverse-Wishart prior on OMEGA/SIGMA) = ' +
+      fmtNum(r.priorDf) +
+      '. Anchors: m+1 (block dim + 1) ≈ non-informative; ' +
+      '~N_subjects (prior study) ≈ very informative. ' +
+      'Informative formula: df = 2·(Ω²/SE(Ω²))² + 1 (Gisleskog 2002).';
+    return annotatedNumber(r.priorDf, tip);
+  }
+  return null;
+}
+
+/**
+ * Render a numeric cell with a custom tooltip. Returns null for
+ * non-finite input so the caller renders the standard `—` placeholder
+ * via rowEl's null-handling branch.
+ */
+function annotatedNumber(value, tooltip) {
+  if (typeof value !== 'number' || !isFinite(value)) return null;
+  const span = document.createElement('span');
+  span.textContent = fmtNum(value);
+  span.title = tooltip;
   return span;
 }
 

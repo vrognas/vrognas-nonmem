@@ -7,6 +7,14 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **feat: P transforms with the toggles; PV/PD tooltip annotations (v0.0.213).** The display-scale toggles now extend to the **P** (prior mean / mode) column: `exp(θ)` transforms `$THETAP` on THETA rows; `√Ω/ρ` transforms `$OMEGAP` / `$SIGMAP` on OMEGA/SIGMA rows. P shares the same scale as the parameter, so when the user is reading on the SD scale (or natural θ scale) the prior values land alongside IE/FE consistently.
+
+  **PV / PD stay raw** under any toggle — they're not parameter-scale quantities — but each cell now carries a tooltip annotating them:
+  - **PV** tooltip: derived SD (`√PV`), **prior RSE** (`√PV/|P| × 100%` — same unitless tightness measure as the FE-side RSE column; lets the user compare prior informativeness vs the data-driven RSE at a glance), and the Chan Kwong 2020 informativeness anchors (`≥1e6 ≈ non-informative`, `≤(P·0.3)² ≈ tight`).
+  - **PD** tooltip: `m+1 ≈ non-informative`, `~N_subjects (prior study) ≈ very informative`, and Gisleskog's `df = 2(Ω²/SE(Ω²))²+1` formula.
+
+  Implementation: `transformValue(r.priorValue, kind, r.name, ieDiagBaseValues)` shares the same diagonal-lookup path as IE; new `priorVarOrDfCell(r)` builds the annotated PV/PD cell; new `annotatedNumber(value, tooltip)` helper renders a number-valued cell with a custom `title`.
+
 - **feat: apply √Ω/ρ + exp(θ) toggles to the IE column too (v0.0.212).** The display-scale toggles previously transformed only the FE column. In mod-mode (no fit, no FE column) the toggle had no visible effect — confusing. In lst-mode, mixing variance-form IE with SD-form FE forced the reader to mental-math `√IE` to compare scales. Now both columns transform together.
 
   - `client.js`: new `ieDiagBaseValues` lookup built from init values (separate from the final-based one used for FE) so `transformValue` can compute off-diagonal correlations on the init scale. In mod-mode the two maps coincide (no `final` data) so we reuse the existing one — no extra allocation.
