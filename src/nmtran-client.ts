@@ -52,7 +52,12 @@ export interface NmtranParsedModel {
 
 interface NmtranApi {
   getParsedModel(uri: vscode.Uri): Promise<NmtranParsedModel | null>;
-  /** Available from vscode-nmtran ≥ 0.4.21. */
+  /**
+   * Available from vscode-nmtran ≥ 0.4.21. Recommend ≥ 0.4.22 — earlier
+   * versions had a cache-collision bug in this path that served the
+   * first-parsed embedded stream for every subsequent call (silent
+   * stale-counts on .lst switches).
+   */
   parseModelFromText?(text: string): Promise<NmtranParsedModel | null>;
 }
 

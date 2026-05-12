@@ -1,13 +1,17 @@
 // Extract Pirana-style `; <label>` comments for `$THETA` / `$OMEGA` /
 // `$SIGMA` parameter declarations from an NM-TRAN control stream.
 //
-// vscode-nmtran's `comment` field on `NmtranThetaDecl` /
-// `NmtranOmegaSigmaDecl` is unreliable in the wild — empirically the
-// labels for `$OMEGA BLOCK(N)` rows are dropped entirely and `$THETA`
-// labels can be off-by-one when the record header sits on its own line
-// (see screenshot from 2026-05-12 bug report). We extract the labels
-// ourselves so the Fit Inspector's "Label" column reflects what the
-// user actually wrote.
+// History: the symptoms that prompted this module — `$OMEGA BLOCK(N)`
+// labels empty, `$THETA` labels off-by-one — turned out to be a
+// cache-collision bug in vscode-nmtran's `ParameterScanner.scanDocument`
+// when called via the `nmtran/parseModelText` LSP path used by lst-mode
+// (synthetic `embedded://lst` URI + version=1 → first parse's result
+// served for every subsequent embedded call). Fixed upstream in
+// vscode-nmtran 0.4.22. We keep this module as defense-in-depth: any
+// future regression in vscode-nmtran's comment field is insulated, and
+// the override costs nothing when vscode-nmtran returns correct
+// labels (we fall back to `t.comment` per-key when our map doesn't
+// have an entry).
 //
 // Output shape: per-kind `Map<1-based-index, label>`. For OMEGA / SIGMA
 // the index is the diagonal index — BLOCK rows attach their `; <label>`

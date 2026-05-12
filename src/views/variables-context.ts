@@ -231,9 +231,10 @@ async function resolveModMode(
   }
   log(`mod-mode: parsedModel ok — ${parsedModelStatsLine(model)}`);
   const runrecord = await loadRunrecord(uri.fsPath, log);
-  // Extract our own parameter labels from the raw .mod source — vscode-nmtran's
-  // comment field is unreliable for `$OMEGA BLOCK(N)` rows and off-by-one
-  // on `$THETA` in some layouts (verified bug, 2026-05-12).
+  // Extract our own parameter labels from the raw .mod source —
+  // defense-in-depth on top of vscode-nmtran's `comment` field. The
+  // cache-collision symptoms reported 2026-05-12 are fixed in
+  // vscode-nmtran 0.4.22; the override stays as guardrail.
   const parameterLabels = await extractLabelsFromModFile(uri.fsPath, log);
   return { model, modUri: uri, fit: null, sumo: null, lst: null, runrecord, prderr: null, fmsg: null, cor: null, cnv: null, trajectories: [], xmlEstimationOptions: [], xmlEstimationResults: [], xmlCovarianceOptions: null, lstEstRecords: [], lstTolerances: { baseNrd: null, baseAnrd: null, estNrd: null, estAnrd: null, covNrd: null, covAnrd: null, siglo: null, sigl: null }, lstCovRecord: null, hasOde: false, hasLevel: false, parameterLabels };
 }
@@ -349,9 +350,10 @@ async function resolveLstMode(
   // $LEVEL).
   const hasOde = lstTolerances.baseAnrd !== null;
   const hasLevel = ctrlStream ? /^\s*\$LEVEL\b/im.test(ctrlStream) : false;
-  // Our own label extraction from the embedded control stream — overrides
-  // vscode-nmtran's unreliable `comment` field (drops $OMEGA BLOCK rows;
-  // off-by-one on $THETA in some layouts).
+  // Our own label extraction from the embedded control stream —
+  // defense-in-depth on top of vscode-nmtran's `comment` field (the
+  // cache-collision bug that motivated this is fixed in vscode-nmtran
+  // 0.4.22; the override stays as guardrail).
   const parameterLabels = ctrlStream
     ? extractParameterLabels(ctrlStream)
     : { thetas: new Map(), omegas: new Map(), sigmas: new Map() };

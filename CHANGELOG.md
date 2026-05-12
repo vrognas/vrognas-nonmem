@@ -7,6 +7,14 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **docs: note vscode-nmtran 0.4.22 fix for embedded-parse cache collision (v0.0.207).** The "4 OMEGA rows when the model has 1" bug reported 2026-05-12 — and the earlier $THETA off-by-one / $OMEGA BLOCK-labels-empty bug from the same review pass — both traced to a single cause: vscode-nmtran's `ParameterScanner.scanDocument` keyed its cache on `${uri}:${version}`, but the `nmtran/parseModelText` LSP path (used by our lst-mode for the embedded control stream) hardcoded URI `embedded://lst` + version `1` for every call. Distinct embedded contents collided on the same key — first-parsed result served for every subsequent call.
+
+  Fix landed in vscode-nmtran 0.4.22 (`server/src/services/ParameterScanner.ts`): skip the cache for synthetic `embedded://` URIs; workspace-document caching unchanged. Two regression tests added there (cache collision + commented-`; $THETA` interleaved).
+
+  positron-nonmem changes in this release are docs-only — updated comments in `parse-param-labels.ts`, `variables-context.ts`, `nmtran-client.ts` noting the override is now defense-in-depth rather than a workaround. The override stays in place: it's small, tested (13 tests), and provides a guardrail if upstream regresses.
+
+  **User action**: install vscode-nmtran 0.4.22+ to get the underlying fix. The nmtran-0.4.22.vsix is already deployed to the host (`~/nmtran-0.4.22.vsix`).
+
 - **test: close 7th-review coverage gaps (v0.0.206).** Six new test files and one bug-prevention refactor of an existing one, +57 tests (442 → 499).
 
   - **`test/runtime/parse-param-labels.test.ts`** (13 tests): locks the new `extractParameterLabels` extractor — THETA Pirana-style + multiple-per-line, `$OMEGA BLOCK(N)` row→diagonal mapping, diagonal-form `$OMEGA`, inline header (`$OMEGA 0.1 ; A`), inline BLOCK header (`$OMEGA BLOCK(2) 0.1 0.05 0.1 ; M`), multi-record continuation, kind-separation, short-keyword forms (`$THE` / `$OME` / `$SIG`).
