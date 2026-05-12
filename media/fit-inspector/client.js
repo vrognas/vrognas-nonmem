@@ -2210,3 +2210,10 @@ function rowEl(cells, attrs, colClasses) {
 }
 
 vscode.postMessage({ type: 'ready' });
+
+// Dual-mode export: WebView ignores (`module` is undefined in
+// browsers); Node / vitest sees the exports for unit testing the pure
+// helpers (no DOM dependency). Same pattern as transforms.js.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { classifyAttrTier, buildEstAttrCell, buildCovAttrCell };
+}

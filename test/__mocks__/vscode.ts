@@ -7,6 +7,15 @@ export const workspace = {
   getConfiguration: (_section?: string): { get: <T>(key: string) => T | undefined } => ({
     get: <T>(_key: string): T | undefined => undefined,
   }),
+  /**
+   * Default implementation returns the input unchanged — tests that
+   * care about the in-workspace branch override via
+   * `vi.spyOn(workspace, 'asRelativePath').mockImplementation(...)`.
+   */
+  asRelativePath: (p: string | { fsPath: string }, _includeWorkspaceFolder?: boolean): string =>
+    typeof p === 'string' ? p : p.fsPath,
+  /** Tests override via `vi.spyOn(workspace, 'workspaceFolders', 'get').mockReturnValue([...])`. */
+  workspaceFolders: undefined as { uri: Uri; name: string; index: number }[] | undefined,
 };
 
 export const window = {
@@ -83,6 +92,13 @@ export class Disposable {
     this.fn?.();
   }
 }
+
+// QuickPick surface — separator kind value matches the real VS Code enum
+// (a real VS Code session ships `Separator = -1`).
+export const QuickPickItemKind = {
+  Separator: -1,
+  Default: 0,
+} as const;
 
 // Tree-view surface — minimal stubs so RunsTreeProvider can be unit tested.
 export const TreeItemCollapsibleState = {

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import * as path from 'node:path';
 import {
   ActiveRunsTracker,
@@ -8,6 +8,15 @@ import {
   type ActiveRun,
 } from '../../src/runtime/active-runs-tracker';
 import { formatTimestamp } from '../../src/views/active-runs-tree-provider';
+
+// Global-restore guard: several tests below use `vi.useFakeTimers()`
+// inline (the makeWatcherEntry helper + the list() ordering test).
+// Without this guard, a failing assertion between useFakeTimers and
+// useRealTimers would leak the fake timer system into every subsequent
+// test in the file — silent test pollution.
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe('ActiveRunsTracker', () => {
   it('start() registers a new run with state="running" and emits a change', () => {
@@ -127,6 +136,63 @@ describe('ActiveRunsTracker', () => {
     expect(() => tracker.markCompleted('does-not-exist', 1, null, '/x.lst')).not.toThrow();
     expect(() => tracker.markFailed('does-not-exist', 'oops')).not.toThrow();
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  // Bounded-history eviction (v0.0.200). The cap is private but
+  // `TERMINAL_HISTORY_CAP = 100` per the source; we exceed it modestly.
+  describe('evictOldestTerminals (terminal history cap)', () => {
+    function startAndComplete(tracker: ActiveRunsTracker, modelPath: string, finishedAt: number): string {
+      const id = tracker.start(modelPath);
+      vi.useFakeTimers();
+      vi.setSystemTime(finishedAt);
+      tracker.markCompleted(id, 1, null, `${modelPath}.lst`);
+      vi.useRealTimers();
+      return id;
+    }
+
+    it('keeps terminal entries while under the cap (100)', () => {
+      const tracker = new ActiveRunsTracker();
+      for (let i = 0; i < 50; i++) startAndComplete(tracker, `/m${i}.mod`, 1000 + i);
+      expect(tracker.list()).toHaveLength(50);
+    });
+
+    it('evicts oldest terminal entries once over the cap', () => {
+      const tracker = new ActiveRunsTracker();
+      // 105 terminal entries; first 5 should evict on the 101st insert and beyond.
+      for (let i = 0; i < 105; i++) startAndComplete(tracker, `/m${i}.mod`, 1000 + i);
+      const runs = tracker.list();
+      expect(runs).toHaveLength(100);
+      // Survivors are the most-recently-finished — modelPaths /m5.mod through /m104.mod.
+      const survivorPaths = new Set(runs.map((r) => r.modelPath));
+      expect(survivorPaths.has('/m0.mod')).toBe(false);
+      expect(survivorPaths.has('/m4.mod')).toBe(false);
+      expect(survivorPaths.has('/m5.mod')).toBe(true);
+      expect(survivorPaths.has('/m104.mod')).toBe(true);
+    });
+
+    it('NEVER evicts running entries even when cap exceeded', () => {
+      const tracker = new ActiveRunsTracker();
+      const liveId = tracker.start('/live.mod'); // running, must survive forever
+      for (let i = 0; i < 105; i++) startAndComplete(tracker, `/m${i}.mod`, 1000 + i);
+      const runs = tracker.list();
+      // Running entry survives + 100 most-recent terminals = 101 total.
+      expect(runs).toHaveLength(101);
+      expect(runs.find((r) => r.id === liveId)?.state).toBe('running');
+    });
+
+    it('evicts on markFailed transitions too (not just markCompleted)', () => {
+      const tracker = new ActiveRunsTracker();
+      for (let i = 0; i < 101; i++) {
+        const id = tracker.start(`/m${i}.mod`);
+        vi.useFakeTimers();
+        vi.setSystemTime(2000 + i);
+        // Alternate completed/failed transitions.
+        if (i % 2 === 0) tracker.markCompleted(id, 1, null, `/m${i}.lst`);
+        else tracker.markFailed(id, 'err');
+        vi.useRealTimers();
+      }
+      expect(tracker.list()).toHaveLength(100);
+    });
   });
 });
 
