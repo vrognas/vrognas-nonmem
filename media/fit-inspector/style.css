@@ -532,8 +532,29 @@ table.param-table .col-shrink { width: 16%; }
    columns — P (mean / mode) and PV (THETA variance) / PD (OMEGA/SIGMA
    degrees of freedom). Same width regardless of kind so the position
    stays vertically aligned across the THETA / OMEGA / SIGMA tables. */
-table.param-table .col-prior,
-table.param-table .col-prior-var { width: 10%; }
+table.param-table .col-prior      { width: 10%; }
+/* PV column slightly wider so the inline (XX%) Prior-RSE badge has
+   breathing room without forcing the raw value to truncate. */
+table.param-table .col-prior-var  { width: 13%; }
+/* `value (badge)` cells: a two-sub-zone flex layout so per-row badge-
+   width differences don't shift the decimal column across rows. Value
+   right-aligned in the left sub-zone; badge left-aligned in a fixed-
+   width right sub-zone. `min-width: 3.6em` accommodates `(NNN%)`. */
+.value-with-badge {
+  display: inline-flex;
+  align-items: baseline;
+  width: 100%;
+  gap: 0.35em;
+}
+.value-with-badge .value-part {
+  flex: 1 1 auto;
+  text-align: right;
+  min-width: 0;
+}
+.value-with-badge .badge-part {
+  flex: 0 0 3.6em;
+  text-align: left;
+}
 /* Secondary-stat dimming for RSE / NSD / Shrinkage cells (eye snaps
    to FE first). Threshold-warn classes (`.warn` / `.bad`) on inner
    spans override this with their own color, preserving the orange/red

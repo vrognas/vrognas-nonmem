@@ -7,6 +7,8 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **fix: PV value alignment across rows when pane is resized (v0.0.215).** The inline Prior-RSE badge introduced in v0.0.214 made the value's decimal column shift between rows: `(7%)` and `(42%)` are different widths, and since the cell was right-aligned-as-a-whole, the value's right edge moved with the badge width. Restructured `annotatedNumber` to lay value + badge into a two-sub-zone `inline-flex` (value `flex: 1 1 auto; text-align: right`; badge `flex: 0 0 3.6em; text-align: left`). Values now right-align in their own sub-zone; badges left-align in a fixed-width slot — vertical alignment holds at any pane width. `.col-prior-var` widened 10% → 13% so the slot doesn't squeeze the value.
+
 - **feat: inline Prior RSE badge in the PV cell (v0.0.214).** The PV cell now renders `<value> (<rse%>)` — raw variance, plus the derived Prior RSE = `√PV/|P| × 100%` as a dim-tinted badge inline. Saves the user hovering the tooltip for the most common follow-up ("how tight is this prior?"). Same row height — single line; badge reuses the existing `.dim` token. Tooltip retains the full annotation with informativeness anchors (Chan Kwong 2020). Skipped when P is 0 / null to avoid div-by-zero noise.
 
   `annotatedNumber(value, tooltip)` extended to `annotatedNumber(value, tooltip, dimBadge?)` — the optional badge is the inline-derived secondary view; any future cell needing a "raw + derived" pair can use the same helper.

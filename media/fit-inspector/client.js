@@ -2211,21 +2211,29 @@ function priorVarOrDfCell(r) {
 
 /**
  * Render a numeric cell with a custom tooltip and an optional dim
- * trailing badge (e.g. derived value shown alongside the raw). Returns
- * null for non-finite input so the caller renders the standard `—`
- * placeholder via rowEl's null-handling branch.
+ * trailing badge. When a badge is supplied, the value and the badge
+ * land in their own sub-zones (value right-aligned, badge left-
+ * aligned in a fixed-width slot) so per-row badge-width differences
+ * — e.g. `(7%)` vs `(42%)` — don't shift the value's decimal column
+ * across rows. CSS classes drive the layout (`value-with-badge`,
+ * `.value-part`, `.badge-part`) — see style.css. Returns null for
+ * non-finite input so the caller renders the standard `—`.
  */
 function annotatedNumber(value, tooltip, dimBadge) {
   if (typeof value !== 'number' || !isFinite(value)) return null;
   const wrap = document.createElement('span');
   wrap.title = tooltip;
-  wrap.append(document.createTextNode(fmtNum(value)));
   if (dimBadge) {
+    wrap.className = 'value-with-badge';
+    const val = document.createElement('span');
+    val.className = 'value-part';
+    val.textContent = fmtNum(value);
     const badge = document.createElement('span');
-    badge.className = 'dim';
-    badge.style.marginLeft = '0.4em';
+    badge.className = 'badge-part dim';
     badge.textContent = dimBadge;
-    wrap.append(badge);
+    wrap.append(val, badge);
+  } else {
+    wrap.textContent = fmtNum(value);
   }
   return wrap;
 }
