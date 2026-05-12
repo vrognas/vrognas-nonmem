@@ -79,6 +79,9 @@ describe('buildInspectorPayload', () => {
         numSigDig: null,
         declLine: 10,
         boundary: null,
+        priorValue: null,
+        priorVariance: null,
+        priorDf: null,
       },
       {
         index: 2,
@@ -98,6 +101,9 @@ describe('buildInspectorPayload', () => {
         numSigDig: null,
         declLine: 11,
         boundary: null,
+        priorValue: null,
+        priorVariance: null,
+        priorDf: null,
       },
     ]);
     expect(payload!.omegas[0]).toMatchObject({

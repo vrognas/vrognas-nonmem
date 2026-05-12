@@ -7,6 +7,14 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **feat: $PRIOR columns in Fit Inspector (v0.0.211).** Surfaces the six NWPRI records from `$PRIOR` — `$THETAP`, `$THETAPV`, `$OMEGAP`, `$OMEGAPD`, `$SIGMAP`, `$SIGMAPD` — as two new columns "P" (prior mean / mode) and "PV" (THETA variance, normal prior) / "PD" (OMEGA & SIGMA degrees of freedom, inverse-Wishart prior). Columns appear only when the model declares priors; they sit between UB and FE so the prior values land adjacent to IE (initial estimate) and FE (final estimate) for visual comparison. Column position is the same across all three sections so values line up vertically; the header just toggles between PV and PD per kind.
+
+  - **Source**: vscode-nmtran 0.4.23 — new `ParsedModel` fields `thetaPriors`, `thetaPriorVariances`, `omegaPriors`, `omegaPriorDfs`, `sigmaPriors`, `sigmaPriorDfs` (each `PriorDecl[]`). Parses scalar / parenthesised-vector / `BLOCK(N)` / `BLOCK(N) SAME` / multi-value-per-line forms; `*PD` scalars expanded per-parameter so the consumer looks up by OMEGA(i) directly.
+  - **positron-nonmem plumbing**: new types in `nmtran-client.ts`, payload `InspectorRow` gains `priorValue` / `priorVariance` / `priorDf`, `buildInspectorPayload` populates per-row via lookup maps. WebView renders P + PV/PD columns when ANY row in ANY section has prior data (matches the all-or-nothing rule used for the Label column — keeps columns vertically aligned across THETA / OMEGA / SIGMA).
+  - **TNPRI form not supported** — requires MSF reference, rare in practice (Gisleskog et al. 2002, J Pharmacokinet Pharmacodyn).
+
+  **User action**: install nmtran-0.4.23.vsix on the host (already deployed to `~/nmtran-0.4.23.vsix`).
+
 - **feat: ellipsis-truncate long parameter labels (v0.0.210).** Long Pirana-style `; <label>` comments (e.g. `klebsiella_other vs acinetobacter_psudomonas`) previously overflowed the Label column into LB/IE/UB at narrow side-pane widths, garbling the table. The Label column now truncates with a CSS ellipsis; full label is preserved on hover via the cell's `title` attribute.
 
   - `style.css` `table.param-table td.col-label`: added `overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 0;`. The `max-width: 0` is the standard fixed-layout-table trick that lets the column's percentage width bind for ellipsis purposes. Combined with `table { width: 100% }`, the truncation re-flows automatically when the side pane is resized — no JS listener needed.

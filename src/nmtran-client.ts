@@ -41,6 +41,22 @@ export interface NmtranEquation {
   value: number | undefined;
 }
 
+/**
+ * `$PRIOR`-subroutine declaration shipped per parameter index. Available
+ * from vscode-nmtran ≥ 0.4.23. `value` is per-record:
+ *   - `$THETAP` / `$OMEGAP` / `$SIGMAP`: prior mean / mode.
+ *   - `$THETAPV`: diagonal of the prior variance for THETA.
+ *   - `$OMEGAPD` / `$SIGMAPD`: degrees of freedom (expanded per-param
+ *     so consumers can look up by any OMEGA(i) directly).
+ */
+export interface NmtranPriorDecl {
+  index: number;
+  value: number;
+  fix: boolean;
+  line: number;
+  comment?: string;
+}
+
 export interface NmtranParsedModel {
   dataFile: string | null;
   inputColumns: string[];
@@ -48,6 +64,18 @@ export interface NmtranParsedModel {
   omegas: NmtranOmegaSigmaDecl[];
   sigmas: NmtranOmegaSigmaDecl[];
   equations: NmtranEquation[];
+  /** $THETAP prior means. Empty when record absent. Available ≥ 0.4.23. */
+  thetaPriors?: NmtranPriorDecl[];
+  /** $THETAPV prior variances (diagonal). Available ≥ 0.4.23. */
+  thetaPriorVariances?: NmtranPriorDecl[];
+  /** $OMEGAP prior modes. Available ≥ 0.4.23. */
+  omegaPriors?: NmtranPriorDecl[];
+  /** $OMEGAPD degrees of freedom (expanded per OMEGA index). Available ≥ 0.4.23. */
+  omegaPriorDfs?: NmtranPriorDecl[];
+  /** $SIGMAP prior modes. Available ≥ 0.4.23. */
+  sigmaPriors?: NmtranPriorDecl[];
+  /** $SIGMAPD degrees of freedom. Available ≥ 0.4.23. */
+  sigmaPriorDfs?: NmtranPriorDecl[];
 }
 
 interface NmtranApi {

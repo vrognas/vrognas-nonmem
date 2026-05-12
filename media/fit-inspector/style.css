@@ -528,6 +528,12 @@ table.param-table .col-fe     { width: 13%; }
 table.param-table .col-rse    { width: 14%; }
 table.param-table .col-nsd    { width: 6%; }
 table.param-table .col-shrink { width: 16%; }
+/* Prior columns: only present when `$PRIOR` records are declared. Two
+   columns — P (mean / mode) and PV (THETA variance) / PD (OMEGA/SIGMA
+   degrees of freedom). Same width regardless of kind so the position
+   stays vertically aligned across the THETA / OMEGA / SIGMA tables. */
+table.param-table .col-prior,
+table.param-table .col-prior-var { width: 10%; }
 /* Secondary-stat dimming for RSE / NSD / Shrinkage cells (eye snaps
    to FE first). Threshold-warn classes (`.warn` / `.bad`) on inner
    spans override this with their own color, preserving the orange/red

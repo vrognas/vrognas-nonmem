@@ -140,9 +140,19 @@ function render(payload) {
     payload.thetas.some((r) => r.label) ||
     payload.omegas.some((r) => r.label) ||
     payload.sigmas.some((r) => r.label);
-  if (payload.thetas.length) { root.append(renderSection('Theta', payload.thetas, hasFit, 'theta', showLabel)); rendered = true; }
-  if (payload.omegas.length) { root.append(renderSection('Omega', payload.omegas, hasFit, 'omega', showLabel)); rendered = true; }
-  if (payload.sigmas.length) { root.append(renderSection('Sigma', payload.sigmas, hasFit, 'sigma', showLabel)); rendered = true; }
+  // Show P (and PV/PD) columns when ANY kind has at least one prior
+  // value. Toggle ALL kinds together so the column position stays
+  // vertically aligned across the THETA / OMEGA / SIGMA tables — even
+  // sections without their own priors render the columns as em-dash
+  // for alignment. Matches the same all-or-nothing rule as `showLabel`.
+  const hasPrior = (r) => r.priorValue !== null || r.priorVariance !== null || r.priorDf !== null;
+  const showPrior =
+    payload.thetas.some(hasPrior) ||
+    payload.omegas.some(hasPrior) ||
+    payload.sigmas.some(hasPrior);
+  if (payload.thetas.length) { root.append(renderSection('Theta', payload.thetas, hasFit, 'theta', showLabel, showPrior)); rendered = true; }
+  if (payload.omegas.length) { root.append(renderSection('Omega', payload.omegas, hasFit, 'omega', showLabel, showPrior)); rendered = true; }
+  if (payload.sigmas.length) { root.append(renderSection('Sigma', payload.sigmas, hasFit, 'sigma', showLabel, showPrior)); rendered = true; }
   // Top-level section order, post-params:
   //   diagnostics (failure modes + identifiability)
   //   trajectory (estimation dynamics)
@@ -1834,7 +1844,7 @@ function renderStatuses(statuses) {
   return wrap;
 }
 
-function renderSection(title, rows, hasFit, kind, showLabel = true) {
+function renderSection(title, rows, hasFit, kind, showLabel = true, showPrior = false) {
   // Layout (per-mode):
   //   mod-mode (no fit):  `# | Label | LB | IE | UB`
   //   lst-mode  (fit):    `# | Label | LB | IE | UB | FE | (RSE%) | [Shrinkage%]?`
@@ -1883,6 +1893,16 @@ function renderSection(title, rows, hasFit, kind, showLabel = true) {
   const colClasses = ['col-num'];
   if (showLabel) { cols.push('Label'); colClasses.push('col-label'); }
   cols.push('LB', 'IE', 'UB'); colClasses.push('col-lb', 'col-ie', 'col-ub');
+  // P / PV / PD columns sit between UB and FE so they're adjacent to
+  // IE (prior mean ~ initial estimate) and FE (estimated mean), the
+  // natural visual comparison. Per-kind header: THETA shows "PV"
+  // (variance of normal prior); OMEGA / SIGMA show "PD" (degrees of
+  // freedom of inverse-Wishart prior). Column class is the same so
+  // they line up vertically across sections.
+  if (showPrior) {
+    cols.push('P', kind === 'theta' ? 'PV' : 'PD');
+    colClasses.push('col-prior', 'col-prior-var');
+  }
   if (hasFit) {
     cols.push('FE', rseHeader, 'NSD', 'Shrinkage');
     colClasses.push('col-fe', 'col-rse', 'col-nsd', 'col-shrink');
@@ -1926,7 +1946,13 @@ function renderSection(title, rows, hasFit, kind, showLabel = true) {
     const ie = r.impliedInit && typeof r.init === 'number' && isFinite(r.init)
       ? impliedInitCell(r.init)
       : r.init;
-    if (!hasFit) return [...head, lb, ie, ub];
+    // Prior columns when in scope. The second column is THETA's PV
+    // (variance) for theta rows and OMEGA/SIGMA's PD (degrees of
+    // freedom) for matrix rows — picked per-row from the payload's
+    // priorVariance / priorDf fields (always one of the two is null
+    // by construction).
+    const priorCells = showPrior ? [r.priorValue, r.priorVariance ?? r.priorDf] : [];
+    if (!hasFit) return [...head, lb, ie, ub, ...priorCells];
     const valueCell = renderValueCell(r, kind, hasFit, diagBaseValues);
     // RSE source: ALWAYS prefer NONMEM's authoritative SD/corr-form
     // (`-1000000005`) when present, regardless of the `√Ω/ρ` display
@@ -1940,7 +1966,7 @@ function renderSection(title, rows, hasFit, kind, showLabel = true) {
       isOmegaOrSigma && typeof r.rseStdcorr === 'number' ? r.rseStdcorr : r.rse;
     const rseCell = fmtRse(rseValue, kind);
     const nsdCell = fmtNsd(r.numSigDig);
-    const base = [...head, lb, ie, ub, valueCell, rseCell, nsdCell];
+    const base = [...head, lb, ie, ub, ...priorCells, valueCell, rseCell, nsdCell];
     if (!hasShrinkData) {
       base.push(null);
       return base;

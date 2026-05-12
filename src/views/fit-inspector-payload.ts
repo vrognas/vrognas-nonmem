@@ -116,6 +116,19 @@ export interface InspectorRow {
    * and when either side of the comparison is null. Drives the orange highlight in the WebView.
    */
   boundary: 'lower' | 'upper' | null;
+  /**
+   * $PRIOR data shipped per-row. `priorValue` is the prior mean
+   * ($THETAP / $OMEGAP / $SIGMAP) — null when no prior record applies.
+   * `priorVariance` is set on THETA rows only (from $THETAPV diagonal);
+   * `priorDf` is set on OMEGA / SIGMA rows only (from $OMEGAPD /
+   * $SIGMAPD, expanded per-parameter from the block-level scalar).
+   * The inspector renders a single "PV/PD" column that picks whichever
+   * field is non-null based on row kind. Available when the source
+   * vscode-nmtran is ≥ 0.4.23; older versions don't populate these.
+   */
+  priorValue: number | null;
+  priorVariance: number | null;
+  priorDf: number | null;
 }
 
 export interface InspectorPayload {
@@ -587,6 +600,15 @@ export function buildInspectorPayload(
   const pickLabel = (kind: 'thetas' | 'omegas' | 'sigmas', idx: number, fallback?: string): string | null => {
     return ctx.parameterLabels?.[kind].get(idx) ?? fallback ?? null;
   };
+  // Prior-lookup maps: keyed by 1-based parameter index. Defined once
+  // per build call so the row builders don't `find()` linearly per row.
+  const thetaPriorByIdx = priorIndexMap(model.thetaPriors);
+  const thetaPriorVarByIdx = priorIndexMap(model.thetaPriorVariances);
+  const omegaPriorByIdx = priorIndexMap(model.omegaPriors);
+  const omegaPriorDfByIdx = priorIndexMap(model.omegaPriorDfs);
+  const sigmaPriorByIdx = priorIndexMap(model.sigmaPriors);
+  const sigmaPriorDfByIdx = priorIndexMap(model.sigmaPriorDfs);
+
   const thetas: InspectorRow[] = filteredThetas.map((t) => {
     const name = `THETA(${t.index})`;
     const final = fit?.finals.get(name) ?? null;
@@ -616,6 +638,9 @@ export function buildInspectorPayload(
       numSigDig: numSigDigByName.get(name) ?? null,
       declLine: t.line ?? null,
       boundary: computeBoundary(final, t.lower ?? null, t.upper ?? null, t.fix, true),
+      priorValue: thetaPriorByIdx.get(t.index) ?? null,
+      priorVariance: thetaPriorVarByIdx.get(t.index) ?? null,
+      priorDf: null,
     };
   });
 
@@ -626,8 +651,26 @@ export function buildInspectorPayload(
   const initialSigma = ctx.lst?.initialSigma ?? new Map();
   const omegaLabels = ctx.parameterLabels?.omegas ?? new Map<number, string>();
   const sigmaLabels = ctx.parameterLabels?.sigmas ?? new Map<number, string>();
-  const omegas = mergeMatrixRows('OMEGA', filteredOmegas, fit, numSigDigByName, initialOmega, omegaLabels);
-  const sigmas = mergeMatrixRows('SIGMA', filteredSigmas, fit, numSigDigByName, initialSigma, sigmaLabels);
+  const omegas = mergeMatrixRows(
+    'OMEGA',
+    filteredOmegas,
+    fit,
+    numSigDigByName,
+    initialOmega,
+    omegaLabels,
+    omegaPriorByIdx,
+    omegaPriorDfByIdx,
+  );
+  const sigmas = mergeMatrixRows(
+    'SIGMA',
+    filteredSigmas,
+    fit,
+    numSigDigByName,
+    initialSigma,
+    sigmaLabels,
+    sigmaPriorByIdx,
+    sigmaPriorDfByIdx,
+  );
 
   return {
     summary,
@@ -772,9 +815,20 @@ function mergeMatrixRows(
   numSigDigByName: Map<string, number>,
   lstInitial: Map<string, number>,
   labels: ReadonlyMap<number, string>,
+  priorByIdx: ReadonlyMap<number, number>,
+  priorDfByIdx: ReadonlyMap<number, number>,
 ): InspectorRow[] {
   const rows = diagonals.map((d) =>
-    buildOmegaSigmaRow(d, prefix, fit, numSigDigByName, lstInitial, labels),
+    buildOmegaSigmaRow(
+      d,
+      prefix,
+      fit,
+      numSigDigByName,
+      lstInitial,
+      labels,
+      priorByIdx,
+      priorDfByIdx,
+    ),
   );
   if (fit) rows.push(...offDiagonalRows(prefix, fit, numSigDigByName, lstInitial));
   rows.sort(compareMatrixRows);
@@ -816,6 +870,9 @@ function offDiagonalRows(
         line: null,
         fit,
         numSigDigByName,
+        // Priors are diagonal-only by construction; off-diagonals get null.
+        priorValue: null,
+        priorDf: null,
       }),
     );
   }
@@ -1084,6 +1141,8 @@ function buildOmegaSigmaRow(
   numSigDigByName: Map<string, number>,
   lstInitial: Map<string, number>,
   labels: ReadonlyMap<number, string>,
+  priorByIdx: ReadonlyMap<number, number>,
+  priorDfByIdx: ReadonlyMap<number, number>,
 ): InspectorRow {
   const name = `${prefix}(${d.index},${d.index})`;
   const initPick = pickInit(d.value, name, fit, lstInitial);
@@ -1097,6 +1156,8 @@ function buildOmegaSigmaRow(
     line: d.line ?? null,
     fit,
     numSigDigByName,
+    priorValue: priorByIdx.get(d.index) ?? null,
+    priorDf: priorDfByIdx.get(d.index) ?? null,
   });
 }
 
@@ -1123,6 +1184,10 @@ function makeOmegaSigmaRow(args: {
   line: number | null;
   fit: ExtEstimates | null;
   numSigDigByName: Map<string, number>;
+  /** Prior MODE for the diagonal of this row (from $OMEGAP / $SIGMAP). Null for off-diagonals + when no prior record. */
+  priorValue: number | null;
+  /** Degrees of freedom for the prior (from $OMEGAPD / $SIGMAPD, expanded per-row). Null for off-diagonals + when no prior record. */
+  priorDf: number | null;
 }): InspectorRow {
   const final = args.fit?.finals.get(args.name) ?? null;
   const se = args.fit?.standardErrors.get(args.name) ?? null;
@@ -1153,7 +1218,25 @@ function makeOmegaSigmaRow(args: {
     // through anyway so the field is uniform across all rows and so
     // future bound-aware data lands in the right place.
     boundary: computeBoundary(final, null, null, args.fix),
+    priorValue: args.priorValue,
+    priorVariance: null,
+    priorDf: args.priorDf,
   };
+}
+
+/**
+ * Build a 1-based-index → value lookup from a `NmtranPriorDecl[]`. Used
+ * by row builders to attach prior P / PV / PD to each parameter row.
+ * Empty map when the source array is undefined (older vscode-nmtran) or
+ * empty (no prior records in the model).
+ */
+function priorIndexMap(
+  priors: { index: number; value: number }[] | undefined,
+): Map<number, number> {
+  const out = new Map<number, number>();
+  if (!priors) return out;
+  for (const p of priors) out.set(p.index, p.value);
+  return out;
 }
 
 /**
