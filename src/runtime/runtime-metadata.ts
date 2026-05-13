@@ -1,5 +1,6 @@
 import type * as positron from 'positron';
 import * as path from 'node:path';
+import { createHash } from 'node:crypto';
 import type { NmVersionEntry } from '../psn-conf';
 
 const NONMEM_ICON_SVG =
@@ -66,9 +67,20 @@ export function buildRuntimeMetadata(deps: BuildMetadataDeps): positron.Language
  * as the runtimeId suffix so two entries with the same version (e.g.
  * `default=/opt/nm760,7.6` and `nm760=/opt/nm760,7.6`) get distinct
  * runtime IDs and Positron's session-restoration picks the right one.
+ *
+ * psn.conf labels are user-controlled. Truncate beyond MAX_IDTAG_LEN
+ * to prevent hostname-shaped labels (`nm760-on-myserver.corp.example`)
+ * from embedding the hostname verbatim in `runtimeId`, which Positron
+ * may surface to crash reporters / telemetry. An 8-char SHA-256 hash
+ * of the original label is appended so two long labels sharing a
+ * prefix still get distinct ids.
  */
+const MAX_IDTAG_LEN = 16;
 function idTagFromLabel(label: string): string {
-  return label.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'default';
+  const cleaned = label.replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'default';
+  if (cleaned.length <= MAX_IDTAG_LEN) return cleaned;
+  const hash = createHash('sha256').update(label).digest('hex').slice(0, 8);
+  return cleaned.slice(0, MAX_IDTAG_LEN - 9) + '-' + hash;
 }
 
 /**

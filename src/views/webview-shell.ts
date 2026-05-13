@@ -46,6 +46,7 @@ export function sanitizeWebviewMessage(raw: string): string {
     .replace(/vscode-resource:\/\/\S+/g, '<resource>')
     .replace(/[A-Za-z]:\\[^\s,;:]*/g, '<path>')
     .replace(/\/home\/[^/\s]+\/\S*/g, '/home/<user>/<path>')
+    .replace(/\/Users\/[^/\s]+\/\S*/g, '/Users/<user>/<path>')
     .slice(0, 500);
 }
 

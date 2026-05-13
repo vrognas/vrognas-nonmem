@@ -31,11 +31,12 @@ const REDACTIONS: Array<{ pattern: RegExp; replacement: string }> = [
   { pattern: /(working directory[:\s]+)\S.*$/gim, replacement: '$1<redacted>' },
   // License Registered to: <org>  → marker preserved, value gone.
   { pattern: /^(\s*License Registered to:)\s*.*$/gm, replacement: '$1 <redacted>' },
-  // User-named path components: /home/<user>/...  → /home/<user>/...
+  // User-named path components: /home/<user>/... and macOS /Users/<user>/...
   // Run BEFORE the email replacement so an email-shaped path component
   // gets path-redacted (yielding `/home/<user>/`) instead of leaving
   // `/home/<redacted-email>/` and then matching the `/home/[^/]+` rule.
   { pattern: /\/home\/[^/\s]+\//g, replacement: '/home/<user>/' },
+  { pattern: /\/Users\/[^/\s]+\//g, replacement: '/Users/<user>/' },
   // Bare email tokens not already inside a /home/ path.
   { pattern: /[\w.+-]+@[\w.-]+\.[a-zA-Z]{2,}/g, replacement: '<redacted-email>' },
 ];

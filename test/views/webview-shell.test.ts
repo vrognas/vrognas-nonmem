@@ -24,6 +24,13 @@ describe('sanitizeWebviewMessage', () => {
     expect(out).not.toContain('jane.doe');
   });
 
+  it('strips macOS /Users/<user>/ paths', () => {
+    const raw = 'failed: /Users/jane.doe/work/run001.lst not readable';
+    const out = sanitizeWebviewMessage(raw);
+    expect(out).toContain('/Users/<user>/<path>');
+    expect(out).not.toContain('jane.doe');
+  });
+
   it('caps output to 500 chars (runaway stack)', () => {
     const raw = 'x'.repeat(1000);
     expect(sanitizeWebviewMessage(raw).length).toBe(500);

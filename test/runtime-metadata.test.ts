@@ -50,6 +50,44 @@ describe('buildRuntimeMetadata', () => {
     expect(named.runtimeShortName).toBe('NONMEM 7.5');
   });
 
+  it('truncates long host-leaky labels (no full hostname in runtimeId)', () => {
+    // psn.conf labels are user-controlled. A label like
+    // `nm760-on-myserver.corp.example.com` would otherwise embed the
+    // hostname verbatim in `runtimeId`, which Positron may surface to
+    // crash reporters / telemetry. Truncate + hash beyond MAX_IDTAG_LEN.
+    const meta = buildRuntimeMetadata({
+      ...enums,
+      nmVersion: {
+        label: 'nm760-on-myserver.corp.example.com',
+        installDir: '/opt/nm760',
+        version: '7.6',
+      },
+    });
+    expect(meta.runtimeId).not.toContain('myserver');
+    expect(meta.runtimeId).not.toContain('corp');
+    expect(meta.runtimeId).not.toContain('example');
+  });
+
+  it('long labels sharing a prefix produce distinct runtimeIds (hash disambiguates)', () => {
+    const a = buildRuntimeMetadata({
+      ...enums,
+      nmVersion: {
+        label: 'nm760-server-alpha.corp.example.com',
+        installDir: '/opt/nm760',
+        version: '7.6',
+      },
+    });
+    const b = buildRuntimeMetadata({
+      ...enums,
+      nmVersion: {
+        label: 'nm760-server-beta.corp.example.com',
+        installDir: '/opt/nm760',
+        version: '7.6',
+      },
+    });
+    expect(a.runtimeId).not.toBe(b.runtimeId);
+  });
+
   it('runtimePath is a synthetic placeholder — installDir is privacy-sensitive and never surfaced', () => {
     const meta = buildRuntimeMetadata({
       ...enums,

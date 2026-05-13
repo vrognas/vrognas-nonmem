@@ -20,6 +20,12 @@ describe('scrubPrivate', () => {
     );
   });
 
+  it('replaces /Users/<user>/ with /Users/<user>/ on macOS-style paths', () => {
+    expect(scrubPrivate('cwd /Users/jane.doe/work/run001.lst\n')).toBe(
+      'cwd /Users/<user>/work/run001.lst\n',
+    );
+  });
+
   it('redacts an email-shaped path component as a path, not as an email (ordering contract)', () => {
     // Locks in the documented ordering: /home/<user>/ runs BEFORE the
     // email pattern, so an email inside a path becomes /home/<user>/...

@@ -1056,14 +1056,18 @@ function extractValue(match, extract) {
  * Method-conditional attrs (NUMERICAL/CENTERING) are skipped when
  * inapplicable AND not user-typed; user-typed-inapplicable surfaces
  * with `inapplicable: true` for the renderer's WARNING tooltip.
+ * Additive-by-construction: `existingKeys` are XML-emitted attrs that
+ * the synthesis must not clobber (NM 7.7+ may emit attrs we currently
+ * treat as invisible).
  */
-function synthesizeInvisibleAttrs(userTokens, methodKind, hasLevel) {
+function synthesizeInvisibleAttrs(userTokens, methodKind, hasLevel, existingKeys) {
   const applies = (attr) => attrAppliesToContext(attr, methodKind, hasLevel);
   return synthesizeFromTokens(
     userTokens,
     INVISIBLE_ATTR_PATTERNS,
     applies,
     INVISIBLE_ATTR_DEFAULTS,
+    existingKeys,
   );
 }
 
@@ -1129,7 +1133,9 @@ function renderEstimationOptionsStep(step, stepNum, tierMap, methodKind, lstReco
   // set. Method-aware: NUMERICAL/CENTERING skipped for inapplicable
   // methods unless user explicitly typed them. Effective view =
   // XML attrs ∪ synthesised. methodKind comes from payload.
-  const synthetic = synthesizeInvisibleAttrs(userTokens, methodKind, !!hasLevel);
+  // Compute `merged` (XML attrs minus filtered atol) BEFORE synthesis
+  // so `existingKeys` correctly suppresses synthetic entries for any
+  // XML-emitted attr — matches the $COV path's contract.
   const userWroteAtol = userTokens.some((t) => /^ATOL=/i.test(t));
   const merged = { ...step };
   // Filter ATOL from XML when ODE is not used AND user didn't type it.
@@ -1138,6 +1144,12 @@ function renderEstimationOptionsStep(step, stepNum, tierMap, methodKind, lstReco
   if (!hasOde && !userWroteAtol && merged.atol === '0') {
     delete merged.atol;
   }
+  const synthetic = synthesizeInvisibleAttrs(
+    userTokens,
+    methodKind,
+    !!hasLevel,
+    new Set(Object.keys(merged)),
+  );
   for (const k of Object.keys(synthetic)) {
     merged[k] = synthetic[k].value;
   }
@@ -2211,29 +2223,24 @@ function priorVarOrDfCell(r) {
 
 /**
  * Render a numeric cell with a custom tooltip and an optional dim
- * trailing badge. When a badge is supplied, the value and the badge
- * land in their own sub-zones (value right-aligned, badge left-
- * aligned in a fixed-width slot) so per-row badge-width differences
- * — e.g. `(7%)` vs `(42%)` — don't shift the value's decimal column
- * across rows. CSS classes drive the layout (`value-with-badge`,
- * `.value-part`, `.badge-part`) — see style.css. Returns null for
- * non-finite input so the caller renders the standard `—`.
+ * trailing badge. The badge is an inline-block with a fixed min-
+ * width + left text-align (see `.badge-fixed` in style.css), so all
+ * badges occupy the same horizontal space regardless of content
+ * (e.g. `(7%)` vs `(42%)`). Combined with the cell's right-alignment,
+ * the value's right edge lands at the same X-position across rows
+ * (decimal-column alignment). Returns null for non-finite input so
+ * the caller renders the standard `—`.
  */
 function annotatedNumber(value, tooltip, dimBadge) {
   if (typeof value !== 'number' || !isFinite(value)) return null;
   const wrap = document.createElement('span');
   wrap.title = tooltip;
+  wrap.append(document.createTextNode(fmtNum(value)));
   if (dimBadge) {
-    wrap.className = 'value-with-badge';
-    const val = document.createElement('span');
-    val.className = 'value-part';
-    val.textContent = fmtNum(value);
     const badge = document.createElement('span');
-    badge.className = 'badge-part dim';
+    badge.className = 'dim badge-fixed';
     badge.textContent = dimBadge;
-    wrap.append(val, badge);
-  } else {
-    wrap.textContent = fmtNum(value);
+    wrap.append(badge);
   }
   return wrap;
 }

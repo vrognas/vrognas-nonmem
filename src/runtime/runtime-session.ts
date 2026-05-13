@@ -73,12 +73,14 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
   /** URI of the editor that produced `currentParsedModel`; needed to resolve `view` RPCs back to the source file. */
   private currentSourceUri: vscode.Uri | null = null;
   /**
-   * Execute id of the currently in-flight dispatch, or null when idle.
-   * interrupt() reads this to emit a paired per-execution Idle — otherwise
-   * the Console line stays marked Busy if the SSH transport hangs and the
-   * dispatch never reaches its finally.
+   * Ids of currently in-flight dispatches. Set (not scalar) because
+   * Positron's `execute()` interface is sync and a second call can land
+   * before the first's dispatch completes. interrupt() iterates this
+   * to emit a paired per-execution Idle for every in-flight id — a
+   * scalar would lose the older id and leave its Console line stuck
+   * on Busy if the SSH transport hangs.
    */
-  private currentExecuteId: string | null = null;
+  private readonly inFlightExecuteIds = new Set<string>();
 
   constructor(
     runtimeMetadata: positron.LanguageRuntimeMetadata,
@@ -135,7 +137,7 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
   }
 
   private async dispatch(code: string, id: string): Promise<void> {
-    this.currentExecuteId = id;
+    this.inFlightExecuteIds.add(id);
     try {
       if (isExecuteModelRun(code)) {
         // Model runs are tracked in the Active Runs view (FS-watcher-
@@ -187,7 +189,7 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
       // with the session-level Idle.
       this.emitOnlineState(id, this.positron.RuntimeOnlineState.Idle);
       this.transitionState(this.positron.RuntimeState.Idle);
-      if (this.currentExecuteId === id) this.currentExecuteId = null;
+      this.inFlightExecuteIds.delete(id);
     }
   }
 
@@ -228,14 +230,15 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
     // ssh / shell child needs a handle the Transport doesn't expose yet
     // (M3+ adds that when long NONMEM runs make it actually matter).
     // For now, we flip session state back to Idle so the UI unfreezes,
-    // AND emit the per-execution Idle for the in-flight id so its Console
-    // line redraws. dispatch()'s own finally would do this eventually,
-    // but if the transport hangs (SSH connection drop) the finally may
-    // never fire — interrupt() needs to leave the Console in a sane state
-    // independent of the runner.
-    if (this.currentExecuteId) {
-      this.emitOnlineState(this.currentExecuteId, this.positron.RuntimeOnlineState.Idle);
+    // AND emit the per-execution Idle for every in-flight id so its
+    // Console line redraws. dispatch()'s own finally would do this
+    // eventually, but if the transport hangs (SSH connection drop) the
+    // finally may never fire — interrupt() needs to leave the Console
+    // in a sane state independent of the runner.
+    for (const id of this.inFlightExecuteIds) {
+      this.emitOnlineState(id, this.positron.RuntimeOnlineState.Idle);
     }
+    this.inFlightExecuteIds.clear();
     this.transitionState(this.positron.RuntimeState.Idle);
   }
 
