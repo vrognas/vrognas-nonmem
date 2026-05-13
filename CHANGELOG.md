@@ -7,6 +7,8 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **fix: tighten LB/UB columns, widen Label (v0.0.223).** The LB column carried 10% of table width even though it only ever displays `0` / `-3` / the `±1e+06` THETA implicit-bound sentinel (≤6 chars). Mirrored on UB. Shifted 3% from each (LB and UB) into the Label column (16% → 22%), so longer `;<comment>` strings like `Pat omitted_; 10 prop increase Vcol (RRT)` stay readable without hovering for the tooltip. IE keeps 10% — actual initial estimates do run wider (e.g. `37814.69`). Sums still 100%.
+
 - **9th-pass review: BIG refactors — module splits (v0.0.222).** The two large modules that were on the deferred list are now split into focused sub-modules. Behaviour unchanged; surface area for future edits dramatically smaller.
 
   **`fit-inspector-payload.ts` (1305 → 730 lines):**
