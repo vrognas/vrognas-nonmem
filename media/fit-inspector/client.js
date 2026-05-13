@@ -1754,6 +1754,19 @@ function rowEl(cells, attrs, colClasses) {
         td.title = text;
       }
     }
+    // Hover-to-see-full-value for clipped numeric cells. style.css applies
+    // `overflow: hidden` to numeric columns so wide values like `242.706`
+    // / `1.807e+35` don't overlap into neighbours at narrow pane widths.
+    // The clip removes leading characters (text is right-aligned) — the
+    // most informative half — so we mirror the textContent into the
+    // title so hover always reveals the full value. Skip the em-dash
+    // placeholder (no info), label cells (title set explicitly above),
+    // and cells whose inner span already carries a title (annotatedNumber
+    // tooltips win — they describe what the number means, not just its
+    // value).
+    if (!td.title && td.textContent && td.textContent !== '—') {
+      td.title = td.textContent;
+    }
     tr.append(td);
   });
   return tr;

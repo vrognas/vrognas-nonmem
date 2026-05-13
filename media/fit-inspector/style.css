@@ -479,13 +479,34 @@ tr.fixed-row td { color: var(--vscode-charts-blue); }
    than converging freely. Distinct from `.bad` (red, hard error) and
    `.fix` (yellow, intentional). */
 .boundary { color: var(--vscode-charts-orange); font-weight: 600; }
-/* Parameter sections (Theta / Omega / Sigma): `#` and `Label` columns
-   are left-aligned; numeric value/RSE/shrinkage columns stay right-
-   aligned via the global `td` rule. Class-based selectors so dropping
-   the Label column (when no `;<comment>` exists in any row) doesn't
-   shift nth-child positions and break alignment. */
-table.param-table td.col-label,
-table.param-table th.col-label { text-align: left; }
+/* Parameter sections (Theta / Omega / Sigma): explicit alignment per
+   column class. `#` and `Label` left; everything numeric right.
+   Class-based (rather than nth-child) so dropping the Label column —
+   when no `;<comment>` exists in any row — doesn't shift positions and
+   break alignment. Explicit rather than relying on global `td` rule +
+   `td:first-child` override so future column reorderings stay correct. */
+table.param-table th.col-num,
+table.param-table td.col-num,
+table.param-table th.col-label,
+table.param-table td.col-label { text-align: left; }
+table.param-table th.col-lb,
+table.param-table td.col-lb,
+table.param-table th.col-ie,
+table.param-table td.col-ie,
+table.param-table th.col-ub,
+table.param-table td.col-ub,
+table.param-table th.col-fe,
+table.param-table td.col-fe,
+table.param-table th.col-rse,
+table.param-table td.col-rse,
+table.param-table th.col-nsd,
+table.param-table td.col-nsd,
+table.param-table th.col-shrink,
+table.param-table td.col-shrink,
+table.param-table th.col-prior,
+table.param-table td.col-prior,
+table.param-table th.col-prior-var,
+table.param-table td.col-prior-var { text-align: right; }
 /* Long parameter labels (e.g. `klebsiella_other vs acinetobacter_…`)
    overflow into the LB/IE columns at narrow side-pane widths and
    garble the table. Truncate to the column's allotted width with an
@@ -500,6 +521,30 @@ table.param-table td.col-label {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 0;
+}
+/* Numeric cells (LB / IE / UB / FE / RSE / NSD / Shrink / Prior /
+   PriorVar): clip at the cell boundary instead of overflowing into
+   neighbours. With table-layout: fixed enforcing column widths and
+   text-align: right, wide values like `242.706` or `1.807e+35` used
+   to paint LEFTWARD from their right-anchor and overlap LB / IE /
+   adjacent columns. `overflow: hidden` keeps the paint inside the
+   cell. Trade-off: at very narrow pane widths the LEADING characters
+   get clipped (since text is right-anchored) — leading digits are the
+   more informative half, so we deliberately skip `text-overflow:
+   ellipsis` (which would also clip from the start, just with an "…"
+   indicator that looks like part of the number). Hover the cell to
+   see the full value via the `title` attribute (set in rowEl). */
+table.param-table td.col-num,
+table.param-table td.col-lb,
+table.param-table td.col-ie,
+table.param-table td.col-ub,
+table.param-table td.col-fe,
+table.param-table td.col-rse,
+table.param-table td.col-nsd,
+table.param-table td.col-shrink,
+table.param-table td.col-prior,
+table.param-table td.col-prior-var {
+  overflow: hidden;
 }
 /* Fluid table layout: fill the inspector pane (no fixed pixel width
    wastes pane width) but keep `table-layout: fixed` so per-column
