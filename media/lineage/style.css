@@ -206,7 +206,6 @@ body {
 .iofv-table th { color: var(--vscode-descriptionForeground); font-weight: 500; }
 .iofv-table td.delta-improved { color: var(--vscode-charts-green); }
 .iofv-table td.delta-worsened { color: var(--vscode-charts-red); }
-.iofv-error { color: var(--vscode-errorForeground); margin: 6px 0 0; }
 .iofv-warning {
   color: var(--vscode-editorWarning-foreground, var(--vscode-charts-yellow));
   background: var(--vscode-inputValidation-warningBackground, transparent);
@@ -316,16 +315,6 @@ body {
    marker. Keeps the same colour signal (improvement / worsening /…)
    so the user reads ΔOFV class first, provenance second. */
 .edge.via-override { stroke-dasharray: 5 4; }
-/* Tiny dashed-line legend swatch matching `.dot` dimensions so the
-   legend row reads at the same baseline. */
-.dash {
-  display: inline-block;
-  width: 18px;
-  border-bottom: 2px dashed var(--vscode-foreground);
-  vertical-align: middle;
-  margin-right: 4px;
-  margin-bottom: 4px;
-}
 #empty {
   flex: 1 1 auto;
   display: none;

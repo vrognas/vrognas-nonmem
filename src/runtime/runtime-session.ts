@@ -34,6 +34,13 @@ export interface NonmemSessionDeps {
    * Tests pass undefined to keep the session vscode-free.
    */
   navigator?: (uri: vscode.Uri, line: number) => void;
+  /**
+   * Optional diagnostic logger — receives scrubbed error messages from
+   * the fire-and-forget PsN-execute path (where failures can't surface
+   * via the Console because dispatch returns immediately). Wired to
+   * the extension's Output channel in production; undefined in tests.
+   */
+  log?: (msg: string) => void;
 }
 
 export class NonmemSession implements positron.LanguageRuntimeSession {
@@ -66,6 +73,7 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
   /** psn.conf label this session targets — read by runModel so multi-version picks work. */
   readonly nmVersionLabel: string | undefined;
   private readonly navigator: ((uri: vscode.Uri, line: number) => void) | undefined;
+  private readonly log: ((msg: string) => void) | undefined;
   /** Open Variables-comm client IDs we should keep in sync. */
   private readonly variablesClients = new Set<string>();
   /** Most recently received parsed-model snapshot — pushed to new + existing Variables comms. */
@@ -93,6 +101,7 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
     this.runner = deps.runner;
     this.nmVersionLabel = deps.nmVersionLabel;
     this.navigator = deps.navigator;
+    this.log = deps.log;
     this.state = this.positron.RuntimeState.Uninitialized;
     this.workingDirectory = sessionMetadata.workingDirectory;
     this.sessionName = runtimeMetadata.runtimeName;
@@ -160,7 +169,15 @@ export class NonmemSession implements positron.LanguageRuntimeSession {
           this.positron.LanguageRuntimeStreamName.Stdout,
           '[NONMEM run dispatched — see Active Runs in the NONMEM activity pane]\n',
         );
-        void this.runner.run(code).catch(() => undefined);
+        // Fire-and-forget — failures can't surface via the Console
+        // (dispatch returns immediately for the model-run path), so
+        // log them through the extension's Output channel instead.
+        // The Active Runs view shows the run-state side; this catches
+        // upstream launch failures (missing PsN binary, permission
+        // denied) that would otherwise stay invisible.
+        void this.runner.run(code).catch((e: unknown) => {
+          this.log?.(`runner.run failed for execute(${id}): ${scrubPrivate(errMsg(e))}`);
+        });
         return;
       }
       const result = await this.runner.run(code);

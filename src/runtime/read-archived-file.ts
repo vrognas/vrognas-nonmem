@@ -20,8 +20,47 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { pathExists } from '../fs-utils';
+import { errMsg } from '../log-utils';
 import type { Runner } from '../runner';
 import { quote } from '../shell';
+
+/**
+ * Extract one named member from a 7z archive via `7z e -so` and return
+ * its stdout. Used by both the `NM_run1.7z` bulk-archive path (PsN
+ * -clean<=2) and the per-file `.cor.7z` / `.cnv.7z` per-artifact
+ * convention. Returns null on a non-zero exit or thrown error — caller
+ * decides whether empty-trim is also a null. `log` is optional; when
+ * supplied, failures are surfaced with the archive's basename so the
+ * caller's log prefix carries the context.
+ */
+export async function extract7zMember(opts: {
+  runner: Runner;
+  archivePath: string;
+  /** Member path inside the archive (e.g. `NM_run1/PRDERR`, `psn.cor`). */
+  memberName: string;
+  /** cwd for the spawned `7z` — typically the archive's directory. */
+  cwd: string;
+  log?: (msg: string) => void;
+}): Promise<string | null> {
+  // 7z e -so: extract to stdout. -y answers any prompts; 2>/dev/null
+  // mutes 7z's chatty banner so we don't conflate it with file content.
+  const cmd = `7z e -so -y ${quote(opts.archivePath)} ${opts.memberName} 2>/dev/null`;
+  try {
+    const result = await opts.runner.run(cmd, opts.cwd);
+    if (result.code !== 0) {
+      opts.log?.(
+        `7z extraction returned ${result.code} for ${path.basename(opts.archivePath)}`,
+      );
+      return null;
+    }
+    return result.stdout;
+  } catch (e) {
+    opts.log?.(
+      `7z extraction threw for ${path.basename(opts.archivePath)}: ${errMsg(e)}`,
+    );
+    return null;
+  }
+}
 
 export interface ReadArchivedFileOptions<TExtra extends object = Record<string, never>> {
   /** Absolute path to the run's `modelfit_dir<N>`. */
@@ -78,22 +117,17 @@ async function readPlainOrArchive(opts: {
   const archivePath = path.join(opts.modelfitDir, ARCHIVE_NAME);
   if (!opts.runner || !(await pathExists(archivePath))) return null;
 
-  // 7z e -so: extract to stdout. -y answers any prompts; 2>/dev/null
-  // mutes 7z's chatty banner so we don't conflate it with file content.
   // Member path MUST include the `NM_run1/` prefix — `7z e -so` with a
   // bare name (e.g. `psn.xml`) returns 0 bytes for files inside a
   // subdirectory; the subpath form `NM_run1/psn.xml` matches. Mirrors
   // the plain-file convention above (`<modelfitDir>/NM_run1/<member>`)
   // so callers pass bare names for both paths uniformly.
-  const memberPath = `NM_run1/${opts.memberName}`;
-  const cmd = `7z e -so -y ${quote(archivePath)} ${memberPath} 2>/dev/null`;
-  try {
-    const result = await opts.runner.run(cmd, opts.modelfitDir);
-    if (result.code !== 0) return null;
-    const content = result.stdout;
-    if (content.trim() === '') return null;
-    return { content, source: 'archive' };
-  } catch {
-    return null;
-  }
+  const content = await extract7zMember({
+    runner: opts.runner,
+    archivePath,
+    memberName: `NM_run1/${opts.memberName}`,
+    cwd: opts.modelfitDir,
+  });
+  if (content === null || content.trim() === '') return null;
+  return { content, source: 'archive' };
 }

@@ -7,6 +7,18 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **8th-pass review: 8 MEDIUM fixes (v0.0.218).** Continuation of the structural review:
+  1. **extension.ts `pushVariables`** — replaced 11 inline `cfg.get<number>(KEY, INSPECTOR_THRESHOLD_DEFAULTS.KEY)` calls with `readInspectorThresholds()` that iterates the defaults object. Adding a new threshold now needs 1 edit (defaults), not 2.
+  2. **variables-context.ts `resolveModMode`** — replaced 20-field object literal with `{ ...EMPTY_LST_CONTEXT_FIELDS, model, modUri, runrecord, parameterLabels }`. Adding an lst-mode field stops being a mod-mode mirror edit.
+  3. **read-archived-file.ts + variables-context.ts** — extracted `extract7zMember({ runner, archivePath, memberName, cwd, log? })` and replaced both inline 7z-extraction blocks with the helper. Single canonical shape for the `7z e -so -y …` invocation.
+  4. **lineage-relation-actions.ts `pickRunFromGraph`** — accepts deps (with `lastGraph`) instead of just `log`. Reuses the panel's cached graph when present; previously every QuickPick (Set parent…, Create relation…) re-ran `discoverLineage()` — seconds of disk I/O for a 500-run workspace.
+  5. **runtime-session.ts dispatch** — fire-and-forget `runner.run().catch()` now scrub-logs to the extension's Output channel via injected `log?` dep (wired through `NonmemRuntimeManager`). PsN-launch failures (missing binary, perm denied) are no longer silent.
+  6. **webview-src/lineage/client.ts** — moved `render(msg.graph)` BEFORE the `selectedEdge` mutation + iOFV-request post. Previously a render throw left the side-panel stuck on "Loading per-subject ΔiOFV…" because the extension never replied to a request whose edge no longer existed post-throw.
+  7. **fit-inspector style.css + media/lineage style.css** — deleted dead rules: `.summary .ofv` (moved to `.ofv-headline`), `.iofv-error` (never applied), `.dash` legend swatch (not emitted).
+  8. **fit-inspector client.js** — deleted 5 orphan `COL_TITLES` entries (`Value`, `(RSE%)`, `[Shrinkage%]`, `Fixed`, `Shrinkage (SD)`) that couldn't match any header (`COL_TITLES[c]` is exact-string lookup); deleted shadowed inner `isOmegaOrSigma` const at line 1999 (outer at 1933 in scope).
+
+  Skipped reviewer findings: #13 (lineage `.lst` reads twice — reviewer misread; `loadExtFitForLst` reads `.ext`, not `.lst`); #14 (lst-decoration race — already handled by the existing watcher invalidate + mtime check at line 121); #17 (`-eval` suffix detection borderline duplication — watch list per reviewer's own note); #9 (`BuildContext` / `VariablesContext` merge — risky refactor with low payoff today).
+
 - **8th-pass review: 5 HIGH-severity fixes (v0.0.217).** From the structural review of `src/` and `media/`:
   1. **runtime-session.ts** — replaced scalar `currentExecuteId` with `Set<string>` `inFlightExecuteIds`. Positron's `execute()` is sync and a second call could land before the first dispatch's `finally` cleared the field, leaving the older id's Console line stuck on Busy if the SSH transport hung. `interrupt()` now iterates the set.
   2. **runner.ts** — `LocalRunner` accumulated stdout/stderr without a cap; a misbehaving PsN invocation that dumped hundreds of MB would OOM the extension host. New `createCappedBuffer(maxChars)` caps each stream at 8 MB chars with a single truncation trailer; further chunks drop silently. Buffer factory is exported so tests can verify cap behaviour without spawning a multi-GB process.

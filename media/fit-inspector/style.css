@@ -58,7 +58,6 @@ body {
   font-size: 0.92em;
 }
 .summary .title { font-weight: 600; }
-.summary .ofv { color: var(--vscode-descriptionForeground); margin-left: 8px; }
 .summary .meta { color: var(--vscode-descriptionForeground); margin-left: 8px; font-size: 0.92em; }
 /* Semantic threshold-colour classes (warn = yellow, bad = red, good = green).
    Same colour vocabulary as the inspector tables. Theme-aware via

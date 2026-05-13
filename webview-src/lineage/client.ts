@@ -237,6 +237,23 @@ window.addEventListener('message', (ev) => {
       msg.graph.unresolvedParentCount ?? 0,
       msg.staleOverrides ?? [],
     );
+    // Render FIRST — if it throws, bail without touching panel state.
+    // Previously the selectedEdge update (showIOfvPanelLoading +
+    // requestEdgeIOfv) ran before render(); when render threw, the
+    // loading spinner stuck because the extension never replied to a
+    // request whose edge no longer existed post-throw.
+    try {
+      render(msg.graph);
+    } catch (e) {
+      vscode.postMessage({
+        type: 'renderError',
+        // Don't send `e.stack` — Chromium stack frames include
+        // `vscode-resource://` URIs which embed the local extension path.
+        // The error message alone is enough; the receiver sanitises too.
+        message: e instanceof Error ? e.message : String(e),
+      });
+      return;
+    }
     // Preserve the side-panel selection across refresh when both
     // endpoints + the edge between them still exist in the new graph.
     // Re-fetches the ΔiOFV (the underlying .phi may have changed if
@@ -261,17 +278,6 @@ window.addEventListener('message', (ev) => {
           childModelPath: selectedEdge.childModelPath,
         });
       }
-    }
-    try {
-      render(msg.graph);
-    } catch (e) {
-      vscode.postMessage({
-        type: 'renderError',
-        // Don't send `e.stack` — Chromium stack frames include
-        // `vscode-resource://` URIs which embed the local extension path.
-        // The error message alone is enough; the receiver sanitises too.
-        message: e instanceof Error ? e.message : String(e),
-      });
     }
     return;
   }

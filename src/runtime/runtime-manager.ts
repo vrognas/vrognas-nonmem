@@ -21,6 +21,8 @@ export interface NonmemRuntimeManagerDeps {
   navigator?: (uri: vscode.Uri, line: number) => void;
   /** Runner used by spawned sessions (defaults to LocalRunner). */
   runner?: Runner;
+  /** Forwarded to every spawned NonmemSession; see NonmemSessionDeps.log. */
+  log?: (msg: string) => void;
 }
 
 export class NonmemRuntimeManager implements positron.LanguageRuntimeManager {
@@ -32,6 +34,7 @@ export class NonmemRuntimeManager implements positron.LanguageRuntimeManager {
   private readonly nmVersions: readonly NmVersionEntry[];
   private readonly navigator: ((uri: vscode.Uri, line: number) => void) | undefined;
   private readonly runner: Runner;
+  private readonly log: ((msg: string) => void) | undefined;
   private readonly liveSessions = new Set<NonmemSession>();
 
   constructor(_context: vscode.ExtensionContext, deps: NonmemRuntimeManagerDeps) {
@@ -39,6 +42,7 @@ export class NonmemRuntimeManager implements positron.LanguageRuntimeManager {
     this.nmVersions = deps.nmVersions;
     this.navigator = deps.navigator;
     this.runner = deps.runner ?? new LocalRunner();
+    this.log = deps.log;
   }
 
   /** Snapshot of currently-live sessions; used by the editor watcher to push parsed-model updates. */
@@ -70,6 +74,7 @@ export class NonmemRuntimeManager implements positron.LanguageRuntimeManager {
       runner: this.runner,
       navigator: this.navigator,
       nmVersionLabel: label,
+      log: this.log,
     });
     this.liveSessions.add(session);
     session.onDidEndSession(() => this.liveSessions.delete(session));

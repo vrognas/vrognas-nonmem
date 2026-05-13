@@ -62,10 +62,10 @@ import { parseLst, type LstSummary } from '../runtime/parse-lst';
 import { extractParameterLabels, type ParameterLabels } from '../runtime/parse-param-labels';
 import { parseRunrecord, type RunrecordTags } from '../runtime/parse-runrecord';
 import type { SumoSummary } from '../runtime/parse-sumo';
+import { extract7zMember } from '../runtime/read-archived-file';
 import { readFmsg, type FmsgContent } from '../runtime/read-fmsg';
 import { readPrderr, type PrderrContent } from '../runtime/read-prderr';
 import { runSumo } from '../runtime/run-sumo';
-import { quote } from '../shell';
 
 export interface VariablesContext {
   /** Parsed-model snapshot pulled from vscode-nmtran for the .mod file. */
@@ -237,8 +237,46 @@ async function resolveModMode(
   // cache-collision symptoms reported 2026-05-12 are fixed in
   // vscode-nmtran 0.4.22; the override stays as guardrail.
   const parameterLabels = await extractLabelsFromModFile(uri.fsPath, log);
-  return { model, modUri: uri, fit: null, sumo: null, lst: null, runrecord, prderr: null, fmsg: null, cor: null, cnv: null, trajectories: [], xmlEstimationOptions: [], xmlEstimationResults: [], xmlCovarianceOptions: null, lstEstRecords: [], lstTolerances: { baseNrd: null, baseAnrd: null, estNrd: null, estAnrd: null, covNrd: null, covAnrd: null, siglo: null, sigl: null }, lstCovRecord: null, hasOde: false, hasLevel: false, parameterLabels };
+  return { ...EMPTY_LST_CONTEXT_FIELDS, model, modUri: uri, runrecord, parameterLabels };
 }
+
+/**
+ * The all-empty lst-mode fields for mod-mode returns. Spread into the
+ * mod-mode return so adding a lst-mode field doesn't require touching
+ * the mod-mode site separately. Non-readonly fields (`hasOde`,
+ * `hasLevel`) stay primitive defaults — the consumer never mutates
+ * VariablesContext, and TS narrows `false` correctly.
+ */
+const EMPTY_LST_CONTEXT_FIELDS: Omit<
+  VariablesContext,
+  'model' | 'modUri' | 'runrecord' | 'parameterLabels'
+> = {
+  fit: null,
+  sumo: null,
+  lst: null,
+  prderr: null,
+  fmsg: null,
+  cor: null,
+  cnv: null,
+  trajectories: [],
+  xmlEstimationOptions: [],
+  xmlEstimationResults: [],
+  xmlCovarianceOptions: null,
+  lstEstRecords: [],
+  lstCovRecord: null,
+  lstTolerances: {
+    baseNrd: null,
+    baseAnrd: null,
+    estNrd: null,
+    estAnrd: null,
+    covNrd: null,
+    covAnrd: null,
+    siglo: null,
+    sigl: null,
+  },
+  hasOde: false,
+  hasLevel: false,
+};
 
 async function extractLabelsFromModFile(
   modPath: string,
@@ -489,19 +527,13 @@ async function readArtifactText(
     log(`lst-mode: ${extension}.7z found but no runner — skipping extraction`);
     return null;
   }
-  const memberName = path.basename(archivePath, '.7z');
-  const cmd = `7z e -so -y ${quote(archivePath)} ${memberName} 2>/dev/null`;
-  try {
-    const result = await runner.run(cmd, path.dirname(archivePath));
-    if (result.code !== 0) {
-      log(`lst-mode: 7z extraction returned ${result.code} for ${path.basename(archivePath)}`);
-      return null;
-    }
-    return result.stdout;
-  } catch (e) {
-    log(`lst-mode: 7z extraction threw for ${path.basename(archivePath)}: ${errMsg(e)}`);
-    return null;
-  }
+  return extract7zMember({
+    runner,
+    archivePath,
+    memberName: path.basename(archivePath, '.7z'),
+    cwd: path.dirname(archivePath),
+    log: (m) => log(`lst-mode: ${m}`),
+  });
 }
 
 /**

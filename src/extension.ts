@@ -134,7 +134,6 @@ function pushVariables(ctx: VariablesContext | null): void {
     }
   }
   if (fitInspector) {
-    const cfg = vscode.workspace.getConfiguration('nonmem');
     const payload = buildInspectorPayload(ctx?.model ?? null, {
       lstPath: ctx?.lstPath,
       fit: ctx?.fit,
@@ -155,54 +154,28 @@ function pushVariables(ctx: VariablesContext | null): void {
       hasOde: ctx?.hasOde,
       hasLevel: ctx?.hasLevel,
       parameterLabels: ctx?.parameterLabels,
-      // Defaults imported from INSPECTOR_THRESHOLD_DEFAULTS so config-fallback
-      // values and payload-side fallbacks (`?? DEFAULT_THRESHOLDS.x`) stay
-      // in lockstep — previously the same numbers were spelled out in both
-      // places and could drift.
-      shrinkageWarnPct: cfg.get<number>(
-        'shrinkageWarnPct',
-        INSPECTOR_THRESHOLD_DEFAULTS.shrinkageWarnPct,
-      ),
-      shrinkageBorderlineWarnPct: cfg.get<number>(
-        'shrinkageBorderlineWarnPct',
-        INSPECTOR_THRESHOLD_DEFAULTS.shrinkageBorderlineWarnPct,
-      ),
-      rseWarnPct: cfg.get<number>('rseWarnPct', INSPECTOR_THRESHOLD_DEFAULTS.rseWarnPct),
-      rseThetaWarnPct: cfg.get<number>(
-        'rseThetaWarnPct',
-        INSPECTOR_THRESHOLD_DEFAULTS.rseThetaWarnPct,
-      ),
-      rseOmegaWarnPct: cfg.get<number>(
-        'rseOmegaWarnPct',
-        INSPECTOR_THRESHOLD_DEFAULTS.rseOmegaWarnPct,
-      ),
-      pValWarnThreshold: cfg.get<number>(
-        'pValWarnThreshold',
-        INSPECTOR_THRESHOLD_DEFAULTS.pValWarnThreshold,
-      ),
-      pValBadThreshold: cfg.get<number>(
-        'pValBadThreshold',
-        INSPECTOR_THRESHOLD_DEFAULTS.pValBadThreshold,
-      ),
-      corrRedFlagThreshold: cfg.get<number>(
-        'corrRedFlagThreshold',
-        INSPECTOR_THRESHOLD_DEFAULTS.corrRedFlagThreshold,
-      ),
-      corrWarnThreshold: cfg.get<number>(
-        'corrWarnThreshold',
-        INSPECTOR_THRESHOLD_DEFAULTS.corrWarnThreshold,
-      ),
-      condNumberBadThreshold: cfg.get<number>(
-        'condNumberBadThreshold',
-        INSPECTOR_THRESHOLD_DEFAULTS.condNumberBadThreshold,
-      ),
-      condNumberWarnThreshold: cfg.get<number>(
-        'condNumberWarnThreshold',
-        INSPECTOR_THRESHOLD_DEFAULTS.condNumberWarnThreshold,
-      ),
+      ...readInspectorThresholds(),
     });
     fitInspector.update(payload, ctx?.modUri);
   }
+}
+
+/**
+ * Read the 11 user-configurable inspector thresholds from
+ * `workspace.getConfiguration('nonmem')` in one pass. Defaults come
+ * from `INSPECTOR_THRESHOLD_DEFAULTS` so config-fallback values and
+ * payload-side fallbacks stay in lockstep — the same numbers used to
+ * be spelled out twice and could drift.
+ */
+function readInspectorThresholds(): typeof INSPECTOR_THRESHOLD_DEFAULTS {
+  const cfg = vscode.workspace.getConfiguration('nonmem');
+  const out = {} as Record<string, number>;
+  for (const key of Object.keys(INSPECTOR_THRESHOLD_DEFAULTS) as Array<
+    keyof typeof INSPECTOR_THRESHOLD_DEFAULTS
+  >) {
+    out[key] = cfg.get<number>(key, INSPECTOR_THRESHOLD_DEFAULTS[key]);
+  }
+  return out as typeof INSPECTOR_THRESHOLD_DEFAULTS;
 }
 
 /** Diagnostic logger for the active-editor → Variables / Fit Inspector resolution path. */
@@ -263,6 +236,7 @@ async function registerRuntime(
     nmVersions,
     runner,
     navigator: navigateToFileLine,
+    log: (msg) => outputChannel?.appendLine(`[positron-nonmem][session] ${msg}`),
   });
   context.subscriptions.push(
     positron.runtime.registerLanguageRuntimeManager('nmtran', runtimeManager),

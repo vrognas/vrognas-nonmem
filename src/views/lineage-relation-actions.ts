@@ -99,7 +99,7 @@ export async function setParent(
   childPath: string,
   childBasename: string,
 ): Promise<void> {
-  const pick = await pickRunFromGraph(deps.log, {
+  const pick = await pickRunFromGraph(deps, {
     title: `Set parent of ${childBasename}`,
     placeHolder: 'Pick a parent run (or "none" to make this a root)',
     excludePath: childPath,
@@ -123,7 +123,7 @@ export async function createRelation(
   originPath: string,
   originBasename: string,
 ): Promise<void> {
-  const partner = await pickRunFromGraph(deps.log, {
+  const partner = await pickRunFromGraph(deps, {
     title: `Create relation: ${originBasename} ↔ …`,
     placeHolder: 'Pick the other run',
     excludePath: originPath,
@@ -354,7 +354,7 @@ function priorityPathsForLineage(
  * extra scroll away rather than gating them behind a mode switch.
  */
 async function pickRunFromGraph(
-  log: (m: string) => void,
+  deps: RelationActionDeps,
   opts: {
     title: string;
     placeHolder: string;
@@ -363,7 +363,12 @@ async function pickRunFromGraph(
     priorityPaths?: ReadonlySet<string>;
   },
 ): Promise<PickedRun | null> {
-  const { graph } = await discoverLineage(log);
+  // Reuse the panel's cached graph when present — avoids re-scanning
+  // the whole workspace (.lst + .ext + .mod reads per node) just to
+  // populate a QuickPick. Falls back to discoverLineage only when the
+  // panel hasn't refreshed yet (cold start, opening a relation action
+  // before the panel mounted).
+  const graph = deps.lastGraph ?? (await discoverLineage(deps.log)).graph;
   const others = graph.nodes.filter((n) => n.modelPath !== opts.excludePath);
   if (others.length === 0 && !opts.noneOption) {
     void vscode.window.showInformationMessage(

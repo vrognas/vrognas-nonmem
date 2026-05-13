@@ -1996,7 +1996,6 @@ function renderSection(title, rows, hasFit, kind, showLabel = true, showPrior = 
     // wrong for off-diagonals (treats correlations like diagonals).
     // The toggle is purely a display choice for the FE column.
     // cvse/2 only used when `-1000000005` is absent (old NONMEM / no $COV).
-    const isOmegaOrSigma = kind === 'omega' || kind === 'sigma';
     const rseValue =
       isOmegaOrSigma && typeof r.rseStdcorr === 'number' ? r.rseStdcorr : r.rse;
     const rseCell = fmtRse(rseValue, kind);
@@ -2254,19 +2253,10 @@ const COL_TITLES = {
   IE: 'Initial estimate from the .mod (or the .lst\'s embedded control stream in lst-mode).',
   UB: 'Upper bound from `$THETA (lb, ie, ub)`. Em-dash for OMEGA/SIGMA.',
   FE: 'Final estimate (lst-mode only). Affected by the √Ω/ρ and exp(θ) toggles in the section heading.',
-  Value:
-    'Final estimate in lst-mode, initial estimate in mod-mode. Affected by the √Ω / exp(θ) toggles.',
-  '(RSE%)':
-    'Relative standard error. THETA: SE/|estimate|. OMEGA / SIGMA: (SE/variance)/2 — relative SE on the standard-deviation scale (sumo default sd_rse=1 convention).',
-  '[Shrinkage%]':
-    'ETA shrinkage on the standard-deviation scale, ETASHRINKSD(%) from the .lst. Values above 30% (configurable in `positronNonmem.shrinkageWarnPct`) suggest the random effect is poorly informed by the data.',
-  Fixed: '$THETA / $OMEGA / $SIGMA FIX flag',
   Name: 'Parameter access key (matches `.ext` columns)',
   ETABAR: 'Arithmetic mean of the ETA-estimates',
   'P VAL.':
     "NONMEM's two-sided significance test for ETABAR ≠ 0. Small p (< 0.05) flags an ETA whose mean differs from zero — typically a structural model mis-specification or an omitted covariate.",
-  'Shrinkage (SD)':
-    'ETA / EPS shrinkage on the standard-deviation scale, ETASHRINKSD(%) / EPSSHRINKSD(%) from the .lst. Values above 30% (configurable in `positronNonmem.shrinkageWarnPct`) suggest that the random effect is poorly informed by the data.',
 };
 
 function sectionEl(title, cols, rowsData, rowAttrs, tableClass, headingExtra, colClasses, colTitles) {
