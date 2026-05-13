@@ -7,6 +7,16 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **9th-pass review: 6 HIGH-severity fixes (v0.0.220).** Deep dive into the next layer (large modules + parsers):
+  1. **fit-inspector-payload.ts** — `Math.min(...eigs)` / `Math.max(...eigs)` replaced with single-pass `reduce`. The spread-as-args form hits V8's ~65535-argument limit; multi-compartment models with large OMEGA BLOCKs can produce more eigenvalues than that.
+  2. **client.js termination cells** — `xmlResult.terminationStatus !== null` (and same on `burninTime` / `elapsedTime`) tightened to `typeof === 'number'`. Older payloads / missing XML attrs ship `undefined`; the `!== null` check let them through, then `terminationCodeLabel(undefined, …)` rendered "termination: undefined" as a red cell.
+  3. **client.js trajectory slider** — captured `idx` once at the `input` handler and forwarded to the rAF callback. Previously the callback re-read `slider.value`; a fast drag landed a different value between label-set and render-call → one-frame label/plot disagreement at the edges.
+  4. **client.js `rowEl`** — `c instanceof HTMLElement` widened to `c instanceof Node`. Symmetry with `sectionEl` (already uses `Node`); future-proof against helpers returning a bare `Text` node (would otherwise fall through to `String(c)` and render as `"[object Text]"`).
+  5. **parse-cor.ts + parse-cnv.ts FORTRAN D-exponent** — `Number(tok)` silently returned NaN on `1.5D+02` form (NM default emit is `E`, but `$EST FORMAT=s1PD15.8` user override exists), row got dropped at the next `isFinite` guard. Added `src/runtime/parse-fortran-number.ts` with `parseFortranNumber(tok)` that normalises `D`/`d` → `E` before `Number()`. Two callers updated; helper is the seed for the broader 5-parser consolidation (MEDIUM #7).
+  6. **client.js `-eval` detection** — extracted `isAnyEvalStep(lst)` and pointed both call sites (OFV headline + EVAL ONLY pill) at it. Previously the same 3-line pattern lived in two places and had already drifted once (v0.0.194 fix).
+
+  Skipped HIGH findings: `parse-lst.ts` Unicode case-folding / regex-injection / global-statefulness — all theoretical (NM tokens are ASCII, callers control labels, callers use `matchAll`); flagged for the future-trap watch list.
+
 - **8th-pass review: 3 LOW fixes (v0.0.219).** Last pass on the review backlog:
   1. **variables-comm.ts** — dropped the local `formatNumber` (identical bytes to `format-number.ts`'s `formatNumberCompact`) and imported the shared one. The "Keep the implementations in sync" comment in `format-number.ts` was an admission of duplication; now there's one server-side implementation.
   2. **lineage-relation-actions.ts** — `RelationActionDeps.setCurrentLineage` was used by exactly one action (`addToLineage`). Moved it from deps to the action's parameter list. Smaller `RelationActionDeps` surface; signal that only `addToLineage` mutates the active-lineage selection.

@@ -1,3 +1,4 @@
+import { parseFortranNumber } from './parse-fortran-number';
 import { extractTableMethod } from './parse-table-header';
 
 // parseCnv — read NONMEM `.cnv` (convergence info, NM 7.2+, written
@@ -94,7 +95,10 @@ export function parseCnv(text: string): CnvTable[] {
     // Marker rows: first column is one of -2000000000..-2000000003.
     const tokens = line.split(/\s+/);
     const marker = tokens[0];
-    const values = tokens.slice(1).map(Number);
+    // FORTRAN-aware: handle both E- and D-exponent tokens since users
+    // can request `$EST FORMAT=s1PD15.8` and NONMEM honours it for the
+    // `.cnv` marker rows the same way it does for `.ext`/`.cor`.
+    const values = tokens.slice(1).map(parseFortranNumber);
     if (values.length !== header.length) continue;
     switch (marker) {
       case '-2000000000':

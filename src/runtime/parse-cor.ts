@@ -1,3 +1,4 @@
+import { parseFortranNumber } from './parse-fortran-number';
 import { extractTableMethod } from './parse-table-header';
 
 // parseCor — read NONMEM `.cor` (correlation matrix of estimates).
@@ -85,7 +86,7 @@ export function parseCor(text: string): CorTable[] {
     const rowMap = current.values.get(rowName);
     if (!rowMap) continue; // unrecognised row name — skip silently
     for (let i = 0; i < header.length && i + 1 < tokens.length; i++) {
-      const v = Number(tokens[i + 1]);
+      const v = parseFortranNumber(tokens[i + 1]);
       if (Number.isFinite(v)) rowMap.set(header[i], v);
     }
   }

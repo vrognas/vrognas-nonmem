@@ -1018,9 +1018,18 @@ function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnostics | nu
   const eigs = lst.eigenvalues;
   // Display signed min/max so the user sees if any eigenvalue is
   // negative (signals a non-PD COR matrix). The condition-number
-  // value comes from sumo; we don't recompute it here.
+  // value comes from sumo; we don't recompute it here. Avoid spread
+  // (`Math.min(...arr)`) — JS engines cap function-argument counts
+  // (~65535 on V8), and multi-compartment models with large OMEGA
+  // BLOCKs can produce more eigenvalues than that.
   const eigenvalues: InspectorDiagnostics['eigenvalues'] =
-    eigs.length > 0 ? { min: Math.min(...eigs), max: Math.max(...eigs), values: eigs } : null;
+    eigs.length > 0
+      ? {
+          min: eigs.reduce((m, v) => (v < m ? v : m), eigs[0]),
+          max: eigs.reduce((m, v) => (v > m ? v : m), eigs[0]),
+          values: eigs,
+        }
+      : null;
   const terminationCodes = fit?.terminationCodes ?? [];
   const correlationRedFlags = findCorrelationRedFlags(cor, corrWarnThreshold, corrRedFlagThreshold);
   // Hide block when there's nothing to show.

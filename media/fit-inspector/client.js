@@ -116,17 +116,11 @@ function render(payload) {
   // the user doesn't read it as a fitted value.
   if (hasFit && payload.summary && typeof payload.summary.ofv === 'number') {
     const lst = payload.summary.lst;
-    // isEval: ANY step (not just the last) being MAXEVAL=0 makes the OFV
-    // an init-evaluation, not a fitted value. Chained $EST runs (e.g.
-    // FOCE → IMP EONLY with MAXEVAL=0 in the IMP step) would otherwise
-    // hide the "(at init)" suffix when methodShort reflects only the
-    // last step.
-    const methodsShort = Array.isArray(lst && lst.methodsShort) ? lst.methodsShort : [];
-    const isEval = methodsShort.some((m) => typeof m === 'string' && m.endsWith('-eval'))
-      || (lst && lst.methodShort ? lst.methodShort.endsWith('-eval') : false);
+    // isAnyEvalStep: ANY chained $EST step being MAXEVAL=0 makes the
+    // OFV an init-evaluation rather than a fitted value (v0.0.194).
     const sigDigits = lst && typeof lst.sigDigits === 'number' ? lst.sigDigits : null;
     const nsigRequired = lst && typeof lst.nsigRequired === 'number' ? lst.nsigRequired : null;
-    root.append(renderOfvHeadline(payload.summary.ofv, isEval, sigDigits, nsigRequired));
+    root.append(renderOfvHeadline(payload.summary.ofv, isAnyEvalStep(lst), sigDigits, nsigRequired));
   }
   let rendered = false;
   // Toggles live inline next to their relevant table heading now —
@@ -329,7 +323,11 @@ function renderTrajectoryStep(t, xmlResult, stepOpts, methodKind) {
     const meta = document.createElement('div');
     meta.className = 'convergence-step-meta';
     const parts = [];
-    if (xmlResult.terminationStatus !== null) {
+    // `typeof === 'number'` (not `!== null`) — older payloads / a
+    // missing XML attr ship `undefined` here, which the `!== null`
+    // check let through, then `terminationCodeLabel(undefined, …)`
+    // rendered "termination: undefined" as a red cell.
+    if (typeof xmlResult.terminationStatus === 'number') {
       // Method-aware termination labels: EM uses NM73+ documented
       // codes (0/8 = completed, 1/9 = ran out of iters, ...);
       // classical methods use arbitrary FORTRAN error numbers.
@@ -346,10 +344,10 @@ function renderTrajectoryStep(t, xmlResult, stepOpts, methodKind) {
       span.textContent = 'termination: ' + label;
       parts.push(span);
     }
-    if (xmlResult.burninTime !== null) {
+    if (typeof xmlResult.burninTime === 'number') {
       parts.push(document.createTextNode('burn-in ' + fmtNum(xmlResult.burninTime) + 's'));
     }
-    if (xmlResult.elapsedTime !== null) {
+    if (typeof xmlResult.elapsedTime === 'number') {
       parts.push(document.createTextNode('elapsed ' + fmtNum(xmlResult.elapsedTime) + 's'));
     }
     if (parts.length > 0) {
@@ -482,15 +480,20 @@ function renderTrajectoryStep(t, xmlResult, stepOpts, methodKind) {
   // ticks and skipping Phase 2 when the new measurement is ≤5px wider
   // than the cached value — keeps the visible width stable for tiny
   // value drift.
+  // Capture `idx` once per `input` event and forward to renderPlots —
+  // re-reading `slider.value` inside the rAF callback would let a fast
+  // drag land a different value between label-set and render-call,
+  // causing one-frame label/plot disagreement at the edges.
   let pendingFrame = false;
+  let pendingIdx = defaultStartIdx;
   slider.addEventListener('input', () => {
-    const idx = Number(slider.value);
-    sliderVal.textContent = String(t.iterations[idx] ?? 0);
+    pendingIdx = Number(slider.value);
+    sliderVal.textContent = String(t.iterations[pendingIdx] ?? 0);
     if (pendingFrame) return;
     pendingFrame = true;
     requestAnimationFrame(() => {
       pendingFrame = false;
-      renderPlots(Number(slider.value));
+      renderPlots(pendingIdx);
     });
   });
 
@@ -1598,6 +1601,21 @@ function anyFinal(rows) {
   return rows.some((r) => r.final !== null && r.final !== undefined);
 }
 
+/**
+ * Does ANY chained $EST step have a `-eval` method-short suffix
+ * (`MAXEVAL=0`)? Drives the OFV headline's "(at init)" suffix AND the
+ * summary header's EVAL ONLY pill — same rule, same answer; previously
+ * inlined twice and went out-of-sync once already (v0.0.194 fix).
+ * Reads both `lst.methodsShort` (array, chained $EST) and the scalar
+ * `lst.methodShort` (last-step only) so older payloads still light up.
+ */
+function isAnyEvalStep(lst) {
+  if (!lst) return false;
+  const arr = Array.isArray(lst.methodsShort) ? lst.methodsShort : [];
+  if (arr.some((m) => typeof m === 'string' && m.endsWith('-eval'))) return true;
+  return typeof lst.methodShort === 'string' && lst.methodShort.endsWith('-eval');
+}
+
 function emptyMessage(text) {
   const div = document.createElement('div');
   div.className = 'empty';
@@ -1634,17 +1652,9 @@ function renderSummary(s) {
   // no SE / RSE / shrinkage / termination diagnostics. The method badge
   // already gets a `-eval` suffix (e.g. `FO-eval`); this complementary
   // pill makes the special status unmissable for users skimming the
-  // inspector. Detect via the suffix so we don't need a separate field.
-  // Chained $EST: ANY step being MAXEVAL=0 makes this an init-only OFV,
-  // so the pill needs to surface from the multi-step array — same rule
-  // as the OFV-headline isEval in renderHeadline (v0.0.194 fix). The
-  // scalar `methodShort` only reflects the last step, so a FOCE → IMP
-  // EONLY chain (with MAXEVAL=0 in the IMP step) would have hidden the
-  // pill while the headline correctly showed "(at init)".
-  const methodsShortBadge = Array.isArray(s.lst && s.lst.methodsShort) ? s.lst.methodsShort : [];
-  const anyEval = methodsShortBadge.some((m) => typeof m === 'string' && m.endsWith('-eval'))
-    || (s.lst && s.lst.methodShort ? s.lst.methodShort.endsWith('-eval') : false);
-  if (anyEval) {
+  // inspector. Shares the `isAnyEvalStep` helper with the OFV-headline
+  // path (v0.0.194 fix) so the two surfaces can't drift.
+  if (isAnyEvalStep(s.lst)) {
     const evalTag = document.createElement('span');
     evalTag.className = 'method method-eval';
     evalTag.textContent = 'EVAL ONLY';
@@ -2330,7 +2340,11 @@ function rowEl(cells, attrs, colClasses) {
       dash.className = 'dim';
       dash.textContent = '—';
       td.append(dash);
-    } else if (c instanceof HTMLElement) {
+    } else if (c instanceof Node) {
+      // `Node`, not `HTMLElement` — symmetry with sectionEl + future-
+      // proof against helpers returning a bare `Text` node (would
+      // otherwise fall through to `String(c)` and render as
+      // "[object Text]").
       td.append(c);
     } else if (typeof c === 'number') {
       td.textContent = fmtNum(c);
