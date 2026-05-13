@@ -519,14 +519,16 @@ table.param-table {
   min-width: 460px;
 }
 table.param-table .col-num    { width: 5%; }
-table.param-table .col-label  { width: 22%; }
-/* LB / UB carry "0", "-3", or the `-1e+06`/`1e+06` THETA implicit-bound
-   sentinel (~6 chars max). 7% covers those at the typical pane width.
+table.param-table .col-label  { width: 26%; }
+/* LB / UB carry "0", "-3", or em-dash (OMEGA/SIGMA — vscode-nmtran
+   doesn't expose those bounds). 5% is enough for those at typical pane
+   widths. Wide sentinels like `-1000000` (THETA with an explicit
+   implicit-bound) WILL wrap to two lines — accepted trade-off, the
+   common case is short content and label readability is the priority.
    IE retains 10% — actual initial estimates can run wider (e.g.
-   `37814.69`). The 6% freed from LB+UB is redirected to Label so longer
-   `;<comment>` strings stay readable without hover. */
+   `37814.69`). */
 table.param-table .col-lb,
-table.param-table .col-ub     { width: 7%; }
+table.param-table .col-ub     { width: 5%; }
 table.param-table .col-ie     { width: 10%; }
 table.param-table .col-fe     { width: 13%; }
 table.param-table .col-rse    { width: 14%; }
