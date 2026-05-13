@@ -1,5 +1,5 @@
 import { parseFortranNumber } from './parse-fortran-number';
-import { extractTableMethod } from './parse-table-header';
+import { parseTableBlocks } from './parse-table-blocks';
 
 // parseCnv — read NONMEM `.cnv` (convergence info, NM 7.2+, written
 // only when `$EST CTYPE > 0`).
@@ -52,76 +52,65 @@ export interface CnvTable {
  * Parse a `.cnv` file into one entry per `TABLE NO.` block. Returns
  * an empty array when no recognisable block is present (file written
  * with CTYPE=0, truncated, non-cnv input). Never throws.
+ *
+ * Strict: only commits blocks where every marker row (-2000000000…-3)
+ * matches header length AND the block has at least 2 columns (one param +
+ * the OFV column). Degraded tables (truncated mid-write, missing
+ * alphas) are dropped so downstream consumers can trust every published
+ * `CnvTable` is fully populated.
  */
 export function parseCnv(text: string): CnvTable[] {
   const tables: CnvTable[] = [];
-  let current: Partial<CnvTable> & { method: string } = { method: '' };
-  let header: string[] | null = null;
-  let inBlock = false;
-
-  for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line) continue;
-
-    if (/^TABLE\s+NO\b/i.test(line)) {
-      if (inBlock && header) finalize(tables, current as CnvTable);
-      current = {
-        method: extractTableMethod(line),
-        paramNames: [],
-        means: [],
-        sds: [],
-        pValues: [],
-        alphas: [],
-      };
-      header = null;
-      inBlock = true;
-      continue;
+  for (const b of parseTableBlocks(text, (l) => /^ITERATION\b/i.test(l))) {
+    if (!b.headerTokens) continue;
+    const paramNames = b.headerTokens.slice(1);
+    if (paramNames.length < 2) continue;
+    const t: CnvTable = {
+      method: b.method,
+      paramNames,
+      means: [],
+      sds: [],
+      pValues: [],
+      alphas: [],
+    };
+    for (const line of b.rowLines) {
+      // Marker rows: first column is one of -2000000000..-2000000003.
+      // FORTRAN-aware: handle both E- and D-exponent tokens since users
+      // can request `$EST FORMAT=s1PD15.8` and NONMEM honours it for the
+      // `.cnv` marker rows the same way it does for `.ext`/`.cor`.
+      const tokens = line.split(/\s+/);
+      const values = tokens.slice(1).map(parseFortranNumber);
+      if (values.length !== paramNames.length) continue;
+      switch (tokens[0]) {
+        case '-2000000000':
+          t.means = values;
+          break;
+        case '-2000000001':
+          t.sds = values;
+          break;
+        case '-2000000002':
+          t.pValues = values;
+          break;
+        case '-2000000003':
+          t.alphas = values;
+          break;
+        default:
+          // Ignore non-marker rows (regular iteration data is theoretically
+          // possible if NONMEM ever writes them here, though empirically
+          // .cnv contains only the 4 marker rows).
+          break;
+      }
     }
-
-    if (!inBlock) continue;
-
-    // Header row: starts with ITERATION, then param names. Only the
-    // FIRST ITERATION row in a TABLE block sets the header — guard
-    // against a stray re-occurrence stomping `paramNames` against
-    // already-collected marker rows.
-    if (!header && /^ITERATION\b/i.test(line)) {
-      header = line.split(/\s+/).slice(1);
-      current.paramNames = header;
-      continue;
-    }
-
-    if (!header) continue;
-
-    // Marker rows: first column is one of -2000000000..-2000000003.
-    const tokens = line.split(/\s+/);
-    const marker = tokens[0];
-    // FORTRAN-aware: handle both E- and D-exponent tokens since users
-    // can request `$EST FORMAT=s1PD15.8` and NONMEM honours it for the
-    // `.cnv` marker rows the same way it does for `.ext`/`.cor`.
-    const values = tokens.slice(1).map(parseFortranNumber);
-    if (values.length !== header.length) continue;
-    switch (marker) {
-      case '-2000000000':
-        current.means = values;
-        break;
-      case '-2000000001':
-        current.sds = values;
-        break;
-      case '-2000000002':
-        current.pValues = values;
-        break;
-      case '-2000000003':
-        current.alphas = values;
-        break;
-      default:
-        // Ignore non-marker rows (regular iteration data is theoretically
-        // possible if NONMEM ever writes them here, though empirically
-        // .cnv contains only the 4 marker rows).
-        break;
+    const n = paramNames.length;
+    if (
+      t.means.length === n &&
+      t.sds.length === n &&
+      t.pValues.length === n &&
+      t.alphas.length === n
+    ) {
+      tables.push(t);
     }
   }
-
-  if (inBlock && header) finalize(tables, current as CnvTable);
   return tables;
 }
 
@@ -129,21 +118,4 @@ export function parseCnv(text: string): CnvTable[] {
 export function lastCnvTable(text: string): CnvTable | null {
   const tables = parseCnv(text);
   return tables.length > 0 ? tables[tables.length - 1] : null;
-}
-
-function finalize(tables: CnvTable[], t: CnvTable): void {
-  // Strict: only commit blocks where every marker row matches
-  // header length. A degraded table (truncated mid-write, missing
-  // alphas, etc.) is dropped here so downstream consumers can trust
-  // every published `CnvTable` is fully populated.
-  const n = t.paramNames.length;
-  if (n < 2) return; // need at least one param + the OFV column
-  if (
-    t.means.length === n &&
-    t.sds.length === n &&
-    t.pValues.length === n &&
-    t.alphas.length === n
-  ) {
-    tables.push(t);
-  }
 }

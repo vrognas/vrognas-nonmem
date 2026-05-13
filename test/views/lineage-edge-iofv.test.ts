@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { computeEdgeIOfvSummary, loadEdgeIOfvSummary } from '../../src/views/lineage-edge-iofv';
 import type { PhiTable } from '../../src/runtime/parse-phi';
+import { makeTmpDir } from '../__helpers__/tmpdir';
 
 // Minimal valid .phi text used by the fs-shell tests below.
 function phiText(
@@ -129,8 +129,8 @@ describe('computeEdgeIOfvSummary', () => {
 
 describe('loadEdgeIOfvSummary (fs shell)', () => {
   it('reads, parses, and computes summary across two real .phi files', async () => {
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'phi-edge-'));
-    try {
+    const tmp = await makeTmpDir('phi-edge');
+    {
       const parentPath = path.join(tmp, 'parent.phi');
       const childPath = path.join(tmp, 'child.phi');
       await fs.writeFile(
@@ -161,14 +161,12 @@ describe('loadEdgeIOfvSummary (fs shell)', () => {
       expect(s.totalDelta).toBeCloseTo(-2, 6);
       expect(s.topImproved[0].id).toBe(1);
       expect(s.topWorsened[0].id).toBe(3);
-    } finally {
-      await fs.rm(tmp, { recursive: true, force: true });
     }
   });
 
   it('returns all-null result when either path is null or file is missing', async () => {
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'phi-edge-'));
-    try {
+    const tmp = await makeTmpDir('phi-edge');
+    {
       const realPath = path.join(tmp, 'real.phi');
       await fs.writeFile(realPath, phiText([[1, 100]]));
       const expectEmpty = (r: {
@@ -185,8 +183,6 @@ describe('loadEdgeIOfvSummary (fs shell)', () => {
       const missing = path.join(tmp, 'missing.phi');
       expectEmpty(await loadEdgeIOfvSummary(missing, realPath, 3.84));
       expectEmpty(await loadEdgeIOfvSummary(realPath, missing, 3.84));
-    } finally {
-      await fs.rm(tmp, { recursive: true, force: true });
     }
   });
 
@@ -195,8 +191,8 @@ describe('loadEdgeIOfvSummary (fs shell)', () => {
     // `Σ ΔiOFV = +25` against `Total ΔOFV (.ext) = -39.61` because the
     // OBJ column for $DESIGN is per-subject FIM contribution, NOT iOFV.
     // The fix is to refuse the comparison and surface a reason instead.
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'phi-edge-'));
-    try {
+    const tmp = await makeTmpDir('phi-edge');
+    {
       const parentPath = path.join(tmp, 'parent.phi');
       const childPath = path.join(tmp, 'child.phi');
       // Mirror real run001 / run008 method labels NONMEM emits.
@@ -233,8 +229,6 @@ describe('loadEdgeIOfvSummary (fs shell)', () => {
       expect(r2.summary).toBeNull();
       expect(r2.warning).toBeNull();
       expect(r2.incomparableReason).toMatch(/Parent run/);
-    } finally {
-      await fs.rm(tmp, { recursive: true, force: true });
     }
   });
 
@@ -242,8 +236,8 @@ describe('loadEdgeIOfvSummary (fs shell)', () => {
     // Different estimation methods (FOCEI → IMP). Per-subject Δ is
     // numerically defined but the additive constants don't cancel —
     // Σ ΔiOFV ≠ total ΔOFV. User-flagged: even IMP vs FOCEI should warn.
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'phi-edge-'));
-    try {
+    const tmp = await makeTmpDir('phi-edge');
+    {
       const parentPath = path.join(tmp, 'parent.phi');
       const childPath = path.join(tmp, 'child.phi');
       await fs.writeFile(
@@ -274,16 +268,14 @@ describe('loadEdgeIOfvSummary (fs shell)', () => {
       expect(r.warning).toMatch(/Different estimation methods/i);
       expect(r.warning).toMatch(/First Order Conditional Estimation with Interaction/);
       expect(r.warning).toMatch(/Importance Sampling/);
-    } finally {
-      await fs.rm(tmp, { recursive: true, force: true });
     }
   });
 
   it('does NOT warn when only the (Evaluation) suffix differs', async () => {
     // FOCEI converged vs FOCEI MAXEVAL=0: same likelihood function,
     // different parameter values. Per-subject diff IS comparable.
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'phi-edge-'));
-    try {
+    const tmp = await makeTmpDir('phi-edge');
+    {
       const parentPath = path.join(tmp, 'parent.phi');
       const childPath = path.join(tmp, 'child.phi');
       await fs.writeFile(
@@ -301,8 +293,6 @@ describe('loadEdgeIOfvSummary (fs shell)', () => {
       expect(r.incomparableReason).toBeNull();
       expect(r.warning).toBeNull();
       expect(r.summary).not.toBeNull();
-    } finally {
-      await fs.rm(tmp, { recursive: true, force: true });
     }
   });
 });

@@ -7,6 +7,37 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **11th-pass review: TABLE-block iterator + test hygiene + 2 small bugs (v0.0.225).** After 10 prior passes the obvious-bug rate is near zero; this pass focuses on the deferred `#8` refactor and test-suite hygiene.
+
+  **BIG refactor: `parseTableBlocks` shared iterator.**
+  - New `src/runtime/parse-table-blocks.ts` (45 LOC) lifts the common envelope shared by `.ext` / `.phi` / `.cor` / `.cnv` parsers: split lines → detect `TABLE NO.` → capture first header-matching line → collect rows until next table / EOF. Caller supplies the header predicate and does its own row interpretation.
+  - 4 parsers refactored to use the helper:
+    - `parse-ext-tokenizer.ts` `parseExtBlocks` — 26 → 12 LOC (header tokenisation + iter-row collection)
+    - `parse-phi.ts` `parsePhi` — 35 → 14 LOC (subject-row collection + iOFV column pick)
+    - `parse-cor.ts` `parseCor` — 38 → 16 LOC (param-row matrix population)
+    - `parse-cnv.ts` `parseCnv` — 65 → 47 LOC (marker-row switch + strict finalisation)
+  - `parse-lst-finals.ts` is NOT a TABLE-block parser (banner-driven, no `TABLE NO.` envelope) so it stays as-is. The "first-match-wins" header semantic in the helper matches `parse-cnv`'s pre-existing guard against stray re-occurrences of the header text.
+  - Helper has its own 4 e2e tests (`test/runtime/parse-table-blocks.test.ts`). All 4 refactored parsers' pre-existing test suites continue to pass byte-identical. Total: 521 → 525 tests (+4 from the helper).
+
+  **Test hygiene: `makeTmpDir` helper.**
+  - New `test/__helpers__/tmpdir.ts` with `vi.onTestFinished`-driven auto-cleanup. Use inside `it()` bodies; cleanup is best-effort recursive remove.
+  - Plugs leaks (no cleanup at all) in: `promote-estimates.test.ts` (6 calls), `run-sumo.test.ts` (3), `read-prderr.test.ts` (6), `find-ext-file.test.ts`, `fs-utils.test.ts`, `lineage-discovery.test.ts`, `signal-dispatch.test.ts`.
+  - Replaces try/finally cleanup blocks in `lineage-edge-iofv.test.ts` (5 callsites).
+  - `beforeEach + afterEach` patterns in `active-runs-watcher.test.ts` / `run-progress.test.ts` / `run-model.test.ts` are NOT migrated — they have explicit cleanup and auto-cleanup wouldn't fire from a `beforeEach` hook (registration requires a running test).
+
+  **Small bugs (MEDIUMs):**
+  - `xml-cov-defaults.ts` `SKIP_COV_TIER_KEYS`: empty `Set` with an unreachable `if (SKIP_COV_TIER_KEYS.has(k))` guard. Documented "intentionally empty for now" but the symmetry-with-`SKIP_TIER_KEYS` reason no longer holds. Dead code deleted.
+  - `parse-lst-est-records.ts` keyword slice: `line.slice(line.toLowerCase().indexOf(kwMatch[1].toLowerCase()) + kwMatch[1].length)` redundantly re-located the keyword via a fresh case-insensitive `indexOf`, which could in principle land on an earlier `est` substring if the regex were ever unanchored. Replaced with `line.slice(kwMatch[0].length)` — the regex already captured the position.
+  - `scrub.test.ts` description typos: "replaces /home/<user>/ with /home/<user>/" had the same string both sides. Rewritten to "redacts /home/<real-name>/ paths to /home/<user>/" — clarifies what's actually being asserted.
+
+  **Skipped findings (with rationale):**
+  - `xml-est-defaults.ts` `EM_METHODS` includes unprobed methods — comment-vs-code drift, speculative not a bug.
+  - `parse-xml-options.ts:37` non-greedy `[^>]*?` on negated class — semantically equivalent to greedy (class already excludes `>`); cosmetic.
+  - `parse-phi.ts:73` silent drop when ID column missing — defensive-only; NM 7 always emits ID.
+  - `parse-ext-fit.ts` ITERATION-column round-trip waste — bikeshed, ~6 lines.
+  - `fit-inspector-payload.test.ts:63-108` full-row `toEqual` — schema-churn risk only; tests still pass.
+  - `function model()` duplicated 2x across `fit-inspector-payload.test.ts` and `variables-comm.test.ts` — Rule of Three not met (2 sites). Skip per CLAUDE.md.
+
 - **10th-pass review: small bug + MEDIUMs (v0.0.224).** Of the 4 candidate HIGHs only one verified as a real bug; the other three were skipped after re-reading the code (the agents missed mitigations / explicit comments). Six MEDIUMs applied.
 
   **HIGH (bug):**

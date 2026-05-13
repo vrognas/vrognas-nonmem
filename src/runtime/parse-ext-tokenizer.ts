@@ -10,9 +10,11 @@
 // Lifted out as a shared module v0.0.192 to remove drift risk (one
 // caller's THETA1→THETA(1) rewrite was a function called
 // `rewriteHeader`, the other's was `normalizeName` — bit-for-bit
-// identical bodies).
+// identical bodies). The TABLE-block envelope itself was lifted into
+// `parse-table-blocks.ts` later — see that file's header for the
+// shared shape across `.ext`/`.phi`/`.cor`/`.cnv`.
 
-import { extractTableMethod } from './parse-table-header';
+import { parseTableBlocks } from './parse-table-blocks';
 
 /**
  * One data row inside an `.ext` TABLE block. `iter` is the leading
@@ -48,40 +50,22 @@ export interface ExtBlock {
  * Parse a `.ext` file into TABLE blocks. Returns one entry per
  * `TABLE NO.` header in order. Blocks without an `ITERATION` line are
  * still returned with `header: null` so the caller can detect
- * truncation explicitly.
+ * truncation explicitly. Non-numeric leading tokens (NM's negative
+ * sentinels are fine — they're finite numbers) are dropped at the row
+ * level.
  */
 export function parseExtBlocks(text: string): ExtBlock[] {
-  const blocks: ExtBlock[] = [];
-  let current: ExtBlock | null = null;
-
-  for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    const tokens = line.split(/\s+/);
-
-    if (tokens[0] === 'TABLE') {
-      if (current) blocks.push(current);
-      current = {
-        method: extractTableMethod(line),
-        header: null,
-        rows: [],
-      };
-      continue;
+  return parseTableBlocks(text, (l) => /^ITERATION\b/i.test(l)).map((b) => {
+    const header = b.headerTokens ? b.headerTokens.slice(1).map(normalizeColumnName) : null;
+    const rows: ExtBlockRow[] = [];
+    for (const line of b.rowLines) {
+      const tokens = line.split(/\s+/);
+      const iter = Number(tokens[0]);
+      if (!Number.isFinite(iter)) continue;
+      rows.push({ iter, tokens: tokens.slice(1) });
     }
-    if (!current) continue;
-
-    if (tokens[0] === 'ITERATION') {
-      // Drop the leading 'ITERATION' token; normalise each column.
-      current.header = tokens.slice(1).map(normalizeColumnName);
-      continue;
-    }
-
-    const iter = Number(tokens[0]);
-    if (!Number.isFinite(iter)) continue;
-    current.rows.push({ iter, tokens: tokens.slice(1) });
-  }
-  if (current) blocks.push(current);
-  return blocks;
+    return { method: b.method, header, rows };
+  });
 }
 
 /**

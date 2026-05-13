@@ -1,4 +1,5 @@
-import { extractTableMethod, pickOfvColumn } from './parse-table-header';
+import { pickOfvColumn } from './parse-table-header';
+import { parseTableBlocks } from './parse-table-blocks';
 
 // parsePhi — read PsN/NONMEM `.phi` for per-subject ETA estimates,
 // conditional covariances, and individual OFV (iOFV).
@@ -42,42 +43,20 @@ export interface PhiTable {
  * empty array if no tables are recognised. Never throws.
  */
 export function parsePhi(text: string): PhiTable[] {
-  const tables: PhiTable[] = [];
-  let current: PhiTable | null = null;
-  let header: string[] | null = null;
-  let iOfvIdx = -1;
-
-  for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line) continue;
-
-    // New TABLE block — finalise the previous and start a fresh one.
-    if (/^TABLE\s+NO\b/i.test(line)) {
-      if (current) tables.push(current);
-      current = { method: extractTableMethod(line), rows: [] };
-      header = null;
-      iOfvIdx = -1;
-      continue;
+  return parseTableBlocks(text, (l) => /^SUBJECT_NO\b/i.test(l)).map((b) => {
+    const rows: PhiRow[] = [];
+    if (b.headerTokens) {
+      const iOfvIdx = pickOfvColumn(b.headerTokens);
+      for (const line of b.rowLines) {
+        const tokens = line.split(/\s+/);
+        // Data row: leading token must be numeric (subject_no).
+        if (!Number.isFinite(Number(tokens[0]))) continue;
+        const row = parseRow(tokens, b.headerTokens, iOfvIdx);
+        if (row) rows.push(row);
+      }
     }
-
-    // Header row: starts with SUBJECT_NO, contains PHI(...) columns.
-    if (/^SUBJECT_NO\b/i.test(line)) {
-      header = line.split(/\s+/);
-      iOfvIdx = pickOfvColumn(header);
-      continue;
-    }
-
-    // Data row: leading token must be numeric (subject_no).
-    if (!current || !header) continue;
-    const tokens = line.split(/\s+/);
-    if (!Number.isFinite(Number(tokens[0]))) continue;
-
-    const row = parseRow(tokens, header, iOfvIdx);
-    if (row) current.rows.push(row);
-  }
-
-  if (current) tables.push(current);
-  return tables;
+    return { method: b.method, rows };
+  });
 }
 
 /** Convenience: return the last (i.e. final $EST step) table, or null. */

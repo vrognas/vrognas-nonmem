@@ -98,7 +98,12 @@ function parseLstRecord(controlStream: string, keywordRe: RegExp): RawEstRecord[
       flush();
       inRecord = true;
       currentKeyword = '$' + kwMatch[1].toUpperCase();
-      const afterKeyword = line.slice(line.toLowerCase().indexOf(kwMatch[1].toLowerCase()) + kwMatch[1].length);
+      // Slice past the full anchored match (whitespace + `$KEYWORD`)
+      // — the regex already located the keyword position; re-searching
+      // the line via toLowerCase()/indexOf() could in principle skid
+      // to an earlier "est" substring on lines that aren't anchored
+      // (none today, but the bug class is avoided).
+      const afterKeyword = line.slice(kwMatch[0].length);
       currentLines.push(stripComment(afterKeyword));
     } else if (RECORD_BOUNDARY_RE.test(line)) {
       flush();

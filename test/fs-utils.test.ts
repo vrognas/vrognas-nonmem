@@ -1,12 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { findSiblingByExt, pathExists } from '../src/fs-utils';
-
-async function workdir(prefix: string): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), `${prefix}-`));
-}
+import { makeTmpDir as workdir } from './__helpers__/tmpdir';
 
 describe('findSiblingByExt', () => {
   it('returns the exact-case match when one exists', async () => {

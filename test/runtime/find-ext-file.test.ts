@@ -1,12 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { findExtFile } from '../../src/runtime/find-ext-file';
+import { makeTmpDir } from '../__helpers__/tmpdir';
 
-async function makeWorkdir(): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), 'find-ext-'));
-}
+const makeWorkdir = (): Promise<string> => makeTmpDir('find-ext');
 
 describe('findExtFile', () => {
   it('prefers `<dir>/<basename>.ext` (Pirana / nmfe-direct layout)', async () => {

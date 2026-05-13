@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { runSumo } from '../../src/runtime/run-sumo';
 import type { Runner } from '../../src/runner';
+import { makeTmpDir } from '../__helpers__/tmpdir';
 
 const SUMO_OUTPUT = `m.lst
 No rounding errors                                                [    OK   ]
@@ -12,7 +12,7 @@ Objective function value: 4.5310
 
 describe('runSumo', () => {
   it('runs sumo in the .lst parent dir and returns the parsed summary on RC=0', async () => {
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'sumo-'));
+    const tmp = await makeTmpDir('sumo');
     const lstPath = path.join(tmp, 'run001.lst');
     await fs.writeFile(lstPath, '');
 
@@ -31,7 +31,7 @@ describe('runSumo', () => {
   });
 
   it('returns null when sumo exits non-zero (stderr swallowed; caller decides what to log)', async () => {
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'sumo-'));
+    const tmp = await makeTmpDir('sumo');
     const lstPath = path.join(tmp, 'run001.lst');
     await fs.writeFile(lstPath, '');
 
@@ -42,7 +42,7 @@ describe('runSumo', () => {
   });
 
   it('returns null when sumo output is unparseable', async () => {
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'sumo-'));
+    const tmp = await makeTmpDir('sumo');
     const lstPath = path.join(tmp, 'run001.lst');
     await fs.writeFile(lstPath, '');
 

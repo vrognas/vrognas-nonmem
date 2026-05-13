@@ -1,5 +1,5 @@
 import { parseFortranNumber } from './parse-fortran-number';
-import { extractTableMethod } from './parse-table-header';
+import { parseTableBlocks } from './parse-table-blocks';
 
 // parseCor — read NONMEM `.cor` (correlation matrix of estimates).
 //
@@ -51,48 +51,23 @@ export interface CorTable {
  * input, etc.). Never throws.
  */
 export function parseCor(text: string): CorTable[] {
-  const tables: CorTable[] = [];
-  let current: CorTable | null = null;
-  let header: string[] | null = null;
-
-  for (const rawLine of text.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line) continue;
-
-    // New TABLE block — finalise the previous and start fresh.
-    if (/^TABLE\s+NO\b/i.test(line)) {
-      if (current) tables.push(current);
-      current = { method: extractTableMethod(line), paramNames: [], values: new Map() };
-      header = null;
-      continue;
-    }
-
-    // Header row: starts with NAME, then parameter names.
-    if (/^NAME\b/i.test(line)) {
-      const tokens = line.split(/\s+/).slice(1); // drop the leading "NAME"
-      header = tokens;
-      if (current) {
-        current.paramNames = tokens;
-        for (const name of tokens) current.values.set(name, new Map());
+  return parseTableBlocks(text, (l) => /^NAME\b/i.test(l)).map((b) => {
+    const paramNames = b.headerTokens ? b.headerTokens.slice(1) : [];
+    const values = new Map<string, Map<string, number>>();
+    for (const name of paramNames) values.set(name, new Map());
+    for (const line of b.rowLines) {
+      // Data row: first token is a parameter name (or a continuation —
+      // skipped here, see header comment), rest are numeric correlations.
+      const tokens = line.split(/\s+/);
+      const rowMap = values.get(tokens[0]);
+      if (!rowMap) continue; // unrecognised row name — skip silently
+      for (let i = 0; i < paramNames.length && i + 1 < tokens.length; i++) {
+        const v = parseFortranNumber(tokens[i + 1]);
+        if (Number.isFinite(v)) rowMap.set(paramNames[i], v);
       }
-      continue;
     }
-
-    // Data row: first token is a parameter name (or a continuation —
-    // skipped here, see header comment), rest are numeric correlations.
-    if (!current || !header) continue;
-    const tokens = line.split(/\s+/);
-    const rowName = tokens[0];
-    const rowMap = current.values.get(rowName);
-    if (!rowMap) continue; // unrecognised row name — skip silently
-    for (let i = 0; i < header.length && i + 1 < tokens.length; i++) {
-      const v = parseFortranNumber(tokens[i + 1]);
-      if (Number.isFinite(v)) rowMap.set(header[i], v);
-    }
-  }
-
-  if (current) tables.push(current);
-  return tables;
+    return { method: b.method, paramNames, values };
+  });
 }
 
 /** Convenience: return the last (final $EST step) table, or null. */

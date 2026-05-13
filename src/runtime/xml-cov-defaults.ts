@@ -157,18 +157,6 @@ function userWroteCovAttr(attr: string, tokens: readonly string[]): boolean {
 }
 
 /**
- * Identity-style $COV attrs that don't fit the explicit/implicit/default
- * model. `file` is per-run-derived ($EST-inherited); `format` similarly
- * inherits. `omitted` is the cov-step omitted flag — user types
- * OMITTED to set it, but the wire 'no' is the default; treat normally.
- */
-const SKIP_COV_TIER_KEYS: ReadonlySet<string> = new Set([
-  // intentionally empty for now — `file`/`format` get sentinel-based
-  // resolution via resolveCovAttrToRuntime, and the diff is still
-  // meaningful (user-typed FILE=foo.ext differs from inherited BLANK).
-]);
-
-/**
  * Unified $COV classifier (v0.0.185+). Same explicit/implicit/
  * explicitDefault scheme as `classifyEstStep`. `covTokens` are the
  * user's verbatim tokens from the $COV line in the .lst echo.
@@ -185,7 +173,6 @@ export function classifyCovStep(
   const defaults = findCovDefaults(cov);
   const out: Record<string, CovTier> = {};
   for (const k of Object.keys(cov)) {
-    if (SKIP_COV_TIER_KEYS.has(k)) continue;
     const value = cov[k];
     const wroteIt = userWroteCovAttr(k, covTokens);
     const matchesDefault = defaults[k] !== undefined && defaults[k] === value;

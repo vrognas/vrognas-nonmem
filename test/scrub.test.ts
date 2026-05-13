@@ -14,13 +14,13 @@ describe('scrubPrivate', () => {
     );
   });
 
-  it('replaces /home/<user>/ with /home/<user>/ in arbitrary paths', () => {
+  it('redacts /home/<real-name>/ paths to /home/<user>/', () => {
     expect(scrubPrivate('working dir: /home/jane.doe/projects/m1\n')).toBe(
       'working dir: /home/<user>/projects/m1\n',
     );
   });
 
-  it('replaces /Users/<user>/ with /Users/<user>/ on macOS-style paths', () => {
+  it('redacts /Users/<real-name>/ paths to /Users/<user>/ on macOS-style paths', () => {
     expect(scrubPrivate('cwd /Users/jane.doe/work/run001.lst\n')).toBe(
       'cwd /Users/<user>/work/run001.lst\n',
     );

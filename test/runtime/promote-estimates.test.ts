@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   buildUpdateInitsCommand,
@@ -10,6 +9,7 @@ import {
 } from '../../src/runtime/promote-estimates';
 import type { Runner } from '../../src/runner';
 import { quote } from '../../src/shell';
+import { makeTmpDir } from '../__helpers__/tmpdir';
 
 describe('computeNextModelName', () => {
   // Build expectations through path.join so the test passes on both
@@ -60,7 +60,7 @@ describe('buildUpdateInitsCommand', () => {
 
 describe('promoteEstimates', () => {
   it('runs update_inits and returns the new model path on success', async () => {
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'promote-'));
+    const tmp = await makeTmpDir('promote');
     const inputModel = path.join(tmp, 'run001.mod');
     const outputModel = path.join(tmp, 'run002.mod');
     await fs.writeFile(inputModel, '$PROBLEM\n$THETA 1\n');
@@ -87,7 +87,7 @@ describe('promoteEstimates', () => {
   });
 
   it('throws when update_inits exits non-zero, surfacing stdout+stderr', async () => {
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'promote-'));
+    const tmp = await makeTmpDir('promote');
     const inputModel = path.join(tmp, 'run001.mod');
     await fs.writeFile(inputModel, '$PROBLEM\n');
 
@@ -105,7 +105,7 @@ describe('promoteEstimates', () => {
   });
 
   it('throws when update_inits exits 0 but produced no output file (defensive)', async () => {
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'promote-'));
+    const tmp = await makeTmpDir('promote');
     const inputModel = path.join(tmp, 'run001.mod');
     await fs.writeFile(inputModel, '$PROBLEM\n');
 
@@ -157,7 +157,7 @@ describe('promoteEstimates — runrecord parent linkage', () => {
   }
 
   it('writes `;; Based on: N` directly under $PROBLEM in the new .mod', async () => {
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'promote-'));
+    const tmp = await makeTmpDir('promote');
     const inputModel = path.join(tmp, 'run001.mod');
     const outputModel = path.join(tmp, 'run002.mod');
     await fs.writeFile(inputModel, '$PROBLEM\n$THETA 1\n');
@@ -172,7 +172,7 @@ describe('promoteEstimates — runrecord parent linkage', () => {
   it('replaces an existing `;; Based on:` instead of duplicating it (idempotent re-promote)', async () => {
     // Simulate re-promoting from a model that already carries a parent
     // marker — the marker should rewrite to point at the new parent.
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'promote-'));
+    const tmp = await makeTmpDir('promote');
     const inputModel = path.join(tmp, 'run002.mod');
     const outputModel = path.join(tmp, 'run003.mod');
     await fs.writeFile(inputModel, '$PROBLEM\n$THETA 2.5\n');
@@ -192,7 +192,7 @@ describe('promoteEstimates — runrecord parent linkage', () => {
   });
 
   it('skips the marker when the parent basename is not run<NNN> (e.g. `m.mod`)', async () => {
-    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'promote-'));
+    const tmp = await makeTmpDir('promote');
     const inputModel = path.join(tmp, 'm.mod');
     const outputModel = path.join(tmp, 'm+1.mod');
     await fs.writeFile(inputModel, '$PROBLEM\n$THETA 1\n');

@@ -1,13 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { readPrderr } from '../../src/runtime/read-prderr';
 import type { Runner } from '../../src/runner';
+import { makeTmpDir } from '../__helpers__/tmpdir';
 
-async function tmpDir(): Promise<string> {
-  return fs.mkdtemp(path.join(os.tmpdir(), 'prderr-'));
-}
+const tmpDir = (): Promise<string> => makeTmpDir('prderr');
 
 const PRDERR_TEXT = '0DURING SIMULATION STEP, PRED EXIT CODE = 1\n MORE DETAIL HERE\n';
 
