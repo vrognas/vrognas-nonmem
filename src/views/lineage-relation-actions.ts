@@ -38,8 +38,6 @@ export interface RelationActionDeps {
   namedLineages: ReadonlyMap<string, readonly string[]>;
   /** Trigger a panel re-render after a state-mutating action. */
   refresh: () => void | Promise<void>;
-  /** Switch the panel's active named lineage (called by addToLineage). */
-  setCurrentLineage: (name: string) => void;
 }
 
 interface PickedRun {
@@ -160,12 +158,15 @@ export async function createRelation(
 /**
  * Right-click → "Add to lineage…" — pick (or create) a named lineage
  * and append the run's modelPath to its set. Switches the panel view
- * to that lineage so the user sees the result.
+ * to that lineage so the user sees the result. `setCurrentLineage` is
+ * the only panel-mutation callback this action needs; passed inline
+ * rather than via deps since no other relation action consumes it.
  */
 export async function addToLineage(
   deps: RelationActionDeps,
   modelPath: string,
   basename: string,
+  setCurrentLineage: (name: string) => void,
 ): Promise<void> {
   const existing = deps.namedLineages;
   interface Item extends vscode.QuickPickItem {
@@ -216,7 +217,7 @@ export async function addToLineage(
   if (!list.includes(modelPath)) list.push(modelPath);
   next.set(target, list);
   await writeLineages(next);
-  deps.setCurrentLineage(target);
+  setCurrentLineage(target);
   void deps.refresh();
 }
 

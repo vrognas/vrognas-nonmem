@@ -176,7 +176,10 @@ export class LineagePanel {
         return createRelation(deps, m.modelPath, m.basename ?? '');
       if (m.action === 'setParentDirect' && typeof m.parentModelPath === 'string')
         return writeOverride(deps, m.modelPath, m.parentModelPath, m.basename ?? '');
-      if (m.action === 'addToLineage') return addToLineage(deps, m.modelPath, m.basename ?? '');
+      if (m.action === 'addToLineage')
+        return addToLineage(deps, m.modelPath, m.basename ?? '', (name) => {
+          this.currentLineage = name;
+        });
       if (m.action === 'removeFromLineage')
         return removeFromLineage(deps, m.modelPath, m.basename ?? '');
     } else if (m.type === 'refresh') {
@@ -336,9 +339,6 @@ export class LineagePanel {
       // `getConfiguration(...).get(...)` round-trips per action.
       namedLineages: readNamedLineages(),
       refresh: () => this.refresh(),
-      setCurrentLineage: (name) => {
-        this.currentLineage = name;
-      },
     };
   }
 

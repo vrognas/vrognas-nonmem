@@ -7,6 +7,13 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **8th-pass review: 3 LOW fixes (v0.0.219).** Last pass on the review backlog:
+  1. **variables-comm.ts** — dropped the local `formatNumber` (identical bytes to `format-number.ts`'s `formatNumberCompact`) and imported the shared one. The "Keep the implementations in sync" comment in `format-number.ts` was an admission of duplication; now there's one server-side implementation.
+  2. **lineage-relation-actions.ts** — `RelationActionDeps.setCurrentLineage` was used by exactly one action (`addToLineage`). Moved it from deps to the action's parameter list. Smaller `RelationActionDeps` surface; signal that only `addToLineage` mutates the active-lineage selection.
+  3. **fit-inspector client.js** — lifted Chan Kwong 2020's `0.3` tightness factor (was inline in the PV tooltip string) to `PRIOR_TIGHTNESS_FACTOR` module const. Future surface (settings knob, visual `.tight` tier badge) can reference one name instead of grep-hunting the literal.
+
+  Skipped: #21 (`xmlEstimationResults` parsed but only `.length` read) — reviewer's concern was server-side, but the WebView client.js (line 170) uses the full array; remove would break the inspector. #23 (`transformValue` 3-layer fallback) — the `typeof prefs !== 'undefined'` guard is load-bearing for the Node test env's import of `transforms.js` (where `prefs` is undeclared in module scope); simplifying to `prefsArg ?? prefs` would ReferenceError. Comment-level cleanup only.
+
 - **8th-pass review: 8 MEDIUM fixes (v0.0.218).** Continuation of the structural review:
   1. **extension.ts `pushVariables`** — replaced 11 inline `cfg.get<number>(KEY, INSPECTOR_THRESHOLD_DEFAULTS.KEY)` calls with `readInspectorThresholds()` that iterates the defaults object. Adding a new threshold now needs 1 edit (defaults), not 2.
   2. **variables-context.ts `resolveModMode`** — replaced 20-field object literal with `{ ...EMPTY_LST_CONTEXT_FIELDS, model, modUri, runrecord, parameterLabels }`. Adding an lst-mode field stops being a mod-mode mirror edit.

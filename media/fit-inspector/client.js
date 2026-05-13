@@ -2173,6 +2173,15 @@ function impliedInitCell(value) {
 }
 
 /**
+ * Chan Kwong 2020's "tight prior" heuristic: PV ≤ (P · TIGHTNESS_FACTOR)²
+ * corresponds to a prior RSE ≤ TIGHTNESS_FACTOR (e.g. 0.3 → 30% RSE).
+ * Surfaced in the PV tooltip; lifted to a named const so any future
+ * thresholding surface (a settings knob, a visual `.tight` tier badge)
+ * can reference the same value.
+ */
+const PRIOR_TIGHTNESS_FACTOR = 0.3;
+
+/**
  * Build the PV-or-PD cell for a $PRIOR'd row. Picks PV (THETA) or PD
  * (OMEGA/SIGMA) by which field is non-null, renders raw value, and
  * attaches an informativeness-anchor tooltip:
@@ -2200,7 +2209,8 @@ function priorVarOrDfCell(r) {
       'PV (prior variance, normal prior on θ) = ' + fmtNum(r.priorVariance) +
       '. Prior SD = √PV = ' + fmtNum(sd) + '.' + rseLine +
       ' Smaller PV pulls the estimate toward P more strongly. ' +
-      'PV ≥ 1e6 ≈ non-informative; PV ≤ (P·0.3)² ≈ tight (Chan Kwong 2020).';
+      'PV ≥ 1e6 ≈ non-informative; PV ≤ (P·' + PRIOR_TIGHTNESS_FACTOR +
+      ')² ≈ tight (Chan Kwong 2020).';
     // Inline dim badge with the derived prior RSE — saves the user
     // having to hover the tooltip for the most common follow-up
     // question ("how tight is this prior?"). Single line; uses the

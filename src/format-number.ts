@@ -1,6 +1,6 @@
-// Compact number formatter used across both the runtime modules
-// (hover provider, etc.) and conceptually mirrored in the WebView
-// client.js. Keep the implementations in sync — same policy:
+// Compact number formatter used across all server-side modules
+// (variables comm, hover, lst-decoration, …) and conceptually
+// mirrored in the WebView client.js's `fmtNum` (same policy):
 //
 //   - 0 → '0'
 //   - |v| ≥ 1e7 or 0 < |v| < 1e-3 → toExponential(3)

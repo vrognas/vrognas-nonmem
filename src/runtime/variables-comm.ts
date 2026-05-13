@@ -7,6 +7,7 @@
 // the conversation history. All variables are leaves in this cut; bound
 // triples / FIX flags are folded into display_value text.
 
+import { formatNumberCompact } from '../format-number';
 import type {
   NmtranParsedModel,
   NmtranEquation,
@@ -116,18 +117,18 @@ function findDeclLine(decls: { index: number; line?: number }[], index: number):
 }
 
 function thetaDisplay(t: NmtranThetaDecl): string {
-  const initStr = formatNumber(t.init);
+  const initStr = formatNumberCompact(t.init);
   if (t.fix) return `${initStr} (FIX)`;
   if (t.lower !== undefined && t.upper !== undefined) {
-    return `${initStr} (${formatNumber(t.lower)}..${formatNumber(t.upper)})`;
+    return `${initStr} (${formatNumberCompact(t.lower)}..${formatNumberCompact(t.upper)})`;
   }
-  if (t.lower !== undefined) return `${initStr} (>=${formatNumber(t.lower)})`;
-  if (t.upper !== undefined) return `${initStr} (<=${formatNumber(t.upper)})`;
+  if (t.lower !== undefined) return `${initStr} (>=${formatNumberCompact(t.lower)})`;
+  if (t.upper !== undefined) return `${initStr} (<=${formatNumberCompact(t.upper)})`;
   return initStr;
 }
 
 function omegaSigmaDisplay(d: NmtranOmegaSigmaDecl): string {
-  return d.fix ? `${formatNumber(d.value)} (FIX)` : formatNumber(d.value);
+  return d.fix ? `${formatNumberCompact(d.value)} (FIX)` : formatNumberCompact(d.value);
 }
 
 /**
@@ -164,27 +165,13 @@ function equationRow(eq: NmtranEquation): Variable {
     // first so the alphabetic sort groups equations by record. The
     // access_key (used by view-RPC lookup) stays as eq.name.
     displayName: `${eq.block}: ${eq.name}`,
-    displayValue: evaluable ? formatNumber(eq.value!) : eq.rhs,
+    displayValue: evaluable ? formatNumberCompact(eq.value!) : eq.rhs,
     kind: evaluable ? 'number' : 'string',
     nmtranType: eq.block,
     // Equations always carry a line; runtime-session routes the
     // resulting `view` RPC to the editor at eq.line.
     hasViewer: true,
   });
-}
-
-/**
- * Format a number for the Variables-pane display: max 3 decimal places,
- * trailing zeros dropped (so 0.5 not 0.500, integers stay integers),
- * scientific notation for extremes (>= 1e7 or non-zero < 1e-3) so we
- * don't lose all signal on very small / very large values.
- */
-function formatNumber(n: number): string {
-  if (!Number.isFinite(n)) return String(n);
-  if (n === 0) return '0';
-  const abs = Math.abs(n);
-  if (abs >= 1e7 || abs < 1e-3) return n.toExponential(3);
-  return parseFloat(n.toFixed(3)).toString();
 }
 
 function leaf(args: {
