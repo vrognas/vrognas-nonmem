@@ -97,8 +97,8 @@ export class LineagePanel {
   }
 
   private async refresh(): Promise<void> {
+    const named = readNamedLineages();
     try {
-      const named = readNamedLineages();
       const restrict =
         this.currentLineage && named.has(this.currentLineage)
           ? new Set(named.get(this.currentLineage))
@@ -119,7 +119,7 @@ export class LineagePanel {
         type: 'graph',
         graph: this.lastGraph,
         staleOverrides: [],
-        lineages: this.lineagePickerItems(readNamedLineages()),
+        lineages: this.lineagePickerItems(named),
         currentLineage: this.currentLineage,
       });
     }

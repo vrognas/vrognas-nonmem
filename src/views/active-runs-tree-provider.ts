@@ -78,12 +78,15 @@ function describe(run: ActiveRun): string {
     return `running for ${elapsed}`;
   }
   const elapsed = run.finishedAt ? formatDuration(run.finishedAt - run.startedAt) : '';
+  // `.trim()` won't strip a trailing ` · ` if elapsed is empty —
+  // filter out empty parts BEFORE joining so the separator only sits
+  // between real content.
   if (run.state === 'done') {
     const ofv = typeof run.finalOfv === 'number' ? `OFV=${run.finalOfv}` : 'no OFV';
-    return `${ofv} · ${elapsed}`.trim();
+    return [ofv, elapsed].filter(Boolean).join(' · ');
   }
   // failed
-  return `failed · ${elapsed}`.trim();
+  return ['failed', elapsed].filter(Boolean).join(' · ');
 }
 
 function tooltip(run: ActiveRun): string {

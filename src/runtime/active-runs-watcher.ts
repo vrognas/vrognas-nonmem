@@ -169,13 +169,21 @@ export class ActiveRunsWatcher implements vscode.Disposable {
       .list()
       .find((r) => r.state === 'running' && candidateModelPaths.includes(r.modelPath));
     if (!run) return;
+    // Recover modelfitDir up-front: the `runCurrentModel` path registers
+    // tracker entries via the synchronous `tracker.start(modelPath)` call
+    // WITHOUT modelfitDir (PsN hasn't created the dir yet); the watcher's
+    // psn.mod handler matches the existing entry by id but doesn't update
+    // it. Without this hoist, `perRunLst` would be null for those
+    // entries, falling through to the overwritable top-level `.lst` path.
+    const modelfitDir =
+      run.modelfitDir ?? (await findLatestModelfitDir(path.dirname(lstPath)));
     // Race: PsN copies the .lst back to the top-level dir BEFORE copying
     // it under modelfit_dir<N>/. If we mark completed on the top-level
     // event and store that path, a re-run overwrites this entry's
     // history. When we know a `modelfitDir` but the per-run lst doesn't
     // exist yet, defer once and retry at +1 s — by then PsN's copy-back
     // has finished.
-    const perRunLst = run.modelfitDir ? path.join(run.modelfitDir, lstBasename) : null;
+    const perRunLst = modelfitDir ? path.join(modelfitDir, lstBasename) : null;
     const perRunReady = perRunLst ? await pathExists(perRunLst) : false;
     if (perRunLst && !perRunReady && !retried) {
       const t = setTimeout(() => {
@@ -193,7 +201,6 @@ export class ActiveRunsWatcher implements vscode.Disposable {
     } catch {
       // file disappeared between watcher and read; leave OFV null.
     }
-    const modelfitDir = run.modelfitDir ?? (await findLatestModelfitDir(path.dirname(lstPath)));
     this.tracker.markCompleted(run.id, ofv, modelfitDir, preservedLst);
   }
 }

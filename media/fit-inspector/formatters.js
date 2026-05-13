@@ -114,14 +114,13 @@ function fmtPVal(v) {
 
 /**
  * Shrinkage formatted as `XX.XX%`. Two tiers:
- *   - `.bad`  (red)   : `v > thresholds.shrinkageWarnPct` (default 30,
+ *   - `.bad`  (red)   : `v >= thresholds.shrinkageWarnPct` (default 30,
  *                       pharmacometrics red-flag). Configurable via
- *                       `positronNonmem.shrinkageWarnPct`.
- *   - `.warn` (yellow): `v > 20` AND below the bad threshold —
- *                       borderline shrinkage, worth a glance even if
- *                       below the red flag. Hard-coded 20% per
- *                       common pharmacometric convention; not yet
- *                       user-configurable.
+ *                       `nonmem.shrinkageWarnPct`.
+ *   - `.warn` (yellow): `v >= thresholds.shrinkageBorderlineWarnPct`
+ *                       (default 20) AND below the bad threshold —
+ *                       borderline shrinkage. Configurable via
+ *                       `nonmem.shrinkageBorderlineWarnPct`.
  */
 function fmtShrinkage(v) {
   if (typeof v !== 'number' || !isFinite(v)) return null;
@@ -219,12 +218,6 @@ function terminationCodeLabel(c, methodKind) {
   // method context but defensive when it's missing.
   return 'code ' + c;
 }
-
-// `classifyEstimationMethodKind` retired in v0.0.191 — `methodKind`
-// per step is now shipped on the payload from `xml-est-defaults.ts:
-// deriveMethodKind` (single source of truth for the EM-method list).
-// Callers read `payload.diagnostics.xmlEstimationMethodKinds[i]`
-// directly and collapse to binary for `terminationCodeLabel`.
 
 /**
  * `.ext -1000000007` row codes — empirically-probed mapping against

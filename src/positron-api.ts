@@ -37,8 +37,3 @@ export function getPositron(): PositronApi {
   }
   return cached;
 }
-
-/** Reset the cache (for tests only). Not exported from the package. */
-export function __resetPositronApiCache(): void {
-  cached = undefined;
-}

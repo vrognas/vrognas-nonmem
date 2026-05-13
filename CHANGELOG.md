@@ -7,6 +7,24 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **10th-pass review: small bug + MEDIUMs (v0.0.224).** Of the 4 candidate HIGHs only one verified as a real bug; the other three were skipped after re-reading the code (the agents missed mitigations / explicit comments). Six MEDIUMs applied.
+
+  **HIGH (bug):**
+  - **`active-runs-watcher.ts` preservedLst fallback.** When `runCurrentModel` registers a tracker entry via the synchronous `tracker.start(modelPath)` call (no `modelfitDir` yet because PsN hasn't created the dir), the watcher's `psn.mod` handler matched the existing entry by id but didn't update its `modelfitDir`. Then `.lst` handler hit `run.modelfitDir === undefined` → `perRunLst = null` → fell back to the overwritable top-level `.lst` path. Fix: hoist `findLatestModelfitDir` to the top of `handleLstCreate` so `modelfitDir` is recovered before computing `perRunLst`, and let the per-run snapshot path be discovered even when the tracker entry was created without it. Re-uses the same recovered value when calling `tracker.markCompleted`.
+
+  **HIGH (skipped after verification, with rationale):**
+  - **`runtime-manager.ts:80` onDidEndSession Disposable.** Manager.dispose() loops every live session and calls `session.dispose()`, which disposes the per-session emitter and clears its subscribers — no listener leak in practice.
+  - **`runs-tree-provider.ts:82` manual `/` separator.** `vscode.Uri.file()` normalises separators on Windows (`fsPath` returns platform-native form) — not a Windows bug.
+  - **`run-progress.ts:49` SAEM iter regex.** Comment at lines 46-48 explicitly says the bare-integer regex deliberately rejects SAEM/IMP STAT-summary float rows. SAEM iterations themselves ARE integers; only the post-iteration STAT-summary row has been observed with floats.
+
+  **MEDIUMs applied:**
+  - **`positron-api.ts` `__resetPositronApiCache` removed.** Exported "for tests only" but no test imported it. YAGNI delete.
+  - **`formatters.js fmtShrinkage` JSDoc.** Said the warn-tier 20% threshold was "hard-coded, not yet user-configurable" — stale: `nonmem.shrinkageBorderlineWarnPct` shipped earlier and the code reads `thresholds.shrinkageBorderlineWarnPct`. Doc-only.
+  - **`formatters.js classifyEstimationMethodKind` tombstone removed.** v0.0.191 removal — CHANGELOG records it; the 5-line `// retired in v0.0.191` block was just code-rot.
+  - **`trajectory-plot.js` exports narrowed to `renderTrajectories`.** Helpers (`renderTrajectoryStep`, `renderSparklineCell`, `tuneGridColumns`, `renderSparkline`) were exported on extraction but only `renderTrajectories` is the public entry per the file header. No tests imported them. Surface-area cleanup.
+  - **`active-runs-tree-provider.ts describe()` separator handling.** `${ofv} · ${elapsed}`.trim() doesn't strip a trailing ` · ` when `elapsed === ''`. Switched to `[ofv, elapsed].filter(Boolean).join(' · ')` for both the `done` and `failed` branches.
+  - **`lineage-panel.ts refresh()` duplicate `readNamedLineages()` call.** The catch branch re-read the named-lineages config rather than reusing the value already read in the try branch. Hoisted the call before the try/catch.
+
 - **fix: tighten LB/UB columns, widen Label (v0.0.223).** The LB column carried 10% of table width even though it only ever displays `0` / `-3` / the `±1e+06` THETA implicit-bound sentinel (≤6 chars). Mirrored on UB. Shifted 3% from each (LB and UB) into the Label column (16% → 22%), so longer `;<comment>` strings like `Pat omitted_; 10 prop increase Vcol (RRT)` stay readable without hovering for the tooltip. IE keeps 10% — actual initial estimates do run wider (e.g. `37814.69`). Sums still 100%.
 
 - **9th-pass review: BIG refactors — module splits (v0.0.222).** The two large modules that were on the deferred list are now split into focused sub-modules. Behaviour unchanged; surface area for future edits dramatically smaller.

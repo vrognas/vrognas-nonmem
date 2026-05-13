@@ -411,13 +411,10 @@ function renderSparkline(iterations, values, isOfv) {
 // Dual-mode export: WebView shares scope across <script> tags; Node /
 // vitest needs the explicit globalThis mirror so other files (e.g.
 // `client.js`) imported as separate CJS modules can resolve names.
+// Only `renderTrajectories` is the public entry — helpers stay
+// file-local. (If a test ever needs to exercise them directly, export
+// them then.)
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = {
-    renderTrajectories,
-    renderTrajectoryStep,
-    renderSparklineCell,
-    tuneGridColumns,
-    renderSparkline,
-  };
+  module.exports = { renderTrajectories };
   Object.assign(globalThis, module.exports);
 }
