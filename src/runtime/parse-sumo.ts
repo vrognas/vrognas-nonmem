@@ -121,12 +121,19 @@ export function parseSumo(text: string): SumoSummary | null {
       continue;
     }
     detailTarget = null;
-    summary.ofv ??= matchNumber(line, OFV_RE);
-    summary.totalRuntime ??= matchString(line, RUNTIME_RE);
-    summary.estimationSeconds ??= matchNumber(line, ESTTIME_RE);
-    summary.observations ??= matchInt(line, OBS_RE);
-    summary.individuals ??= matchInt(line, IND_RE);
-    summary.conditionNumber ??= matchNumber(line, COND_RE);
+    // Skip already-set fields rather than re-matching their regex on
+    // every line. The previous `??=` chain ran every regex against
+    // every line, even after a field was set — measurable cost on
+    // multi-thousand-line sumo dumps. Per-line we still try every
+    // unset field's regex (`if`, not `else if`) since each line might
+    // match a different field, but we avoid the redundant work once
+    // a field has its value.
+    if (summary.ofv === null) summary.ofv = matchNumber(line, OFV_RE);
+    if (summary.totalRuntime === null) summary.totalRuntime = matchString(line, RUNTIME_RE);
+    if (summary.estimationSeconds === null) summary.estimationSeconds = matchNumber(line, ESTTIME_RE);
+    if (summary.observations === null) summary.observations = matchInt(line, OBS_RE);
+    if (summary.individuals === null) summary.individuals = matchInt(line, IND_RE);
+    if (summary.conditionNumber === null) summary.conditionNumber = matchNumber(line, COND_RE);
   }
 
   // Empty parse → caller's "garbage" signal.

@@ -131,10 +131,13 @@ const TERM_REASON_RE =
 // last value is the stationary acceptance rate after burn-in; that's
 // what pharmacometricians sanity-check (target ~0.20-0.40).
 const ACCEPT_RE = /Mean\s+Acceptance\s+Rate:\s+([\d.]+)/gi;
-const NUM_TOKEN_RE = /^[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?$/;
+// FORTRAN scientific notation — both `E` and `D` exponents
+// (`$EST FORMAT=s1PD15.8` user override). Plain decimals also pass.
+const NUM_TOKEN_RE = /^[-+]?\d*\.?\d+(?:[eEdD][-+]?\d+)?$/;
 
 export type TerminationState = 'SUCCESSFUL' | 'TERMINATED' | 'NOT_TESTED';
 
+import { parseFortranNumber } from './parse-fortran-number';
 import {
   parseInitialOmega,
   parseInitialSigma,
@@ -644,13 +647,13 @@ function readEtabarBlock(lines: string[]): {
   etaN: number[];
   etaPVal: number[];
 } {
-  // Find LAST ETABAR: occurrence (multi-$EST: one per step; we want the final).
+  // Find LAST ETABAR occurrence (multi-$EST: one per step; we want the
+  // final). Forward-scan capturing latest hit — same complexity as the
+  // backward scan but cache-friendlier on large .lsts and matches the
+  // forward-scan idiom used everywhere else in this file.
   let etabarIdx = -1;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (/^\s*ETABAR\s*:?\s+\S/.test(lines[i])) {
-      etabarIdx = i;
-      break;
-    }
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*ETABAR\s*:?\s+\S/.test(lines[i])) etabarIdx = i;
   }
   if (etabarIdx === -1) {
     return { etabar: [], etabarSe: [], etaN: [], etaPVal: [] };
@@ -722,7 +725,7 @@ function readEigenvalues(lines: string[]): number[] {
     const allInts = tokens.every((t) => /^\d+$/.test(t));
     if (allInts && !seenValues) continue; // header column indices
     if (allInts) break; // unexpected; stop rather than mix
-    values.push(...tokens.map(Number).filter(Number.isFinite));
+    values.push(...tokens.map(parseFortranNumber).filter(Number.isFinite));
     seenValues = true;
   }
   return values;
@@ -732,7 +735,7 @@ function extractNumbers(text: string): number[] {
   const out: number[] = [];
   for (const tok of text.trim().split(/\s+/)) {
     if (!NUM_TOKEN_RE.test(tok)) continue;
-    const n = Number(tok);
+    const n = parseFortranNumber(tok);
     if (Number.isFinite(n)) out.push(n);
   }
   return out;

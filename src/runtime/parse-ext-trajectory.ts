@@ -26,7 +26,15 @@ export interface ExtTrajectory {
   paramNames: string[];
   /** Iteration numbers, parallel to each `values[name][i]`. */
   iterations: number[];
-  /** `paramName -> [values per iteration]`, parallel to `iterations`. */
+  /**
+   * `paramName -> [values per iteration]`, parallel to `iterations`.
+   * Non-finite tokens in the source `.ext` (rare — typically only the
+   * `1.79E+308` sentinel NONMEM emits for OBJ in early iterations) are
+   * pushed as `NaN` so the array stays the same length as `iterations`
+   * (parallel-array invariant). Consumers MUST filter non-finite values
+   * before computing aggregates (`Math.min` / `Math.max` propagate NaN;
+   * sparkline rendering already does this filtering in `renderSparkline`).
+   */
   values: Map<string, number[]>;
 }
 

@@ -1,3 +1,5 @@
+import { parseFortranNumber } from './parse-fortran-number';
+
 // Parse `0INITIAL ESTIMATE OF OMEGA:` / `0INITIAL ESTIMATE OF SIGMA:`
 // blocks from a NONMEM `.lst`. NONMEM-authoritative source for what
 // was parsed from the user's `$OMEGA` / `$SIGMA` — covers BLOCK
@@ -77,7 +79,9 @@ function parseInitialMatrix(lstText: string, kind: MatrixKind): InitialMatrix {
   const stopMatch = after.match(/\n0[A-Z]/);
   const body = stopMatch && stopMatch.index !== undefined ? after.slice(0, stopMatch.index) : after;
 
-  const NUM_RE = /[+-]?\d+\.\d+E[+-]?\d+/gi;
+  // FORTRAN scientific notation — accepts both E- and D-exponent
+  // (`$EST FORMAT=s1PD15.8` user override).
+  const NUM_RE = /[+-]?\d+\.\d+[eEdD][+-]?\d+/g;
   let expectedRow = 1;
   for (const rawLine of body.split(/\r?\n/)) {
     const line = rawLine.trim();
@@ -90,7 +94,7 @@ function parseInitialMatrix(lstText: string, kind: MatrixKind): InitialMatrix {
     // counter on partial matches.
     if (nums.length !== expectedRow) continue;
     for (let col = 1; col <= expectedRow; col++) {
-      const v = Number(nums[col - 1]);
+      const v = parseFortranNumber(nums[col - 1]);
       if (Number.isFinite(v)) values.set(`${kind}(${expectedRow},${col})`, v);
     }
     expectedRow++;

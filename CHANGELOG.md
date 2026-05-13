@@ -7,6 +7,32 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **9th-pass review: MEDIUM fixes (v0.0.221).** 10 MEDIUM items applied; 6 deferred or skipped.
+
+  **Parser improvements:**
+  - **#7 — FORTRAN-float consolidation extended.** `parseFortranNumber` (added v0.0.220) now used by `parse-lst.ts` (`NUM_TOKEN_RE` + `extractNumbers` + eigenvalues readout), `parse-lst-finals.ts` (matrix-row tokenisation), and `parse-initial-matrix.ts` (`NUM_RE` regex). `D`-exponent FORTRAN tokens (`$EST FORMAT=s1PD15.8`) now parse uniformly across all 5 parsers.
+  - **#17 — `parse-lst-finals.ts NUMERIC_LINE_RE` tightened.** Was `/^\s*[-+\d.]/` — false-positives on `-DUMP` debug emissions or `+ extra info` continuation lines. Tightened to `/[eEdD][+-]?\d/` — real final-estimate values always carry a scientific exponent.
+  - **#15 — `parse-sumo.ts` regex short-circuit.** Each summary field now skips its regex once set (`if (summary.X === null) summary.X = matchNumber(line, RE)`). Previously the `??=` chain re-evaluated all 6 regexes on every line.
+  - **#16 — `parse-lst.ts` ETABAR forward scan.** Was backward-scanning from `lines.length - 1`; switched to forward-scan capturing the latest hit. Same complexity, cache-friendlier on multi-MB lsts, matches the forward-scan idiom used everywhere else.
+  - **#14 — `parse-ext-trajectory.ts` NaN-in-values documented.** The parallel-array invariant (`iterations[i]` always has a matching value, NaN sentinel for non-finite tokens) was implicit; jsdoc now spells out the consumer-side filter requirement.
+
+  **Payload refactors:**
+  - **#12 — `computeRse` explicit `kind` arg.** Was sniffing `/^(OMEGA|SIGMA)\(/` from the parameter name; callers now pass `'theta' | 'matrix'` directly. Removed the only stringly-typed name-classification in the row builders.
+  - **#13 — `buildPriorMaps(model)` bundle.** 6 standalone `priorIndexMap` calls collapsed into one helper returning `{ theta: { p, pv }, omega: { p, df }, sigma: { p, df } }`. `mergeMatrixRows` + `buildOmegaSigmaRow` drop a positional arg in favour of the typed `MatrixPriorMaps`.
+  - **#18 — Off-diagonal init via `pickInit`.** Was duplicating the lst→ext priority order inline; now calls `pickInit(undefined, name, fit, lstInitial)` directly. One implementation of the rule, no drift risk.
+
+  **Client.js cleanups:**
+  - **#10 — `appendTip(existing, addition)` extracted.** Was 5 inline `tip = (tip || '') + …` sites with a "see other tip-mutation sites" comment explaining the guard. One helper now, applied to all 5; the guard rationale is documented once.
+  - **#21 — `metaLine` array-push style.** Was a closure-over-`any` flag + 5 conditional `append(node)` calls. Now collects into a `parts: Node[]` array and joins at the end — matches the `qualityParts` style used elsewhere in the same file.
+
+  **Skipped:**
+  - **#8 (TABLE-block iterator across 4 parsers)** — substantive refactor, defer to a focused parser-consolidation session.
+  - **#9 (`buildInspectorPayload` split into rows / diagnostics sub-modules)** — large refactor (~500 lines moved), defer.
+  - **#11 (`xmlEstimationTiers[i]` parallel-array assertion)** — adding an assertion would break the inspector for any minor parse glitch; upstream parser invariant is the right place.
+  - **#19 (`empty`-detection ladder generalised)** — the 18-clause `&&` chain has heterogeneous field types (numbers, arrays, strings, booleans); a generic `isEmpty` helper would either over-trigger (treating `hasOde: false` as "empty") or replicate the same per-field logic in a less-readable form.
+  - **#20 (`tuneGridColumns` style-width reset)** — YAGNI: the function isn't called twice on the same DOM today; reviewer flagged as a future trap.
+  - **#22 (split `client.js` into trajectory / invisible-attrs / diagnostics sub-modules)** — large refactor, defer.
+
 - **9th-pass review: 6 HIGH-severity fixes (v0.0.220).** Deep dive into the next layer (large modules + parsers):
   1. **fit-inspector-payload.ts** — `Math.min(...eigs)` / `Math.max(...eigs)` replaced with single-pass `reduce`. The spread-as-args form hits V8's ~65535-argument limit; multi-compartment models with large OMEGA BLOCKs can produce more eigenvalues than that.
   2. **client.js termination cells** — `xmlResult.terminationStatus !== null` (and same on `burninTime` / `elapsedTime`) tightened to `typeof === 'number'`. Older payloads / missing XML attrs ship `undefined`; the `!== null` check let them through, then `terminationCodeLabel(undefined, …)` rendered "termination: undefined" as a red cell.

@@ -602,12 +602,7 @@ export function buildInspectorPayload(
   };
   // Prior-lookup maps: keyed by 1-based parameter index. Defined once
   // per build call so the row builders don't `find()` linearly per row.
-  const thetaPriorByIdx = priorIndexMap(model.thetaPriors);
-  const thetaPriorVarByIdx = priorIndexMap(model.thetaPriorVariances);
-  const omegaPriorByIdx = priorIndexMap(model.omegaPriors);
-  const omegaPriorDfByIdx = priorIndexMap(model.omegaPriorDfs);
-  const sigmaPriorByIdx = priorIndexMap(model.sigmaPriors);
-  const sigmaPriorDfByIdx = priorIndexMap(model.sigmaPriorDfs);
+  const priors = buildPriorMaps(model);
 
   const thetas: InspectorRow[] = filteredThetas.map((t) => {
     const name = `THETA(${t.index})`;
@@ -630,7 +625,7 @@ export function buildInspectorPayload(
       finalStdcorr: null,
       se,
       seStdcorr: null,
-      rse: computeRse(name, final, se),
+      rse: computeRse('theta', final, se),
       rseStdcorr: null,
       // .ext `-1000000006` is authoritative when present (NONMEM-direct);
       // fall back to vscode-nmtran's parsed-model `t.fix` flag otherwise.
@@ -638,8 +633,8 @@ export function buildInspectorPayload(
       numSigDig: numSigDigByName.get(name) ?? null,
       declLine: t.line ?? null,
       boundary: computeBoundary(final, t.lower ?? null, t.upper ?? null, t.fix, true),
-      priorValue: thetaPriorByIdx.get(t.index) ?? null,
-      priorVariance: thetaPriorVarByIdx.get(t.index) ?? null,
+      priorValue: priors.theta.p.get(t.index) ?? null,
+      priorVariance: priors.theta.pv.get(t.index) ?? null,
       priorDf: null,
     };
   });
@@ -658,8 +653,7 @@ export function buildInspectorPayload(
     numSigDigByName,
     initialOmega,
     omegaLabels,
-    omegaPriorByIdx,
-    omegaPriorDfByIdx,
+    priors.omega,
   );
   const sigmas = mergeMatrixRows(
     'SIGMA',
@@ -668,8 +662,7 @@ export function buildInspectorPayload(
     numSigDigByName,
     initialSigma,
     sigmaLabels,
-    sigmaPriorByIdx,
-    sigmaPriorDfByIdx,
+    priors.sigma,
   );
 
   return {
@@ -815,20 +808,10 @@ function mergeMatrixRows(
   numSigDigByName: Map<string, number>,
   lstInitial: Map<string, number>,
   labels: ReadonlyMap<number, string>,
-  priorByIdx: ReadonlyMap<number, number>,
-  priorDfByIdx: ReadonlyMap<number, number>,
+  priors: MatrixPriorMaps,
 ): InspectorRow[] {
   const rows = diagonals.map((d) =>
-    buildOmegaSigmaRow(
-      d,
-      prefix,
-      fit,
-      numSigDigByName,
-      lstInitial,
-      labels,
-      priorByIdx,
-      priorDfByIdx,
-    ),
+    buildOmegaSigmaRow(d, prefix, fit, numSigDigByName, lstInitial, labels, priors),
   );
   if (fit) rows.push(...offDiagonalRows(prefix, fit, numSigDigByName, lstInitial));
   rows.sort(compareMatrixRows);
@@ -845,24 +828,19 @@ function offDiagonalRows(
   for (const [name] of fit.finals) {
     const idx = parseMatrixIndex(name);
     if (!idx || !name.startsWith(prefix) || idx.row === idx.col) continue;
-    // Init source preference for off-diagonals:
-    //   1. `.lst` `0INITIAL ESTIMATE OF OMEGA` echo (NONMEM-authoritative
-    //      view of the user's `$OMEGA BLOCK` numbers — what we want).
-    //   2. `.ext` iteration-0 (NONMEM's runtime starting matrix; for
-    //      SAEM this is the *perturbed* matrix, not the user's input,
-    //      so flag it as `impliedInit: true` to render muted).
-    const fromLst = lstInitial.get(name);
-    const hasLst = typeof fromLst === 'number' && Number.isFinite(fromLst);
-    const init = hasLst ? fromLst : (fit.inits.get(name) ?? null);
+    // Off-diagonals have no .mod source for the init — `pickInit` with
+    // `modelValue: undefined` falls through its lst → ext priority
+    // tiers (same as diagonals) so both paths share one set of fallback
+    // rules instead of two implementations drifting apart.
+    const initPick = pickInit(undefined, name, fit, lstInitial);
     rows.push(
       makeOmegaSigmaRow({
         index: idx.row,
         name,
         // No .mod source for off-diagonals -> no inline comment label.
         label: null,
-        init,
-        // Implicit only when we fell through to .ext (lst echo absent).
-        impliedInit: !hasLst && init !== null,
+        init: initPick.value,
+        impliedInit: initPick.implicit,
         // Off-diagonal FIX-flag inheritance from `$OMEGA BLOCK ... FIX`
         // isn't recoverable from .lst echo (the FIXED column is per-block,
         // not per-element); keep `false` until we parse it explicitly.
@@ -900,7 +878,11 @@ function computeRseStdcorr(final: number | null, se: number | null): number | nu
   return se / Math.abs(final);
 }
 
-function computeRse(name: string, final: number | null, se: number | null): number | null {
+function computeRse(
+  kind: 'theta' | 'matrix',
+  final: number | null,
+  se: number | null,
+): number | null {
   // NONMEM emits SE=0 for parameters that COV didn't infer — typically
   // FIXED params (no inference attempted) but also some boundary or
   // unidentifiable cases. Treating that as a valid 0% RSE is wrong:
@@ -909,8 +891,10 @@ function computeRse(name: string, final: number | null, se: number | null): numb
   // zero ($COV step skipped/failed); this guard handles the per-param
   // case where the row is mixed.
   if (final === null || se === null || se === 0 || final === 0) return null;
-  const isOmegaOrSigma = /^(OMEGA|SIGMA)\(/.test(name);
-  const factor = isOmegaOrSigma ? 0.5 : 1;
+  // OMEGA / SIGMA: report on the SD scale per sumo's default
+  // `sd_rse=1` convention — `cvse / 2` where cvse = SE / |estimate|.
+  // Caller passes the kind explicitly so we don't regex-sniff names.
+  const factor = kind === 'matrix' ? 0.5 : 1;
   return (se / Math.abs(final)) * factor;
 }
 
@@ -1150,8 +1134,7 @@ function buildOmegaSigmaRow(
   numSigDigByName: Map<string, number>,
   lstInitial: Map<string, number>,
   labels: ReadonlyMap<number, string>,
-  priorByIdx: ReadonlyMap<number, number>,
-  priorDfByIdx: ReadonlyMap<number, number>,
+  priors: MatrixPriorMaps,
 ): InspectorRow {
   const name = `${prefix}(${d.index},${d.index})`;
   const initPick = pickInit(d.value, name, fit, lstInitial);
@@ -1165,9 +1148,48 @@ function buildOmegaSigmaRow(
     line: d.line ?? null,
     fit,
     numSigDigByName,
-    priorValue: priorByIdx.get(d.index) ?? null,
-    priorDf: priorDfByIdx.get(d.index) ?? null,
+    priorValue: priors.p.get(d.index) ?? null,
+    priorDf: priors.df.get(d.index) ?? null,
   });
+}
+
+interface MatrixPriorMaps {
+  /** Prior mode by 1-based diagonal index (from `$OMEGAP` / `$SIGMAP`). */
+  p: ReadonlyMap<number, number>;
+  /** Degrees of freedom by 1-based diagonal index (from `$OMEGAPD` / `$SIGMAPD`). */
+  df: ReadonlyMap<number, number>;
+}
+interface ThetaPriorMaps {
+  /** Prior mean by 1-based theta index (from `$THETAP`). */
+  p: ReadonlyMap<number, number>;
+  /** Prior variance by 1-based theta index (from `$THETAPV`). */
+  pv: ReadonlyMap<number, number>;
+}
+
+/**
+ * Build the per-kind prior-lookup bundle. One pass through each of the
+ * 6 source arrays on `model`; callers carry one object instead of six
+ * standalone maps.
+ */
+function buildPriorMaps(model: NmtranParsedModel): {
+  theta: ThetaPriorMaps;
+  omega: MatrixPriorMaps;
+  sigma: MatrixPriorMaps;
+} {
+  return {
+    theta: {
+      p: priorIndexMap(model.thetaPriors),
+      pv: priorIndexMap(model.thetaPriorVariances),
+    },
+    omega: {
+      p: priorIndexMap(model.omegaPriors),
+      df: priorIndexMap(model.omegaPriorDfs),
+    },
+    sigma: {
+      p: priorIndexMap(model.sigmaPriors),
+      df: priorIndexMap(model.sigmaPriorDfs),
+    },
+  };
 }
 
 /**
@@ -1214,7 +1236,7 @@ function makeOmegaSigmaRow(args: {
     finalStdcorr,
     se,
     seStdcorr,
-    rse: computeRse(args.name, final, se),
+    rse: computeRse('matrix', final, se),
     rseStdcorr: computeRseStdcorr(finalStdcorr, seStdcorr),
     // Prefer .ext `-1000000006` flag over the diagonal-only .mod-parsed
     // value: the .ext flag covers BLOCK matrix off-diagonals too (.mod

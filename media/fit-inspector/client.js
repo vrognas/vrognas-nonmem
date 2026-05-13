@@ -1258,6 +1258,17 @@ const TIER_TIPS = {
  * Doesn't apply special-case decorations — callers decorate on top
  * (NOABORT/NOHABORT, wire-vs-runtime, PsN-wrapper, MATRIX=R quirks).
  */
+/**
+ * Append `addition` to a tooltip string, handling the case where
+ * `existing` is undefined (no tier matched + no synth entry — see
+ * `classifyAttrTier`). Otherwise `tip += addition` would yield
+ * "undefined …" as the prefix. Used by the $EST / $COV attr-cell
+ * decorations that layer extra context on top of the base tier tip.
+ */
+function appendTip(existing, addition) {
+  return (existing || '') + addition;
+}
+
 function classifyAttrTier(k, synthEntry, tierMap, docDefaultMap, scope) {
   const tips = TIER_TIPS[scope];
   let cls = 'xml-options-val';
@@ -1322,7 +1333,7 @@ function buildEstAttrCell(ctx) {
     } else if (userWroteNoabort) {
       tip = 'NOABORT: theta-recovery + force most non-PD Hessian matrices to be PD. (XML wire: abort=\'no\' — same as NOHABORT)';
     } else {
-      tip = (tip || '') + ' (XML wire abort=\'no\' is shared by NOABORT and NOHABORT; .lst echo absent — can\'t disambiguate.)';
+      tip = appendTip(tip, ' (XML wire abort=\'no\' is shared by NOABORT and NOHABORT; .lst echo absent — can\'t disambiguate.)');
     }
   }
 
@@ -1333,7 +1344,7 @@ function buildEstAttrCell(ctx) {
   const resolved = resolveEstAttrFromLst(k, merged[k], tolerances);
   if (resolved && resolved !== merged[k]) {
     displayValue = resolved;
-    tip = (tip || '') + ' (XML wire: \'' + merged[k] + '\' — sentinel for the built-in default; effective runtime value ' + resolved + ' from .lst trace.)';
+    tip = appendTip(tip, ' (XML wire: \'' + merged[k] + '\' — sentinel for the built-in default; effective runtime value ' + resolved + ' from .lst trace.)');
   }
 
   // PsN-wrapper detection on `file` attr: PsN's execute rewrites
@@ -1342,7 +1353,7 @@ function buildEstAttrCell(ctx) {
   // — a user who genuinely typed FILE=psn.ext (unusual but valid)
   // shouldn't see the wrapper note.
   if (k === 'file' && /^psn\.ext$/i.test(merged[k]) && tierMap[k] === 'implicit') {
-    tip = (tip || '') + ' (PsN\'s execute wrapper rewrites the FILE= option to psn.ext in the wrapped control stream — not the modeller\'s choice.)';
+    tip = appendTip(tip, ' (PsN\'s execute wrapper rewrites the FILE= option to psn.ext in the wrapped control stream — not the modeller\'s choice.)');
   }
 
   return { cls, tip, displayValue };
@@ -1360,12 +1371,11 @@ function buildCovAttrCell(ctx) {
   let { cls, tip } = classifyAttrTier(k, synthEntry, tiersMap, INVISIBLE_COV_DEFAULTS, 'cov');
 
   // MATRIX=R + SPECIAL quirk: NM silently suppresses SPECIAL when
-  // MATRIX=R is in effect. The user typed it; NM ignored it.
-  // `(tip || '') +` guard mirrors all other tip-mutation sites — when
-  // classifyAttrTier produced no string (no tier hit + no synth match),
-  // raw `+=` would yield the literal "undefined" prefix in the tooltip.
+  // MATRIX=R is in effect. The user typed it; NM ignored it. The
+  // `appendTip` helper handles the undefined-tip case (no tier hit
+  // + no synth match) so raw `+=` can't yield "undefined …" prefix.
   if (synthEntry !== undefined && synthEntry.isUserSet && k === 'special' && matrixIsR) {
-    tip = (tip || '') + ' WARNING: NM silently ignores SPECIAL when MATRIX=R is used (empirically verified, NM 7.6.0; Bauer\'s docs warn against this combination). Setting has no effect.';
+    tip = appendTip(tip, ' WARNING: NM silently ignores SPECIAL when MATRIX=R is used (empirically verified, NM 7.6.0; Bauer\'s docs warn against this combination). Setting has no effect.');
   }
 
   // Wire→runtime translation (sentinel values → resolved).
@@ -1373,7 +1383,7 @@ function buildCovAttrCell(ctx) {
   const resolved = resolvedMap[k] || resolveCovAttrFromLst(k, merged[k], lstTolerances);
   if (resolved && resolved !== merged[k]) {
     displayValue = resolved;
-    tip = (tip || '') + ' (XML wire: \'' + merged[k] + '\' — sentinel; effective runtime value ' + resolved + ' — inherited from $EST / $SUBROUTINES / method default.)';
+    tip = appendTip(tip, ' (XML wire: \'' + merged[k] + '\' — sentinel; effective runtime value ' + resolved + ' — inherited from $EST / $SUBROUTINES / method default.)');
   }
 
   return { cls, tip, displayValue };
@@ -1690,19 +1700,13 @@ function renderSummary(s) {
  * (eigenvalue line); sig-digits moved to the OFV headline.
  */
 function metaLine(sumo, lst, cnvVerdict) {
-  const wrap = document.createElement('span');
-  wrap.className = 'meta';
-  let any = false;
-  const append = (node) => {
-    if (any) wrap.append(' · ');
-    else wrap.append('· ');
-    wrap.append(node);
-    any = true;
-  };
+  // Collect parts then join — same style as `qualityParts` elsewhere
+  // in this file. Avoids the closure-over-mutable-flag pattern.
+  const parts = [];
   if (sumo && sumo.totalRuntime) {
     let s = 'runtime ' + sumo.totalRuntime;
     if (typeof sumo.estimationSeconds === 'number') s += ' (est ' + fmtNum(sumo.estimationSeconds) + 's)';
-    append(document.createTextNode(s));
+    parts.push(document.createTextNode(s));
   }
   // sig-digits moved to OFV headline (info-about-the-result, co-located
   // with the result). cond moved to diagnostics (alongside eigenvalues +
@@ -1726,20 +1730,27 @@ function metaLine(sumo, lst, cnvVerdict) {
       : v.converged
         ? 'All tested parameters and the OFV have stable slopes (p ≥ α) over the last CITER iterations.'
         : 'OFV slope unstable (p < α). Per-parameter slopes ok.';
-    append(metaPart(label, kind, tip));
+    parts.push(metaPart(label, kind, tip));
   }
   // SAEM / BAYES: stationary acceptance rate. No threshold-coloring —
   // healthy range varies by sampler. Surface as plain text.
   if (lst && typeof lst.acceptanceRate === 'number') {
-    append(document.createTextNode('accept ' + fmtNum(lst.acceptanceRate)));
+    parts.push(document.createTextNode('accept ' + fmtNum(lst.acceptanceRate)));
   }
   if (sumo && typeof sumo.observations === 'number') {
-    append(document.createTextNode(sumo.observations + ' obs'));
+    parts.push(document.createTextNode(sumo.observations + ' obs'));
   }
   if (sumo && typeof sumo.individuals === 'number') {
-    append(document.createTextNode(sumo.individuals + ' subj'));
+    parts.push(document.createTextNode(sumo.individuals + ' subj'));
   }
-  return any ? wrap : null;
+  if (parts.length === 0) return null;
+  const wrap = document.createElement('span');
+  wrap.className = 'meta';
+  parts.forEach((p, i) => {
+    wrap.append(i === 0 ? '· ' : ' · ');
+    wrap.append(p);
+  });
+  return wrap;
 }
 
 /**

@@ -57,8 +57,12 @@ const CORR_HEADER_RE = /CORR MATRIX FOR RANDOM EFFECTS/;
 const PLUS_VALUES_RE = /^\s*\+\s*(.*)$/;
 // `ETA1` / `EPS1` etc — row label preceding the `+` line.
 const ROW_LABEL_RE = /^\s*(ETA|EPS)(\d+)\s*$/;
-// `         8.87E-01 -2.13E+00 ...` — bare numeric line (THETA values).
-const NUMERIC_LINE_RE = /^\s*[-+\d.]/;
+// `         8.87E-01 -2.13E+00 ...` — bare numeric matrix line. Real
+// final-estimate values always carry a scientific exponent (NONMEM
+// emits `s1PE15.8` / `s1PD15.8` formats); requiring `[eEdD]` rejects
+// stray header/footer/comment lines that happen to begin with a digit
+// (e.g. `-DUMP` debug emissions, `+ extra info` continuation echoes).
+const NUMERIC_LINE_RE = /[eEdD][+-]?\d/;
 // FORTRAN form-feed marker — `1` in column 0 starts a new page in NONMEM
 // output. Appears between OMEGA-COV and OMEGA-CORR blocks; without this
 // check the continuation-line logic would treat the bare `1` as an extra
@@ -98,6 +102,7 @@ export interface LstFinalEstimates {
  * init-only path).
  */
 import type { ExtEstimates } from './parse-ext-fit';
+import { parseFortranNumber } from './parse-fortran-number';
 
 export function synthesizeFitFromLst(
   lstText: string,
@@ -344,7 +349,7 @@ function parseNumberLine(line: string): number[] {
       out.push(NaN); // "not computed" marker
       continue;
     }
-    const n = Number(t);
+    const n = parseFortranNumber(t);
     if (Number.isFinite(n)) out.push(n);
   }
   return out;
