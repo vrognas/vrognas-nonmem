@@ -7,6 +7,8 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **fix: shrink IE to 8%, widen Label to 28% (v0.0.227).** Further on v0.0.226: IE 10% → 8%, Label 26% → 28%. Most pharmacometric initial estimates are short (`0.5`, `10`, `2.5`, `50`); the `37814.69` edge case wraps. Sum still 100%.
+
 - **fix: tighten LB/UB further; widen Label more (v0.0.226).** v0.0.223 dropped LB/UB from 10% → 7% and grew Label from 16% → 22%, but THETA labels at typical pane widths still ellipsised while the LB column showed whitespace beside its narrow content (`0`, `-3`, em-dash for OMEGA/SIGMA). Shifted another 4% — LB/UB 7% → 5% each, Label 22% → 26%. Rare wide sentinels like `-1000000` (THETA with explicit implicit-bound) will wrap rather than fit on one line; the user-screenshot case where labels truncate is the common case worth optimising for. Sum still 100%.
 
 - **11th-pass review: TABLE-block iterator + test hygiene + 2 small bugs (v0.0.225).** After 10 prior passes the obvious-bug rate is near zero; this pass focuses on the deferred `#8` refactor and test-suite hygiene.

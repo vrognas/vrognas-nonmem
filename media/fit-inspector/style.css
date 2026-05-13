@@ -519,17 +519,17 @@ table.param-table {
   min-width: 460px;
 }
 table.param-table .col-num    { width: 5%; }
-table.param-table .col-label  { width: 26%; }
+table.param-table .col-label  { width: 28%; }
 /* LB / UB carry "0", "-3", or em-dash (OMEGA/SIGMA — vscode-nmtran
    doesn't expose those bounds). 5% is enough for those at typical pane
    widths. Wide sentinels like `-1000000` (THETA with an explicit
    implicit-bound) WILL wrap to two lines — accepted trade-off, the
    common case is short content and label readability is the priority.
-   IE retains 10% — actual initial estimates can run wider (e.g.
-   `37814.69`). */
+   IE: 8% covers typical pharmacometric initial estimates (`0.5`, `10`,
+   `2.5`). Wider values (`37814.69`) wrap; rare. */
 table.param-table .col-lb,
 table.param-table .col-ub     { width: 5%; }
-table.param-table .col-ie     { width: 10%; }
+table.param-table .col-ie     { width: 8%; }
 table.param-table .col-fe     { width: 13%; }
 table.param-table .col-rse    { width: 14%; }
 table.param-table .col-nsd    { width: 6%; }
