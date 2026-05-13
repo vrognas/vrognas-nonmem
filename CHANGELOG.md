@@ -7,6 +7,20 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **9th-pass review: BIG refactors — module splits (v0.0.222).** The two large modules that were on the deferred list are now split into focused sub-modules. Behaviour unchanged; surface area for future edits dramatically smaller.
+
+  **`fit-inspector-payload.ts` (1305 → 730 lines):**
+  - `fit-inspector-rows.ts` (443 lines) — row-construction surface: `pickInit`, `filterByExtColumns`, `pairNumSigDig`, `buildThetaRow`, `mergeMatrixRows`, `buildPriorMaps`, plus the private `offDiagonalRows` / `buildOmegaSigmaDiagRow` / `makeOmegaSigmaRow` / `computeRse` / `computeRseStdcorr` / `compareMatrixRows` / `parseMatrixIndex` / `priorIndexMap` / `computeBoundary` helpers. The inline THETA-row block in `buildInspectorPayload` collapsed from 35 lines to a 7-line `buildThetaRow` call.
+  - `fit-inspector-diagnostics.ts` (215 lines) — `BuildDiagnosticsArgs` + `buildDiagnostics`. Self-contained: takes one object, emits `InspectorDiagnostics | null`, owns the empty-block detection ladder + the per-step XML-options tier classification + $COV wire→runtime resolution.
+
+  **`media/fit-inspector/client.js` (2384 → 1769 lines):**
+  - `xml-invisible-attrs.js` (296 lines) — pure data + pure functions for the invisible $EST / $COV attribute synthesis pipeline: `INVISIBLE_ATTR_DEFS` / `INVISIBLE_ATTR_DEFAULTS` / `INVISIBLE_ATTR_PATTERNS` / `INVISIBLE_COV_DEFAULTS` / `INVISIBLE_COV_PATTERNS` / `INVISIBLE_TOKEN_PATTERNS` plus `synthesizeFromTokens` / `synthesizeInvisibleAttrs` / `synthesizeInvisibleCovAttrs` / `attrAppliesToContext` / `extractValue` / `resolveEstAttrFromLst` / `resolveCovAttrFromLst` / `isInvisibleToken`.
+  - `trajectory-plot.js` (423 lines) — convergence-trajectory subsystem: `renderTrajectories` + `renderTrajectoryStep` + `renderSparklineCell` + `tuneGridColumns` + `renderSparkline`. Self-contained SVG/DOM block with its own start-iter slider + rAF coalescing.
+
+  Both .js extractions use dual-mode `module.exports + Object.assign(globalThis, …)` so vitest sees the same global resolution the WebView gets from shared `<script>` scope. `client.js` adds a `if (typeof require ...)` bridge at the top that requires `xml-invisible-attrs.js` in Node mode, since the cell-builder tests transitively need its constants on globalThis. `fit-inspector-provider.ts` loads both new scripts BEFORE `client.js` (order matters: function references resolve at call-time via globalThis).
+
+  **Deferred (still): `#8`** (TABLE-block iterator across 4 parsers — substantive refactor, separate session).
+
 - **9th-pass review: MEDIUM fixes (v0.0.221).** 10 MEDIUM items applied; 6 deferred or skipped.
 
   **Parser improvements:**

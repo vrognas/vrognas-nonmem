@@ -101,8 +101,9 @@ export class FitInspectorProvider implements vscode.WebviewViewProvider {
 
   /**
    * Build the WebView HTML via the shared `buildWebviewShell` helper.
-   * Order matters: `formatters.js` and `transforms.js` define helper
-   * functions that `client.js` calls at top level, so they load first.
+   * Order matters: `formatters.js`, `transforms.js`, and
+   * `xml-invisible-attrs.js` define helper functions + global constants
+   * that `client.js` calls at top level, so they load first.
    */
   private renderHtml(webview: vscode.Webview): string {
     const asset = (...parts: string[]): vscode.Uri =>
@@ -112,6 +113,8 @@ export class FitInspectorProvider implements vscode.WebviewViewProvider {
       scripts: [
         asset('media', 'fit-inspector', 'formatters.js'),
         asset('media', 'fit-inspector', 'transforms.js'),
+        asset('media', 'fit-inspector', 'xml-invisible-attrs.js'),
+        asset('media', 'fit-inspector', 'trajectory-plot.js'),
         asset('media', 'fit-inspector', 'client.js'),
       ],
       body: '<div id="root"></div>',
