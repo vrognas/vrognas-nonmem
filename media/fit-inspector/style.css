@@ -546,47 +546,43 @@ table.param-table td.col-prior,
 table.param-table td.col-prior-var {
   overflow: hidden;
 }
-/* Fluid table layout: fill the inspector pane (no fixed pixel width
-   wastes pane width) but keep `table-layout: fixed` so per-column
-   widths are honoured. Class-based widths (.col-*) sum to ~100% across
-   the 9 possible columns so alignment is preserved across THETA /
-   OMEGA / SIGMA tables. When Label is dropped (most models lack
-   inline comments), other columns proportionally absorb the freed
-   space. */
+/* Fluid table layout: numeric columns get FIXED `ch`-based widths
+   sized to fit typical worst-case pharmacometric values. The Label
+   column is the only `width: auto` column — it absorbs all the slack
+   when the pane is wider than the sum of numeric columns, and clips
+   with ellipsis when narrower. Pane-resize affects ONLY the Label
+   column, so numeric alignment across THETA / OMEGA / SIGMA stays
+   stable. `ch` (width of "0" in the current font) scales with the
+   editor's font size and is exact for monospace; combined with
+   `font-family: var(--vscode-editor-font-family, monospace)` on
+   `<table>` (above), every numeric cell sizes predictably. */
 table.param-table {
   table-layout: fixed;
   width: 100%;
-  /* Floor below which columns can't compress without overlap.
-     Empirically: `1e+06` lower-bound + `1e+06` upper-bound + 9 columns
-     × ~50 px each ≈ 450 px. Below this, the body scrolls horizontally
-     (see `body { overflow-x: auto }`); above it, the percentage
-     widths distribute the extra space proportionally. */
-  min-width: 460px;
+  /* Floor below which the body scrolls horizontally (see
+     `body { overflow-x: auto }`). Sized to fit the numeric columns
+     for the widest column set (THETA lst-mode with priors) plus a
+     small Label remnant; below this, horizontal scroll on body. */
+  min-width: 560px;
 }
-table.param-table .col-num    { width: 5%; }
-table.param-table .col-label  { width: 28%; }
-/* LB / UB carry "0", "-3", or em-dash (OMEGA/SIGMA — vscode-nmtran
-   doesn't expose those bounds). 5% is enough for those at typical pane
-   widths. Wide sentinels like `-1000000` (THETA with an explicit
-   implicit-bound) WILL wrap to two lines — accepted trade-off, the
-   common case is short content and label readability is the priority.
-   IE: 8% covers typical pharmacometric initial estimates (`0.5`, `10`,
-   `2.5`). Wider values (`37814.69`) wrap; rare. */
+/* Numeric column widths. All `ch` units so they scale with the editor
+   font and stay invariant under pane resize. Sized for worst-case
+   pharmacometric values + 8px right-padding per cell (set on `td`). */
+table.param-table .col-num        { width: 3ch;  }
 table.param-table .col-lb,
-table.param-table .col-ub     { width: 5%; }
-table.param-table .col-ie     { width: 8%; }
-table.param-table .col-fe     { width: 13%; }
-table.param-table .col-rse    { width: 14%; }
-table.param-table .col-nsd    { width: 6%; }
-table.param-table .col-shrink { width: 16%; }
-/* Prior columns: only present when `$PRIOR` records are declared. Two
-   columns — P (mean / mode) and PV (THETA variance) / PD (OMEGA/SIGMA
-   degrees of freedom). Same width regardless of kind so the position
-   stays vertically aligned across the THETA / OMEGA / SIGMA tables. */
-table.param-table .col-prior      { width: 10%; }
-/* PV column wider to accommodate `<value> (<rse>%)` without the value
-   overlapping the badge at narrow pane widths. */
-table.param-table .col-prior-var  { width: 16%; }
+table.param-table .col-ub         { width: 7ch;  } /* `-1e+06` / `1e+06` */
+table.param-table .col-ie,
+table.param-table .col-fe         { width: 9ch;  } /* `1.807e+35` / `37814.69` */
+table.param-table .col-rse        { width: 14ch; } /* `1234.56%` + badge slack */
+table.param-table .col-nsd        { width: 5ch;  } /* `100.0` */
+table.param-table .col-shrink     { width: 14ch; } /* `12.34% (warn)` */
+table.param-table .col-prior      { width: 10ch; }
+table.param-table .col-prior-var  { width: 16ch; } /* value + `(rse%)` badge */
+/* Label column is the elastic one — `auto` absorbs the pane's leftover
+   space. Combined with `overflow: hidden` + `text-overflow: ellipsis`
+   on `td.col-label` (above) this means widening the pane grows the
+   Label column, narrowing it truncates the label. */
+table.param-table .col-label      { width: auto; }
 /* `<value> (<badge>)` cells: badge is inline-block with min-width +
    left-align, so all badges occupy the same horizontal space
    regardless of `(7%)` vs `(123%)`. Combined with the cell's right
