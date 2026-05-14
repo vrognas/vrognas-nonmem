@@ -583,6 +583,26 @@ table.param-table .col-prior-var  { width: 16ch; } /* value + `(rse%)` badge */
    on `td.col-label` (above) this means widening the pane grows the
    Label column, narrowing it truncates the label. */
 table.param-table .col-label      { width: auto; }
+/* Decimal-point alignment for numeric cells. Each numeric value is
+   rendered (in rowEl) as <span.num-int>integer</span><span.num-frac>
+   .fraction</span>. The integer span right-anchors against the
+   fraction span's left edge; the fraction span is left-aligned and
+   carries a per-column `min-width` so its leading `.` sits at the
+   same X across rows. For integer-only values (`0`, `1e+06`) the
+   fraction span is empty but still occupies the reserved space — the
+   integer's right edge anchors at the decimal column position so
+   integers visually align with decimals at the same offset. */
+table.param-table .num-int  { display: inline-block; text-align: right; }
+table.param-table .num-frac { display: inline-block; text-align: left; }
+/* Per-column fraction-span min-widths. IE / FE / Prior carry typical
+   3-decimal pharmacometric values (`0.500`, `242.706`), so 4ch
+   accommodates `.NNN` + the leading dot. Other columns (LB / UB /
+   NSD / Shrink) keep `min-width` unset (defaults to content-width)
+   so integer-only or short-fraction values render the same as
+   before — no extra padding when there's no decimal-align benefit. */
+table.param-table .col-ie    .num-frac,
+table.param-table .col-fe    .num-frac,
+table.param-table .col-prior .num-frac { min-width: 4ch; }
 /* `<value> (<badge>)` cells: badge is inline-block with min-width +
    left-align, so all badges occupy the same horizontal space
    regardless of `(7%)` vs `(123%)`. Combined with the cell's right

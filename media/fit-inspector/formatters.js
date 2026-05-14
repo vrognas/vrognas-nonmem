@@ -20,14 +20,21 @@
  * the inspector. Behaviour:
  *   - non-finite       → `String(v)` (mostly to surface `NaN` instead of silent em-dash)
  *   - 0                → `"0"`
- *   - |v| ≥ 1e7 or < 1e-3 → exponential with 3 significant digits
- *   - else              → up to 3 decimals, trailing zeros stripped
+ *   - |v| ≥ 1e100 or < 1e-99 → exponential with 0 mantissa decimals
+ *     (`2.019e+262` would otherwise be 10 chars and overflow the IE /
+ *     FE / Prior column; collapse to `2e+262` (6 chars). Full
+ *     precision lives in the cell's `title` attribute — rowEl sets
+ *     it from `String(v)` for number cells so hover reveals
+ *     `2.0186e+262` or similar.)
+ *   - |v| ≥ 1e7 or < 1e-3   → exponential with 3 mantissa decimals
+ *   - else                  → up to 3 decimals, trailing zeros stripped
  *     (so `0.500` → `"0.5"`, `1.234` → `"1.234"`, `1` → `"1"`)
  */
 function fmtNum(v) {
   if (typeof v !== 'number' || !isFinite(v)) return String(v);
   if (v === 0) return '0';
   const abs = Math.abs(v);
+  if (abs >= 1e100 || (abs > 0 && abs < 1e-99)) return v.toExponential(0);
   if (abs >= 1e7 || abs < 1e-3) return v.toExponential(3);
   return parseFloat(v.toFixed(3)).toString();
 }

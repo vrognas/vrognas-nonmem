@@ -1716,6 +1716,36 @@ function sectionEl(title, cols, rowsData, rowAttrs, tableClass, headingExtra, co
   return wrap;
 }
 
+/**
+ * Split a formatted number into integer / fraction <span> nodes for
+ * decimal-point alignment. The integer span is right-aligned against
+ * the fraction span's left edge; the fraction span is left-aligned
+ * and has a CSS `min-width` (applied per-column in style.css — IE /
+ * FE / Prior get the padding) so the leading `.` sits at the same X
+ * across rows. For integer-only values (`0`, `-3`, `1e+06`, `100`)
+ * the fraction span is empty — still emitted so it occupies the
+ * reserved decimal-column space and the integer's right edge anchors
+ * at the same X as decimals do. Scientific values like `1.807e+35`
+ * have the entire mantissa-and-exponent suffix in the fraction span;
+ * if it exceeds the column's `min-width`, the fraction widens and
+ * the integer is pushed left — decimal-align is sacrificed for that
+ * row but the value stays readable.
+ */
+function decimalAlignSpans(text) {
+  const intSpan = document.createElement('span');
+  intSpan.className = 'num-int';
+  const fracSpan = document.createElement('span');
+  fracSpan.className = 'num-frac';
+  const dot = text.indexOf('.');
+  if (dot === -1) {
+    intSpan.textContent = text;
+  } else {
+    intSpan.textContent = text.slice(0, dot);
+    fracSpan.textContent = text.slice(dot);
+  }
+  return [intSpan, fracSpan];
+}
+
 function rowEl(cells, attrs, colClasses) {
   const tr = document.createElement('tr');
   const classes = [];
@@ -1743,7 +1773,13 @@ function rowEl(cells, attrs, colClasses) {
       // "[object Text]").
       td.append(c);
     } else if (typeof c === 'number') {
-      td.textContent = fmtNum(c);
+      td.append(...decimalAlignSpans(fmtNum(c)));
+      // Title: full-precision JS-native representation. fmtNum may
+      // compress very-large/small magnitudes (|exp| ≥ 100) to
+      // toExponential(0) so they fit the column; hover reveals the
+      // unrounded value. Skipped for non-finite — `NaN.toString()`
+      // is just "NaN" which is also what gets displayed.
+      if (Number.isFinite(c)) td.title = String(c);
     } else {
       const text = String(c);
       td.textContent = text;
