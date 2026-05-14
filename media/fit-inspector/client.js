@@ -524,7 +524,7 @@ function renderEstimationOptions(steps, tiersPerStep, methodKindsPerStep, lstEst
   const outer = document.createElement('details');
   outer.className = 'xml-options';
   const sumOuter = document.createElement('summary');
-  sumOuter.textContent = '$EST options (XML, exhaustive — '
+  sumOuter.textContent = '$ESTIMATION options ('
     + steps.length + (steps.length === 1 ? ' step)' : ' steps)');
   outer.append(sumOuter);
   for (let i = 0; i < steps.length; i++) {
@@ -851,7 +851,7 @@ function renderCovarianceOptions(opts, tiersMap, resolvedMap, lstTolerances, lst
   }
   const matrixIsR = merged.matrix === 'r';
   const count = Object.keys(merged).length;
-  sumOuter.textContent = '$COV options (XML, exhaustive — ' + count + ' attributes)';
+  sumOuter.textContent = '$COVARIANCE options (' + count + ' attributes)';
   outer.append(sumOuter);
 
   const table = document.createElement('table');

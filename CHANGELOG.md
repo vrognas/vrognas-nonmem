@@ -7,6 +7,8 @@ All notable changes documented here. Format follows
 
 ### Changed
 
+- **chore: rename $EST/$COV option section headings to $ESTIMATION/$COVARIANCE; drop "XML, exhaustive" wording (v0.0.234).** Section headings now read `$ESTIMATION options (N steps)` and `$COVARIANCE options (N attributes)`. Old `$EST options (XML, exhaustive — N step(s))` was misleading on two counts: invisible-to-XML tokens (PRINT, POSTHOC, etc.) are also surfaced via .lst synthesis, so the set isn't strictly "XML-derived"; and "exhaustive" overpromised when truth depends on NONMEM emitting the attribute at all.
+
 - **fix: drop dim-fade on appended zeros (v0.0.233).** v0.0.232 rendered the trailing 3-decimal pad in a `.dim` child span, which the user found visually busy. Simpler approach: keep the 3-decimal padding but render in normal color — `100` → `100.000` (all normal), `0` → `0.000` (all normal). Sci values unchanged. `fmtNumParts` helper removed; `decimalAlignSpans` simplified back to a single-text split. `format-number.ts` likewise: `formatNumberCompact(1.5)` now returns `"1.500"` (was `"1.5"`). Two variables-comm tests updated to match (`'1' → '1.000'`, `'2 (FIX)' → '2.000 (FIX)'`).
 
 - **feat: decimal-align consistency + 3-decimal padding with dim trailing zeros + payload cleanup (v0.0.232).** Three bundled changes from the 12th-pass review.
