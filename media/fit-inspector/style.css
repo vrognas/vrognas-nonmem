@@ -593,16 +593,14 @@ table.param-table .col-label      { width: auto; }
    integer's right edge anchors at the decimal column position so
    integers visually align with decimals at the same offset. */
 table.param-table .num-int  { display: inline-block; text-align: right; }
-table.param-table .num-frac { display: inline-block; text-align: left; }
-/* Per-column fraction-span min-widths. IE / FE / Prior carry typical
-   3-decimal pharmacometric values (`0.500`, `242.706`), so 4ch
-   accommodates `.NNN` + the leading dot. Other columns (LB / UB /
-   NSD / Shrink) keep `min-width` unset (defaults to content-width)
-   so integer-only or short-fraction values render the same as
-   before — no extra padding when there's no decimal-align benefit. */
-table.param-table .col-ie    .num-frac,
-table.param-table .col-fe    .num-frac,
-table.param-table .col-prior .num-frac { min-width: 4ch; }
+table.param-table .num-frac { display: inline-block; text-align: left;
+                              min-width: 4ch; }
+/* 4ch reserves space for the longest typical fraction across the
+   pharmacometric value range: `.NNN` (3 decimals + leading `.`) AND
+   `e+NN` (single-letter `e` + sign + 2-digit zero-padded exponent).
+   Both are 4 chars, so scientific and decimal values align on a
+   single vertical X. Three-digit-exponent astronomical values
+   (`e+262`) overflow to 5ch — that row misaligns by 1ch; rare. */
 /* `<value> (<badge>)` cells: badge is inline-block with min-width +
    left-align, so all badges occupy the same horizontal space
    regardless of `(7%)` vs `(123%)`. Combined with the cell's right

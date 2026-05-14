@@ -1718,30 +1718,34 @@ function sectionEl(title, cols, rowsData, rowAttrs, tableClass, headingExtra, co
 
 /**
  * Split a formatted number into integer / fraction <span> nodes for
- * decimal-point alignment. The integer span is right-aligned against
+ * decimal-point alignment. The integer span right-anchors against
  * the fraction span's left edge; the fraction span is left-aligned
- * and has a CSS `min-width` (applied per-column in style.css — IE /
- * FE / Prior get the padding) so the leading `.` sits at the same X
- * across rows. For integer-only values (`0`, `-3`, `1e+06`, `100`)
- * the fraction span is empty — still emitted so it occupies the
- * reserved decimal-column space and the integer's right edge anchors
- * at the same X as decimals do. Scientific values like `1.807e+35`
- * have the entire mantissa-and-exponent suffix in the fraction span;
- * if it exceeds the column's `min-width`, the fraction widens and
- * the integer is pushed left — decimal-align is sacrificed for that
- * row but the value stays readable.
+ * and carries a CSS `min-width: 4ch` (style.css) so the leading
+ * separator sits at the same X across rows.
+ *
+ * Split position: the first `.` (normal decimals) OR `e`/`E` (scientific
+ * notation). Treating `e` as the decimal-column anchor means `2e+05`
+ * aligns vertically with `242.706` — both have their split punctuation
+ * at the same X. Three-or-more-digit exponents (`e+262`) push past the
+ * 4ch frac min-width and misalign by 1ch for that row; acceptable
+ * trade-off (astronomical values are rare).
+ *
+ * For integer-only values (`0`, `100`, `-3`) the fraction span is
+ * empty but still emitted so the integer's right edge anchors at the
+ * same X as decimals do — integers visually align with the decimal
+ * column position.
  */
 function decimalAlignSpans(text) {
   const intSpan = document.createElement('span');
   intSpan.className = 'num-int';
   const fracSpan = document.createElement('span');
   fracSpan.className = 'num-frac';
-  const dot = text.indexOf('.');
-  if (dot === -1) {
+  const splitIdx = text.search(/[.eE]/);
+  if (splitIdx === -1) {
     intSpan.textContent = text;
   } else {
-    intSpan.textContent = text.slice(0, dot);
-    fracSpan.textContent = text.slice(dot);
+    intSpan.textContent = text.slice(0, splitIdx);
+    fracSpan.textContent = text.slice(splitIdx);
   }
   return [intSpan, fracSpan];
 }
