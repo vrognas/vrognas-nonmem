@@ -1727,53 +1727,30 @@ function sectionEl(title, cols, rowsData, rowAttrs, tableClass, headingExtra, co
  * CSS `min-width: 4ch` (style.css) so the leading separator sits at
  * the same X across rows.
  *
- * Split position: the first `.` (normal decimals) OR `e`/`E`
- * (scientific). Treating `e` as the decimal-column anchor means
- * `2e+05` aligns with `242.706` — both have their split punctuation
- * at the same X.
+ * fmtNum always emits exactly 3 decimal places (`100` → `100.000`,
+ * `1.5` → `1.500`) for non-sci values, so the fraction span is always
+ * exactly 4ch and the `.` lines up vertically. Scientific values use
+ * `e` as the anchor (`4e+05` frac = `e+05`, also 4ch — aligns with
+ * `.NNN`). Three-or-more-digit exponents (`e+262`) push the frac to
+ * 5ch and misalign by 1ch for that row; rare astronomical values,
+ * accepted trade-off.
  *
- * Trailing-zero fade: for decimal values, `fmtNumParts` returns the
- * `display` part (no trailing zeros) and a `fade` string with the
- * zeros that bring the fraction to 3 places. The fade is rendered in
- * a `.dim` child so the eye picks up the original precision at a
- * glance while still aligning visually. Examples:
- *   `1.5`    → `1`  .  `5` + dim `00`
- *   `100`    → `100`     + dim `.000`
- *   `242.706` → `242` . `706`            (no fade)
- *   `0`      → `0`       + dim `.000`
- *   `4e+05`  → `4`  e  `+05`             (sci form, no fade)
- *   non-finite (NaN / Infinity) → flat `num-int` only, empty `num-frac`
- *
- * Three-or-more-digit exponents (`e+262`) push past the 4ch frac
- * min-width and misalign by 1ch for that row; rare astronomical
- * values, accepted trade-off.
+ * Non-finite values (`NaN`, `Infinity`) render as flat `num-int` only
+ * with an empty `num-frac`.
  */
 function decimalAlignSpans(v) {
   const intSpan = document.createElement('span');
   intSpan.className = 'num-int';
   const fracSpan = document.createElement('span');
   fracSpan.className = 'num-frac';
-  if (typeof v !== 'number' || !isFinite(v)) {
-    intSpan.textContent = String(v);
-    return [intSpan, fracSpan];
-  }
-  const parts = fmtNumParts(v);
-  const full = parts.display + parts.fade;
-  const splitIdx = full.search(/[.eE]/);
+  const text = fmtNum(v);
+  const splitIdx = text.search(/[.eE]/);
   if (splitIdx === -1) {
-    intSpan.textContent = full;
+    intSpan.textContent = text;
     return [intSpan, fracSpan];
   }
-  intSpan.textContent = full.slice(0, splitIdx);
-  const realFrac = parts.display.slice(splitIdx);
-  const fadeText = parts.fade;
-  if (realFrac) fracSpan.appendChild(document.createTextNode(realFrac));
-  if (fadeText) {
-    const fadeSpan = document.createElement('span');
-    fadeSpan.className = 'dim';
-    fadeSpan.textContent = fadeText;
-    fracSpan.appendChild(fadeSpan);
-  }
+  intSpan.textContent = text.slice(0, splitIdx);
+  fracSpan.textContent = text.slice(splitIdx);
   return [intSpan, fracSpan];
 }
 

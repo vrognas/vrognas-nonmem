@@ -19,15 +19,16 @@
  * General-purpose number renderer used everywhere a value lands in
  * the inspector. Behaviour:
  *   - non-finite             → `String(v)` (surfaces `NaN` instead of silent em-dash)
- *   - 0                      → `"0"`
  *   - |v| ≥ 10000 or |v| < 1e-3 → scientific via `fmtScientific`
  *     (always rounded to 0 mantissa decimals — `1.807e+35` → `"2e+35"`,
  *     `437005.037` → `"4e+05"`, `1000000` → `"1e+06"`, `0.0002` →
  *     `"2e-04"`. Exponent is zero-padded to 2 digits to match NONMEM
  *     convention and the hardcoded `1e+06` sentinel display.)
- *   - else                   → up to 3 decimals, trailing zeros stripped
- *     (max "normal" value is `"9999.999"` (8 chars), so a 9-char numeric
- *     column always fits both forms.)
+ *   - else                   → exactly 3 decimals via `toFixed(3)`,
+ *     trailing zeros preserved (`1` → `"1.000"`, `1.5` → `"1.500"`,
+ *     `242.706` unchanged). Uniform decimal width means the fraction
+ *     span (`min-width: 4ch`) is always exactly 4ch and the `.` /
+ *     `e` decimal anchor sits at the same X across every row.
  *
  * Full unrounded value lives in the cell's `title` attribute — rowEl
  * sets `td.title = String(v)` for number cells, so hover reveals
@@ -35,37 +36,10 @@
  */
 function fmtNum(v) {
   if (typeof v !== 'number' || !isFinite(v)) return String(v);
-  if (v === 0) return '0';
+  if (v === 0) return '0.000';
   const abs = Math.abs(v);
   if (abs >= 10000 || abs < 1e-3) return fmtScientific(v);
-  return parseFloat(v.toFixed(3)).toString();
-}
-
-/**
- * Split a numeric value into a `{display, fade}` pair for the
- * decimal-align rendering path. `display` is the "natural" form (no
- * trailing zeros) that the user typed / NONMEM emitted; `fade` is the
- * trailing zeros that bring the fraction to 3 decimal places. The
- * caller (`decimalAlignSpans` in client.js) renders `fade` in dimmed
- * text so the user's eye picks up the original precision while still
- * getting visual alignment via the 4ch frac slot.
- *
- * Examples:
- *   1.5     → { display: "1.5",     fade: "00" }
- *   100     → { display: "100",     fade: ".000" }
- *   242.706 → { display: "242.706", fade: "" }
- *   0       → { display: "0",       fade: ".000" }
- *   4e+05   → { display: "4e+05",   fade: "" }   (sci unchanged)
- *   NaN     → { display: "NaN",     fade: "" }
- */
-function fmtNumParts(v) {
-  if (typeof v !== 'number' || !isFinite(v)) return { display: String(v), fade: '' };
-  if (v === 0) return { display: '0', fade: '.000' };
-  const abs = Math.abs(v);
-  if (abs >= 10000 || abs < 1e-3) return { display: fmtScientific(v), fade: '' };
-  const padded = v.toFixed(3);
-  const natural = parseFloat(padded).toString();
-  return { display: natural, fade: padded.slice(natural.length) };
+  return v.toFixed(3);
 }
 
 /**

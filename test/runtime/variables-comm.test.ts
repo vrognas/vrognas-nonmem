@@ -37,7 +37,7 @@ describe('mapParsedModelToVariables', () => {
       'SIGMA(1,1)',
       '$PRED: Y',
     ]);
-    expect(vars.map((v) => v.display_value)).toEqual(['1', '0.1', '0.1', '1']);
+    expect(vars.map((v) => v.display_value)).toEqual(['1.000', '0.100', '0.100', '1.000']);
     expect(vars.map((v) => v.display_type)).toEqual(['theta', 'omega', 'sigma', '$PRED']);
     // Parameters land in 'class' so Positron groups them under "CLASSES",
     // separating raw declarations from derived-equation values in "VALUES".
@@ -147,6 +147,9 @@ describe('resolveAccessKeyLine', () => {
     expect(vars[0].display_value).toBe('0.068');
     expect(vars[1].display_value).toBe('4.296');
     expect(vars[2].display_value).toBe('0.123');
+    // All three round to 3 decimals; trailing zeros NOT stripped post-v0.0.233
+    // so `1` would display as `1.000`. (These three already have 3 decimals
+    // naturally so the assertion is unchanged.)
   });
 
   it('marks FIX/lower/upper hints in display_value of THETA bounds', () => {
@@ -159,8 +162,10 @@ describe('resolveAccessKeyLine', () => {
       }),
     );
 
-    expect(vars[0].display_value).toBe('1.5 (0..10)');
-    expect(vars[1].display_value).toBe('2 (FIX)');
+    // fmtNum always pads to 3 decimals post-v0.0.233 — `1.5` → `1.500`,
+    // `2` → `2.000`. Bounds (lower/upper) likewise.
+    expect(vars[0].display_value).toBe('1.500 (0.000..10.000)');
+    expect(vars[1].display_value).toBe('2.000 (FIX)');
   });
 });
 

@@ -2,22 +2,23 @@
 // (variables comm, hover, lst-decoration, …) and mirrored in the
 // WebView client.js's `fmtNum` (same policy — keep in sync):
 //
-//   - 0 → '0'
 //   - |v| ≥ 10000 or 0 < |v| < 1e-3 → scientific via `fmtScientific`
 //     (toExponential(0), exponent zero-padded to ≥2 digits — `4e+05`,
 //     `1e+06`, `2e+35`, `2e-04`). Matches NONMEM's emit format and
 //     keeps the column width predictable: max sci form is 6 chars
 //     (`-Ne+NN`) for 2-digit exponents.
-//   - everything else → up to 3 decimals, trailing zeros stripped
-//     (max "normal" value is `9999.999`, 8 chars)
+//   - everything else → exactly 3 decimals (`100` → `100.000`).
+//     Uniform decimal width is load-bearing for the WebView's
+//     decimal-align rendering — the fraction span is always 4ch wide
+//     so the `.` / `e` anchor sits at the same X across every row.
 
 /** Render a number for compact UI display. Pass-through for non-finite. */
 export function formatNumberCompact(n: number): string {
   if (!Number.isFinite(n)) return String(n);
-  if (n === 0) return '0';
+  if (n === 0) return '0.000';
   const abs = Math.abs(n);
   if (abs >= 10000 || abs < 1e-3) return fmtScientific(n);
-  return parseFloat(n.toFixed(3)).toString();
+  return n.toFixed(3);
 }
 
 /**
