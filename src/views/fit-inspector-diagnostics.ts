@@ -98,7 +98,6 @@ export function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnosti
       ? {
           min: eigs.reduce((m, v) => (v < m ? v : m), eigs[0]),
           max: eigs.reduce((m, v) => (v > m ? v : m), eigs[0]),
-          values: eigs,
         }
       : null;
   const terminationCodes = fit?.terminationCodes ?? [];
@@ -177,8 +176,6 @@ export function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnosti
     etaPVal: lst.etaPVal,
     etaShrinkSd: lst.etaShrinkSd,
     etaShrinkVr: lst.etaShrinkVr,
-    ebvShrinkSd: lst.ebvShrinkSd,
-    ebvShrinkVr: lst.ebvShrinkVr,
     epsShrinkSd: lst.epsShrinkSd,
     epsShrinkVr: lst.epsShrinkVr,
     eigenvalues,
@@ -190,9 +187,6 @@ export function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnosti
     cput: lst.cput,
     paraNodes: lst.paraNodes,
     covMatrixSingular: lst.covMatrixSingular,
-    rseMatrix: lst.rseMatrix,
-    seBlockEmitted: lst.seBlockEmitted,
-    hasDesign: lst.hasDesign,
     parameterNearBoundary: lst.parameterNearBoundary,
     boundaryTestOmitted: lst.boundaryTestOmitted,
     prderr,

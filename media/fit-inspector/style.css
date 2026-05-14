@@ -7,10 +7,10 @@ body {
   padding: 8px;
   margin: 0;
   /* Allow horizontal scroll when the inspector pane is narrower than
-     the param tables' min-width. Without this, the fixed-layout
-     percentage columns compress below readable widths and cells
-     visibly overlap (numbers like `1e+06` collide with their
-     neighbours). Vertical scroll stays auto via VS Code default. */
+     the param tables' min-width (560px — sum of `ch`-unit numeric
+     widths). Numeric columns stay at fixed widths regardless of pane
+     size; only the Label column responds to resize. Vertical scroll
+     stays auto via VS Code default. */
   overflow-x: auto;
 }
 .empty {
@@ -513,9 +513,9 @@ table.param-table td.col-prior-var { text-align: right; }
    ellipsis; the full label is preserved in the cell's `title`
    attribute (set in client.js `rowEl`) so hover shows it. The
    `max-width: 0` is the standard fixed-layout-table trick to make
-   percentage column widths bind for ellipsis purposes; combined with
-   `table { width: 100% }` this re-truncates automatically when the
-   side pane is resized. */
+   the `width: auto` Label column bind for ellipsis purposes; combined
+   with `table { width: 100% }` this re-truncates automatically when
+   the side pane is resized. */
 table.param-table td.col-label {
   overflow: hidden;
   text-overflow: ellipsis;

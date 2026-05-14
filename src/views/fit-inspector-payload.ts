@@ -246,16 +246,12 @@ export interface InspectorDiagnostics {
   etaShrinkSd: number[];
   /** Per-ETA shrinkage on the variance scale (`ETASHRINKVR(%)`). */
   etaShrinkVr: number[];
-  /** Per-ETA Empirical-Bayes Variance shrinkage on SD scale (`EBVSHRINKSD(%)`). */
-  ebvShrinkSd: number[];
-  /** Per-ETA EBV shrinkage on variance scale (`EBVSHRINKVR(%)`). */
-  ebvShrinkVr: number[];
   /** Per-EPS shrinkage on the SD scale (`EPSSHRINKSD(%)`). */
   epsShrinkSd: number[];
   /** Per-EPS shrinkage on the variance scale (`EPSSHRINKVR(%)`). */
   epsShrinkVr: number[];
   /** Eigenvalue range from `EIGENVALUES OF COR MATRIX`; null when no $COV ran. */
-  eigenvalues: { min: number; max: number; values: number[] } | null;
+  eigenvalues: { min: number; max: number } | null;
   /** Condition number of the COR matrix. `sumo.conditionNumber` (PsN-derived) preferred; falls back to `lst.conditionNumber` (NM-direct max/min eigenvalue) when sumo wasn't run. Co-located with eigenvalues + correlation red flags in the inspector. */
   conditionNumber: number | null;
   /**
@@ -310,27 +306,6 @@ export interface InspectorDiagnostics {
    * SEs are missing for a *reason*, not silently absent.
    */
   covMatrixSingular: 'R' | 'S' | null;
-  /**
-   * Verbatim matrix-method tag from the COV-step section headers
-   * (`STANDARD ERROR OF ESTIMATE (X)`): one of `R`, `S`, `RSR`,
-   * `From Sample Variance`, etc. Identifies which matrix the SEs came
-   * from, displayed next to the (RSE%) column header so the user knows
-   * the derivation. Null when no $COV ran.
-   */
-  rseMatrix: string | null;
-  /**
-   * `STANDARD ERROR OF ESTIMATE` header present (with or without
-   * parenthetical). Used by the client to infer default `RSR` when
-   * `rseMatrix` is null but the COV step did emit SEs (FOCE classical
-   * default-$COV case).
-   */
-  seBlockEmitted: boolean;
-  /**
-   * `$DESIGN` was used (NM75+ optimal design — auto-runs `$COV MATRIX=R
-   * UNCONDITIONAL`). When true, render `rseMatrix` as "from $DESIGN" so
-   * the user knows the SEs are Fisher-information-derived.
-   */
-  hasDesign: boolean;
   /** PRDERR file contents (NONMEM warnings / numerical-issue notes). Null when none was emitted. */
   prderr: { content: string; source: 'plain' | 'archive' } | null;
   /**

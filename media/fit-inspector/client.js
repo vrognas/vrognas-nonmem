@@ -1490,7 +1490,7 @@ function renderValueCell(r, kind, hasFit, diagBaseValues) {
   if (hasFit && r.boundary) {
     const span = document.createElement('span');
     span.className = 'boundary';
-    span.textContent = fmtNum(v);
+    span.append(...decimalAlignSpans(v));
     span.title =
       r.boundary === 'lower'
         ? 'At lower bound — estimator did not converge freely'
@@ -1537,18 +1537,18 @@ function indexCell(name) {
 function impliedBoundCell(side, kind) {
   const span = document.createElement('span');
   span.className = 'dim';
-  let text;
+  let value;
   let tooltip;
   if (kind === 'omega-diag' && side === 'lower') {
-    text = '0';
+    value = 0;
     tooltip =
       'Implicit lower bound — NONMEM enforces variance ≥ 0 (positive-definiteness on $OMEGA / $SIGMA matrices).';
   } else if (kind === 'omega-diag' && side === 'upper') {
-    text = '1e+06';
+    value = 1e6;
     tooltip =
       'Implicit upper bound — NONMEM uses +1e+06 as its no-bound sentinel for OMEGA / SIGMA diagonals.';
   } else {
-    text = side === 'lower' ? '-1e+06' : '1e+06';
+    value = side === 'lower' ? -1e6 : 1e6;
     tooltip =
       'Implicit ' +
       side +
@@ -1556,7 +1556,11 @@ function impliedBoundCell(side, kind) {
       (side === 'lower' ? '-1e+06' : '+1e+06') +
       ' as its no-bound sentinel.';
   }
-  span.textContent = text;
+  // Use decimalAlignSpans so the implicit-bound row's `e` / decimal
+  // anchor aligns with explicit-bound rows in the same column. The
+  // outer `class="dim"` applies its color to all children — including
+  // the inner fade span — so the whole sentinel renders as dim.
+  span.append(...decimalAlignSpans(value));
   span.title = tooltip;
   return span;
 }
@@ -1572,7 +1576,7 @@ function impliedBoundCell(side, kind) {
 function impliedInitCell(value) {
   const span = document.createElement('span');
   span.className = 'dim';
-  span.textContent = fmtNum(value);
+  span.append(...decimalAlignSpans(value));
   span.title =
     'Empty init slot in $THETA — NONMEM computes the midpoint of bounds at PRED initialization.';
   return span;
@@ -1650,7 +1654,7 @@ function annotatedNumber(value, tooltip, dimBadge) {
   if (typeof value !== 'number' || !isFinite(value)) return null;
   const wrap = document.createElement('span');
   wrap.title = tooltip;
-  wrap.append(document.createTextNode(fmtNum(value)));
+  wrap.append(...decimalAlignSpans(value));
   if (dimBadge) {
     const badge = document.createElement('span');
     badge.className = 'dim badge-fixed';
@@ -1717,35 +1721,58 @@ function sectionEl(title, cols, rowsData, rowAttrs, tableClass, headingExtra, co
 }
 
 /**
- * Split a formatted number into integer / fraction <span> nodes for
- * decimal-point alignment. The integer span right-anchors against
- * the fraction span's left edge; the fraction span is left-aligned
- * and carries a CSS `min-width: 4ch` (style.css) so the leading
- * separator sits at the same X across rows.
+ * Build int / frac spans from a raw numeric value for decimal-point
+ * alignment. The integer span right-anchors against the fraction
+ * span's left edge; the fraction span is left-aligned and carries
+ * CSS `min-width: 4ch` (style.css) so the leading separator sits at
+ * the same X across rows.
  *
- * Split position: the first `.` (normal decimals) OR `e`/`E` (scientific
- * notation). Treating `e` as the decimal-column anchor means `2e+05`
- * aligns vertically with `242.706` — both have their split punctuation
- * at the same X. Three-or-more-digit exponents (`e+262`) push past the
- * 4ch frac min-width and misalign by 1ch for that row; acceptable
- * trade-off (astronomical values are rare).
+ * Split position: the first `.` (normal decimals) OR `e`/`E`
+ * (scientific). Treating `e` as the decimal-column anchor means
+ * `2e+05` aligns with `242.706` — both have their split punctuation
+ * at the same X.
  *
- * For integer-only values (`0`, `100`, `-3`) the fraction span is
- * empty but still emitted so the integer's right edge anchors at the
- * same X as decimals do — integers visually align with the decimal
- * column position.
+ * Trailing-zero fade: for decimal values, `fmtNumParts` returns the
+ * `display` part (no trailing zeros) and a `fade` string with the
+ * zeros that bring the fraction to 3 places. The fade is rendered in
+ * a `.dim` child so the eye picks up the original precision at a
+ * glance while still aligning visually. Examples:
+ *   `1.5`    → `1`  .  `5` + dim `00`
+ *   `100`    → `100`     + dim `.000`
+ *   `242.706` → `242` . `706`            (no fade)
+ *   `0`      → `0`       + dim `.000`
+ *   `4e+05`  → `4`  e  `+05`             (sci form, no fade)
+ *   non-finite (NaN / Infinity) → flat `num-int` only, empty `num-frac`
+ *
+ * Three-or-more-digit exponents (`e+262`) push past the 4ch frac
+ * min-width and misalign by 1ch for that row; rare astronomical
+ * values, accepted trade-off.
  */
-function decimalAlignSpans(text) {
+function decimalAlignSpans(v) {
   const intSpan = document.createElement('span');
   intSpan.className = 'num-int';
   const fracSpan = document.createElement('span');
   fracSpan.className = 'num-frac';
-  const splitIdx = text.search(/[.eE]/);
+  if (typeof v !== 'number' || !isFinite(v)) {
+    intSpan.textContent = String(v);
+    return [intSpan, fracSpan];
+  }
+  const parts = fmtNumParts(v);
+  const full = parts.display + parts.fade;
+  const splitIdx = full.search(/[.eE]/);
   if (splitIdx === -1) {
-    intSpan.textContent = text;
-  } else {
-    intSpan.textContent = text.slice(0, splitIdx);
-    fracSpan.textContent = text.slice(splitIdx);
+    intSpan.textContent = full;
+    return [intSpan, fracSpan];
+  }
+  intSpan.textContent = full.slice(0, splitIdx);
+  const realFrac = parts.display.slice(splitIdx);
+  const fadeText = parts.fade;
+  if (realFrac) fracSpan.appendChild(document.createTextNode(realFrac));
+  if (fadeText) {
+    const fadeSpan = document.createElement('span');
+    fadeSpan.className = 'dim';
+    fadeSpan.textContent = fadeText;
+    fracSpan.appendChild(fadeSpan);
   }
   return [intSpan, fracSpan];
 }
@@ -1777,12 +1804,11 @@ function rowEl(cells, attrs, colClasses) {
       // "[object Text]").
       td.append(c);
     } else if (typeof c === 'number') {
-      td.append(...decimalAlignSpans(fmtNum(c)));
-      // Title: full-precision JS-native representation. fmtNum may
-      // compress very-large/small magnitudes (|exp| ≥ 100) to
-      // toExponential(0) so they fit the column; hover reveals the
-      // unrounded value. Skipped for non-finite — `NaN.toString()`
-      // is just "NaN" which is also what gets displayed.
+      td.append(...decimalAlignSpans(c));
+      // Title: JS-native representation. fmtNum may compress magnitudes
+      // via toExponential(0) and pad decimals to 3 places; the title
+      // shows the unrounded round-trippable value so hover reveals
+      // precision the display loses.
       if (Number.isFinite(c)) td.title = String(c);
     } else {
       const text = String(c);

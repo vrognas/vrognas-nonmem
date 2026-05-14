@@ -42,6 +42,33 @@ function fmtNum(v) {
 }
 
 /**
+ * Split a numeric value into a `{display, fade}` pair for the
+ * decimal-align rendering path. `display` is the "natural" form (no
+ * trailing zeros) that the user typed / NONMEM emitted; `fade` is the
+ * trailing zeros that bring the fraction to 3 decimal places. The
+ * caller (`decimalAlignSpans` in client.js) renders `fade` in dimmed
+ * text so the user's eye picks up the original precision while still
+ * getting visual alignment via the 4ch frac slot.
+ *
+ * Examples:
+ *   1.5     → { display: "1.5",     fade: "00" }
+ *   100     → { display: "100",     fade: ".000" }
+ *   242.706 → { display: "242.706", fade: "" }
+ *   0       → { display: "0",       fade: ".000" }
+ *   4e+05   → { display: "4e+05",   fade: "" }   (sci unchanged)
+ *   NaN     → { display: "NaN",     fade: "" }
+ */
+function fmtNumParts(v) {
+  if (typeof v !== 'number' || !isFinite(v)) return { display: String(v), fade: '' };
+  if (v === 0) return { display: '0', fade: '.000' };
+  const abs = Math.abs(v);
+  if (abs >= 10000 || abs < 1e-3) return { display: fmtScientific(v), fade: '' };
+  const padded = v.toFixed(3);
+  const natural = parseFloat(padded).toString();
+  return { display: natural, fade: padded.slice(natural.length) };
+}
+
+/**
  * `toExponential(0)` with the exponent zero-padded to ≥2 digits.
  * `(1e6).toExponential(0)` returns `"1e+6"` (1-digit exp); we want
  * `"1e+06"` for consistency with NONMEM's emit format and with the
