@@ -5,7 +5,7 @@ import { sendSignal } from '../../src/runtime/signal-dispatch';
 import { makeTmpDir } from '../__helpers__/tmpdir';
 
 async function makeModelfitDirWithNmRun1(): Promise<string> {
-  const dir = await makeTmpDir('positron-nonmem-sig');
+  const dir = await makeTmpDir('nonmem-sig');
   await fs.mkdir(path.join(dir, 'NM_run1'), { recursive: true });
   return dir;
 }
@@ -21,7 +21,7 @@ describe('sendSignal', () => {
   });
 
   it('returns ok=false with error message when NM_run1 does not exist yet', async () => {
-    const earlyDir = await makeTmpDir('positron-nonmem-sig-early');
+    const earlyDir = await makeTmpDir('nonmem-sig-early');
     // No NM_run1 subdir created — simulates pre-nmfe-spawn window.
     const r = await sendSignal({ modelfitDir: earlyDir, name: 'stop.sig' });
     expect(r.ok).toBe(false);

@@ -1,6 +1,6 @@
-# Positron NONMEM
+# NONMEM for Positron
 
-`positron-nonmem` makes NONMEM a first-class language runtime in
+The `vrognas.nonmem` extension makes NONMEM a first-class language runtime in
 [Positron](https://github.com/posit-dev/positron): pick a NONMEM version from
 the runtime picker, hit run, watch live iterations stream, click through a
 runs tree, and read a Fit Inspector that surfaces OFV, SE, shrinkage, $EST /
@@ -53,7 +53,7 @@ In Positron:
 1. Open this folder.
 2. Press F5 → Extension Development Host launches.
 3. Open an `.mod` file; pick a NONMEM runtime from the session picker;
-   `Positron NONMEM: Run Current Model` from the command palette.
+   `NONMEM: Run Current Model` from the command palette.
 
 ## Privacy hygiene
 
@@ -68,7 +68,7 @@ In Positron:
 - WebView `renderError` messages route through `sanitizeWebviewMessage`
   (`src/views/webview-shell.ts`) which strips `vscode-resource://`,
   Windows `[A-Z]:\…`, and `/home/<user>/…` paths plus caps at 500 chars.
-- Run artefacts mirror into `<workspace>/.positron-nonmem/` — gitignored.
+- Run artefacts mirror into `<workspace>/.vrognas-nonmem/` — gitignored.
 - Lineage settings (`lineageOverrides`, `lineages`) store
   workspace-relative paths when inside a workspace folder so
   `settings.json` is shareable without leaking absolute paths.

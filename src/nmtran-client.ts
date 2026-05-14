@@ -3,7 +3,7 @@
 // vscode-nmtran exports `getParsedModel(uri)` from its `activate()` return
 // value. We reach it via vscode.extensions.getExtension(...). The types
 // below intentionally duplicate vscode-nmtran's `parsedModelApi.ts` so
-// positron-nonmem doesn't reach into vscode-nmtran's internals; the
+// vrognas.nonmem doesn't reach into vscode-nmtran's internals; the
 // eventual home for both is a shared types package (per the design plan).
 
 import * as vscode from 'vscode';

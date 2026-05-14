@@ -1,4 +1,4 @@
-# positron-nonmem — Claude Code Working Rules
+# vrognas-nonmem — Claude Code Working Rules
 
 In all interactions and commit messages, be extremely concise; sacrifice grammar for the
 sake of concision.
@@ -33,7 +33,7 @@ Mirror the discipline from `nonmem-ssh-probe` and the nmguides supplements:
   refute it. The plan + nmguides + the NONMEM 7 user guide are the references.
 - **One change per test.** Never bundle multiple variants. A test that drops `$MODEL`
   must not also simplify `$ERROR` — separate tests, separately documented.
-- **Per-run subdirectory** under `~/positron-nonmem/<runId>/` on the host (mirrors the
+- **Per-run subdirectory** under `~/vrognas-nonmem/<runId>/` on the host (mirrors the
   `nonmem-ssh-probe` skill's `~/nm_validate/<probe>/` pattern). Fixed-name NONMEM
   artefacts (`FCON`, `FDATA`, `FSUBS.f90`, `nonmem` binary) collide otherwise.
 - **Isolate the signal.** Strip everything else to the minimum so a PASS/FAIL maps
@@ -59,7 +59,7 @@ Mirror the discipline from `nonmem-ssh-probe` and the nmguides supplements:
 - Positron-only via `engines.positron`. No `tryAcquirePositronApi()` adapter, no
   vanilla-VSCode fallback path.
 - SSH-only execution; per-run remote subdir; outputs sftp'd back to
-  `<workspace>/.positron-nonmem/runs/<runId>/` plus a `manifest.json` (datasetHash,
+  `<workspace>/.vrognas-nonmem/runs/<runId>/` plus a `manifest.json` (datasetHash,
   modelHash, nmfeBinary, nonmemVersion, hostAlias, parentRunId).
 - Live tail via a small remote bash helper (`tailmux.sh`, M3+) that multiplexes
   `m.ext` / `OFV.TXT` / `m.nmfe.log` / `FMSG` over a single SSH stdout channel.

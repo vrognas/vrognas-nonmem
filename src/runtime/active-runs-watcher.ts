@@ -274,7 +274,7 @@ export function parseCommandTxt(text: string): string | null {
 /**
  * Like `parseCommandTxt` but also surfaces the absolute path hint
  * when the modelfile token was passed as an absolute path (Pirana,
- * positron-nonmem). Used to unambiguously resolve the modelDir
+ * vrognas.nonmem). Used to unambiguously resolve the modelDir
  * without a walk-up scan.
  */
 export function parseCommandTxtWithHint(text: string): ModelMetadata | null {

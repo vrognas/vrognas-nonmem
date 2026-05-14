@@ -65,7 +65,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand(COMMAND.showLineage, () =>
       LineagePanel.showOrFocus(
         context.extensionUri,
-        (msg) => outputChannel?.appendLine(`[positron-nonmem] ${msg}`),
+        (msg) => outputChannel?.appendLine(`[nonmem] ${msg}`),
         runner,
         // Click-on-node → push Fit Inspector for that .lst directly,
         // without opening any editor (no tab, focus stays on the
@@ -94,7 +94,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
   void refreshVariablesForEditor(vscode.window.activeTextEditor);
 
-  outputChannel.appendLine('[positron-nonmem] extension activated.');
+  outputChannel.appendLine('[nonmem] extension activated.');
 }
 
 // Monotonic generation counter for `refreshVariablesForEditor`. Each
@@ -180,7 +180,7 @@ function readInspectorThresholds(): typeof INSPECTOR_THRESHOLD_DEFAULTS {
 
 /** Diagnostic logger for the active-editor → Variables / Fit Inspector resolution path. */
 function logVars(message: string): void {
-  outputChannel?.appendLine(`[positron-nonmem][vars] ${message}`);
+  outputChannel?.appendLine(`[nonmem][vars] ${message}`);
 }
 
 /**
@@ -236,14 +236,14 @@ async function registerRuntime(
     nmVersions,
     runner,
     navigator: navigateToFileLine,
-    log: (msg) => outputChannel?.appendLine(`[positron-nonmem][session] ${msg}`),
+    log: (msg) => outputChannel?.appendLine(`[nonmem][session] ${msg}`),
   });
   context.subscriptions.push(
     positron.runtime.registerLanguageRuntimeManager('nmtran', runtimeManager),
   );
   for (const e of nmVersions) {
     // No installDir in logs — remote path encodes host layout (privacy hygiene).
-    channel.appendLine(`[positron-nonmem] registered NONMEM ${e.version} (${e.label}).`);
+    channel.appendLine(`[nonmem] registered NONMEM ${e.version} (${e.label}).`);
   }
 }
 
@@ -266,7 +266,7 @@ async function resolveNmVersions(channel: vscode.OutputChannel): Promise<NmVersi
   try {
     entries = await fetchNmVersions(runner);
   } catch (e) {
-    channel.appendLine(`[positron-nonmem] could not read psn.conf: ${errMsg(e)}`);
+    channel.appendLine(`[nonmem] could not read psn.conf: ${errMsg(e)}`);
     return [];
   }
   const kept: NmVersionEntry[] = [];
@@ -277,12 +277,12 @@ async function resolveNmVersions(channel: vscode.OutputChannel): Promise<NmVersi
         kept.push(entry);
       } else {
         channel.appendLine(
-          `[positron-nonmem] dropped psn.conf entry '${entry.label}' (path is not a directory).`,
+          `[nonmem] dropped psn.conf entry '${entry.label}' (path is not a directory).`,
         );
       }
     } catch {
       channel.appendLine(
-        `[positron-nonmem] dropped psn.conf entry '${entry.label}' (missing on disk).`,
+        `[nonmem] dropped psn.conf entry '${entry.label}' (missing on disk).`,
       );
     }
   }
@@ -303,7 +303,7 @@ function registerRunsTree(context: vscode.ExtensionContext, channel: vscode.Outp
     watcher.onDidChange(() => provider.refresh()),
     watcher.onDidDelete(() => provider.refresh()),
   );
-  channel.appendLine('[positron-nonmem] registered runs tree view.');
+  channel.appendLine('[nonmem] registered runs tree view.');
 }
 
 function registerLstDecorations(
@@ -311,13 +311,13 @@ function registerLstDecorations(
   channel: vscode.OutputChannel,
 ): void {
   const provider = new LstFileDecorationProvider(runner, (msg) =>
-    channel.appendLine(`[positron-nonmem] ${msg}`),
+    channel.appendLine(`[nonmem] ${msg}`),
   );
   context.subscriptions.push(
     vscode.window.registerFileDecorationProvider(provider),
     { dispose: () => provider.dispose() },
   );
-  channel.appendLine('[positron-nonmem] registered .lst file-decoration provider.');
+  channel.appendLine('[nonmem] registered .lst file-decoration provider.');
 }
 
 function registerFitInspector(
@@ -325,12 +325,12 @@ function registerFitInspector(
   channel: vscode.OutputChannel,
 ): void {
   fitInspector = new FitInspectorProvider(context.extensionUri, navigateToFileLine, (msg) =>
-    channel.appendLine(`[positron-nonmem] ${msg}`),
+    channel.appendLine(`[nonmem] ${msg}`),
   );
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(FitInspectorProvider.viewType, fitInspector),
   );
-  channel.appendLine('[positron-nonmem] registered fit inspector view.');
+  channel.appendLine('[nonmem] registered fit inspector view.');
 }
 
 function registerActiveRunsTree(
@@ -340,7 +340,7 @@ function registerActiveRunsTree(
   const provider = new ActiveRunsTreeProvider(activeRunsTracker);
   const watcher = new ActiveRunsWatcher({
     tracker: activeRunsTracker,
-    log: (msg: string) => channel.appendLine(`[positron-nonmem] ${msg}`),
+    log: (msg: string) => channel.appendLine(`[nonmem] ${msg}`),
   });
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider(VIEW_ID.activeRuns, provider),
@@ -349,7 +349,7 @@ function registerActiveRunsTree(
     { dispose: () => provider.dispose() },
     watcher,
   );
-  channel.appendLine('[positron-nonmem] registered active runs tree view + watcher.');
+  channel.appendLine('[nonmem] registered active runs tree view + watcher.');
 }
 
 /**
@@ -642,7 +642,7 @@ function activeNmVersionLabel(): string | undefined {
 }
 
 function log(message: string): void {
-  outputChannel?.appendLine(`[positron-nonmem] ${message}`);
+  outputChannel?.appendLine(`[nonmem] ${message}`);
 }
 
 /**

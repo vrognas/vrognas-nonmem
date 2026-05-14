@@ -15,6 +15,8 @@ coverage/
 !.vscode/launch.example.json
 
 # extension run mirror (per-workspace, never committed)
+.vrognas-nonmem/
+# (legacy name, kept while M0-era runs may still mirror to the old path)
 .positron-nonmem/
 
 # claude-code session state (handoff notes between conversations)

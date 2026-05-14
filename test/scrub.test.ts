@@ -45,7 +45,7 @@ describe('scrubPrivate', () => {
     const raw =
       'Building NONMEM Executable\n' +
       'Starting MPI version of nonmem execution ...\n' +
-      'Manager Location example-host//home/jane.doe@example.com/positron-nonmem/run1/modelfit_dir1/NM_run1\n' +
+      'Manager Location example-host//home/jane.doe@example.com/vrognas-nonmem/run1/modelfit_dir1/NM_run1\n' +
       'License Registered to: Acme Pharmaceuticals\n' +
       'Expiration Date:    14 JUL 2026\n';
     expect(scrubPrivate(raw)).toBe(

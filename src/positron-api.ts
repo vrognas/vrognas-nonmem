@@ -3,8 +3,8 @@
 // `@posit-dev/positron` provides type definitions only. The runtime API
 // is acquired via `acquirePositronApi()`, a global function that Positron
 // injects into the extension host. In plain VSCode the global is
-// undefined; we treat that as a hard error because positron-nonmem is
-// Positron-only by design (see plan §1, §2.3).
+// undefined; we treat that as a hard error because the NONMEM extension
+// is Positron-only by design (see plan §1, §2.3).
 //
 // Runtime access goes through `getPositron()` everywhere else. Tests
 // inject a mock API directly into Manager/Session constructors, so they
@@ -17,7 +17,7 @@ export type * from '@posit-dev/positron';
 export class PositronApiUnavailableError extends Error {
   constructor() {
     super(
-      'Positron API is not available. positron-nonmem requires Positron and does not run in plain VSCode. Install Positron from https://positron.posit.co.',
+      'Positron API is not available. The NONMEM extension requires Positron and does not run in plain VSCode. Install Positron from https://positron.posit.co.',
     );
     this.name = 'PositronApiUnavailableError';
   }

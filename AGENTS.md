@@ -1,4 +1,4 @@
-# positron-nonmem — Agent guidelines
+# vrognas-nonmem — Agent guidelines
 
 These rules apply to AI coding agents (Claude, Copilot, Codex, etc.) working in this
 repository. They mirror `CLAUDE.md` but in a tool-neutral form.

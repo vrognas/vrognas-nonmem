@@ -5,7 +5,7 @@
 
 export const EXTENSION_ID = 'vrognas.nonmem';
 
-export const OUTPUT_CHANNEL_NAME = 'Positron NONMEM';
+export const OUTPUT_CHANNEL_NAME = 'NONMEM';
 
 export const COMMAND = {
   runModel: 'nonmem.runModel',
