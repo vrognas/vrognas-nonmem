@@ -43,7 +43,7 @@ export class ActiveRunsTreeProvider implements vscode.TreeDataProvider<ActiveRun
     item.iconPath = iconFor(run.state);
     item.description = describe(run);
     item.tooltip = tooltip(run);
-    item.contextValue = `positronNonmem.activeRun.${run.state}`;
+    item.contextValue = `nonmem.activeRun.${run.state}`;
     // All entries route through one command keyed by run id; the handler
     // dispatches by state (running → live OUTPUT; done → final .lst;
     // failed → toast with parsed error). Keeps the tree provider

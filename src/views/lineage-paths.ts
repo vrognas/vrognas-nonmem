@@ -1,5 +1,5 @@
 // Path-format helpers for the workspace settings that persist lineage
-// state (`positronNonmem.lineageOverrides`, `positronNonmem.lineages`).
+// state (`nonmem.lineageOverrides`, `nonmem.lineages`).
 //
 // Storage policy: write workspace-relative when the absolute path lives
 // inside a workspace folder; fall back to absolute otherwise. Reads

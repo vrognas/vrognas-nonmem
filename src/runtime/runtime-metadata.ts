@@ -47,7 +47,7 @@ export function buildRuntimeMetadata(deps: BuildMetadataDeps): positron.Language
   );
   return {
     runtimePath,
-    runtimeId: `positron-nonmem-${idTag}`,
+    runtimeId: `nonmem-${idTag}`,
     runtimeName: `NONMEM ${version}${nameSuffix}`,
     runtimeShortName: `NONMEM ${version}`,
     runtimeVersion: '0.0.1',

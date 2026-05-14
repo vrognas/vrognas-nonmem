@@ -30,7 +30,7 @@ export interface RelationActionDeps {
   /** Currently-active named lineage; the sentinel empty string means "All Runs". */
   currentLineage: string;
   /**
-   * Snapshot of `positronNonmem.lineages` read once per dispatch by the
+   * Snapshot of `nonmem.lineages` read once per dispatch by the
    * panel. Threading it through deps keeps `priorityPathsForLineage`
    * pure and avoids 2-3 independent `readNamedLineages()` round-trips
    * for a single action that touches both pickers and lineage edits.
@@ -46,7 +46,7 @@ interface PickedRun {
 }
 
 /**
- * Write `positronNonmem.lineageOverrides[childPath] = parentPath`
+ * Write `nonmem.lineageOverrides[childPath] = parentPath`
  * (or `null` for "make this a root"). Shared write path for all
  * three relation-edit entry points: `setParent` QuickPick,
  * `createRelation` two-step picker, and drag-to-drop.

@@ -1,8 +1,8 @@
 {
-  "name": "positron-nonmem",
-  "displayName": "Positron NONMEM",
+  "name": "nonmem",
+  "displayName": "NONMEM",
   "description": "NONMEM as a first-class Positron language runtime: local nmfe76 execution (or via Positron Remote SSH), run history tree, and pharmacometric workbench features. Companion to the vscode-nmtran language extension.",
-  "version": "0.0.234",
+  "version": "0.0.235",
   "publisher": "vrognas",
   "license": "MIT",
   "private": true,
@@ -33,98 +33,98 @@
     ],
     "commands": [
       {
-        "command": "positronNonmem.runModel",
-        "title": "Positron NONMEM: Run Current Model",
+        "command": "nonmem.runModel",
+        "title": "NONMEM: Run Current Model",
         "icon": "$(play)"
       },
       {
-        "command": "positronNonmem.showNmtranParsedModel",
-        "title": "Positron NONMEM: Show NMTRAN Parsed Model (Debug)"
+        "command": "nonmem.showNmtranParsedModel",
+        "title": "NONMEM: Show NMTRAN Parsed Model (Debug)"
       },
       {
-        "command": "positronNonmem.refreshRuns",
-        "title": "Positron NONMEM: Refresh Runs",
+        "command": "nonmem.refreshRuns",
+        "title": "NONMEM: Refresh Runs",
         "icon": "$(refresh)"
       },
       {
-        "command": "positronNonmem.openRun",
-        "title": "Positron NONMEM: Open Active Run"
+        "command": "nonmem.openRun",
+        "title": "NONMEM: Open Active Run"
       },
       {
-        "command": "positronNonmem.promoteEstimates",
-        "title": "Positron NONMEM: Promote Estimates to New Model"
+        "command": "nonmem.promoteEstimates",
+        "title": "NONMEM: Promote Estimates to New Model"
       },
       {
-        "command": "positronNonmem.showLineage",
-        "title": "Positron NONMEM: Show Run Lineage",
+        "command": "nonmem.showLineage",
+        "title": "NONMEM: Show Run Lineage",
         "icon": "$(type-hierarchy)"
       },
       {
-        "command": "positronNonmem.signalEndMode",
-        "title": "Positron NONMEM: End Current EM Mode (next.sig)"
+        "command": "nonmem.signalEndMode",
+        "title": "NONMEM: End Current EM Mode (next.sig)"
       },
       {
-        "command": "positronNonmem.signalStopRun",
-        "title": "Positron NONMEM: Stop Run Cleanly (stop.sig)"
+        "command": "nonmem.signalStopRun",
+        "title": "NONMEM: Stop Run Cleanly (stop.sig)"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "positronNonmem.showLineage",
-          "when": "view == positronNonmem.runs",
+          "command": "nonmem.showLineage",
+          "when": "view == nonmem.runs",
           "group": "navigation@1"
         },
         {
-          "command": "positronNonmem.refreshRuns",
-          "when": "view == positronNonmem.runs",
+          "command": "nonmem.refreshRuns",
+          "when": "view == nonmem.runs",
           "group": "navigation@2"
         }
       ],
       "view/item/context": [
         {
-          "command": "positronNonmem.promoteEstimates",
-          "when": "view == positronNonmem.activeRuns && viewItem == positronNonmem.activeRun.done",
+          "command": "nonmem.promoteEstimates",
+          "when": "view == nonmem.activeRuns && viewItem == nonmem.activeRun.done",
           "group": "modification@1"
         },
         {
-          "command": "positronNonmem.signalEndMode",
-          "when": "view == positronNonmem.activeRuns && viewItem == positronNonmem.activeRun.running",
+          "command": "nonmem.signalEndMode",
+          "when": "view == nonmem.activeRuns && viewItem == nonmem.activeRun.running",
           "group": "signals@1"
         },
         {
-          "command": "positronNonmem.signalStopRun",
-          "when": "view == positronNonmem.activeRuns && viewItem == positronNonmem.activeRun.running",
+          "command": "nonmem.signalStopRun",
+          "when": "view == nonmem.activeRuns && viewItem == nonmem.activeRun.running",
           "group": "signals@2"
         }
       ],
       "editor/title/run": [
         {
-          "command": "positronNonmem.runModel",
+          "command": "nonmem.runModel",
           "when": "resourceExtname == .mod || resourceExtname == .ctl",
           "group": "navigation@1"
         },
         {
-          "command": "positronNonmem.showNmtranParsedModel",
+          "command": "nonmem.showNmtranParsedModel",
           "when": "resourceExtname == .mod || resourceExtname == .ctl",
           "group": "navigation@2"
         }
       ],
       "commandPalette": [
         {
-          "command": "positronNonmem.openRun",
+          "command": "nonmem.openRun",
           "when": "false"
         },
         {
-          "command": "positronNonmem.promoteEstimates",
+          "command": "nonmem.promoteEstimates",
           "when": "false"
         },
         {
-          "command": "positronNonmem.signalEndMode",
+          "command": "nonmem.signalEndMode",
           "when": "false"
         },
         {
-          "command": "positronNonmem.signalStopRun",
+          "command": "nonmem.signalStopRun",
           "when": "false"
         }
       ]
@@ -132,29 +132,29 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "positronNonmem",
+          "id": "nonmem",
           "title": "NONMEM",
           "icon": "media/nonmem-icon.svg"
         }
       ]
     },
     "views": {
-      "positronNonmem": [
+      "nonmem": [
         {
-          "id": "positronNonmem.activeRuns",
+          "id": "nonmem.activeRuns",
           "name": "Active Runs",
           "icon": "$(pulse)",
           "contextualTitle": "NONMEM Active Runs"
         },
         {
-          "id": "positronNonmem.runs",
+          "id": "nonmem.runs",
           "name": "Runs",
           "icon": "$(beaker)",
           "contextualTitle": "NONMEM Runs"
         },
         {
           "type": "webview",
-          "id": "positronNonmem.fitInspector",
+          "id": "nonmem.fitInspector",
           "name": "Fit Inspector",
           "icon": "$(symbol-parameter)",
           "contextualTitle": "NONMEM Fit Inspector"

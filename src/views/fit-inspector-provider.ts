@@ -32,7 +32,7 @@ import type { InspectorPayload } from './fit-inspector-payload';
 import { buildWebviewShell, sanitizeWebviewMessage } from './webview-shell';
 
 export class FitInspectorProvider implements vscode.WebviewViewProvider {
-  public static readonly viewType = 'positronNonmem.fitInspector';
+  public static readonly viewType = 'nonmem.fitInspector';
 
   private view: vscode.WebviewView | undefined;
   /** Most-recent payload we've been asked to render; replayed on view re-mount + on `ready`. */

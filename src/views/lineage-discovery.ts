@@ -102,7 +102,7 @@ export function findStaleOverrides(
  *
  * `restrictToModelPaths` (when set) filters the result to a curated
  * set of model paths — used by named sub-lineages
- * (`positronNonmem.lineages` setting) so only the user-included runs
+ * (`nonmem.lineages` setting) so only the user-included runs
  * appear in the panel. Unset (default) = include every discovered
  * run, capped at `MAX_NODES`.
  */
@@ -160,7 +160,7 @@ export async function discoverLineage(
 }
 
 /**
- * Read `positronNonmem.lineages` workspace setting. Shape:
+ * Read `nonmem.lineages` workspace setting. Shape:
  *   { "<name>": ["<rel-or-abs-path>", ...] }
  * Paths stored workspace-relative when possible (see `lineage-paths.ts`);
  * legacy absolute entries pass through. Both forms resolve to absolute
@@ -199,7 +199,7 @@ export function readLineageOfvThreshold(): number {
 }
 
 /**
- * Read `positronNonmem.lineageOverrides` workspace setting. Shape:
+ * Read `nonmem.lineageOverrides` workspace setting. Shape:
  *   { "<child-mod-path>": "<parent-mod-path>" | null }
  * Paths are stored workspace-relative when possible (privacy hygiene
  * — see `lineage-paths.ts`); legacy absolute entries pass through.

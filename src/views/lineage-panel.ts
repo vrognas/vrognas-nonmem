@@ -35,7 +35,7 @@ import { buildWebviewShell, sanitizeWebviewMessage } from './webview-shell';
 /** Special selector value meaning "show every run in the workspace". */
 const ALL_RUNS_SELECTION = '';
 
-const PANEL_VIEW_TYPE = 'positronNonmem.lineage';
+const PANEL_VIEW_TYPE = 'nonmem.lineage';
 const PANEL_TITLE = 'Run Lineage';
 
 export class LineagePanel {
@@ -335,7 +335,7 @@ export class LineagePanel {
       // Snapshot once per dispatch so the three downstream consumers
       // (pickRunFromGraph priorityPaths derivation, addToLineage's
       // existing-set, removeFromLineage's existing-set) all see the
-      // same view of `positronNonmem.lineages` and avoid 2-3 separate
+      // same view of `nonmem.lineages` and avoid 2-3 separate
       // `getConfiguration(...).get(...)` round-trips per action.
       namedLineages: readNamedLineages(),
       refresh: () => this.refresh(),
@@ -344,7 +344,7 @@ export class LineagePanel {
 
   /**
    * Header `+ New lineage` button: prompt for a name, create an empty
-   * curated lineage in `positronNonmem.lineages`, switch to it.
+   * curated lineage in `nonmem.lineages`, switch to it.
    */
   private async newLineage(): Promise<void> {
     const existing = readNamedLineages();

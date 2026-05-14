@@ -85,7 +85,7 @@ function treeNodeToItem(node: RunsTreeNode): vscode.TreeItem {
     // the remote-FS prefix into any screenshot. RunDir already carries
     // `relativePath` (computed at discovery).
     item.tooltip = `${node.run.relativePath || node.run.primaryLst}\n${node.run.lstFiles.length} .lst file${node.run.lstFiles.length === 1 ? '' : 's'}`;
-    item.contextValue = 'positronNonmem.run';
+    item.contextValue = 'nonmem.run';
     item.resourceUri = vscode.Uri.file(node.run.dirPath);
     item.command = {
       command: 'vscode.open',
@@ -94,7 +94,7 @@ function treeNodeToItem(node: RunsTreeNode): vscode.TreeItem {
     };
   } else {
     // Pure folder: no command, no description, no tooltip beyond the label.
-    item.contextValue = 'positronNonmem.runFolder';
+    item.contextValue = 'nonmem.runFolder';
   }
   return item;
 }

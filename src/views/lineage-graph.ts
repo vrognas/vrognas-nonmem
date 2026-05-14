@@ -25,7 +25,7 @@
 
 /**
  * Default χ²₁,0.05 = 3.84. Significance threshold for nested 1-df ΔOFV
- * (Keizer 2013). User-configurable via `positronNonmem.lineageOfvThreshold`.
+ * (Keizer 2013). User-configurable via `nonmem.lineageOfvThreshold`.
  * Exported so the lineage WebView's legend label can fall back to it
  * when no setting is provided.
  */
