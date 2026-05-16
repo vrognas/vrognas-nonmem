@@ -106,10 +106,10 @@ export function pollProgress(
     } catch {
       // Expected: psn.ext doesn't exist yet, or got cleaned up post-run.
     }
-    if (!stopped) timer = setTimeout(tick, intervalMs);
+    if (!stopped) timer = setTimeout(() => void tick(), intervalMs);
   }
 
-  timer = setTimeout(tick, intervalMs);
+  timer = setTimeout(() => void tick(), intervalMs);
   return {
     stop(): void {
       stopped = true;
