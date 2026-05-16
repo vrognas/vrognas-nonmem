@@ -2,7 +2,7 @@
   "name": "nonmem",
   "displayName": "NONMEM",
   "description": "NONMEM as a first-class Positron language runtime: local nmfe76 execution (or via Positron Remote SSH), run history tree, and pharmacometric workbench features. Companion to the vscode-nmtran language extension.",
-  "version": "0.0.238",
+  "version": "0.0.239",
   "publisher": "vrognas",
   "license": "MIT",
   "private": true,
