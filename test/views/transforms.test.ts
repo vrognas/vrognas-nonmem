@@ -2,6 +2,7 @@
 // The file is loaded as a plain `<script>` in the inspector but
 // dual-exports for Node so vitest can import its public functions.
 import { describe, it, expect } from 'vitest';
+// prettier-ignore
 // @ts-expect-error — plain JS file with module.exports guard
 import { matrixIsDiagonal, buildDiagBaseValues, transformValue } from '../../media/fit-inspector/transforms.js';
 
@@ -81,9 +82,31 @@ describe('transformValue', () => {
     // Missing diagonal:
     expect(transformValue(0.03, 'omega', 'OMEGA(2,1)', new Map([[1, 0.04]]), sqrt)).toBeNull();
     // Zero diagonal:
-    expect(transformValue(0.03, 'omega', 'OMEGA(2,1)', new Map([[1, 0], [2, 0.09]]), sqrt)).toBeNull();
+    expect(
+      transformValue(
+        0.03,
+        'omega',
+        'OMEGA(2,1)',
+        new Map([
+          [1, 0],
+          [2, 0.09],
+        ]),
+        sqrt,
+      ),
+    ).toBeNull();
     // Negative diagonal:
-    expect(transformValue(0.03, 'omega', 'OMEGA(2,1)', new Map([[1, -0.04], [2, 0.09]]), sqrt)).toBeNull();
+    expect(
+      transformValue(
+        0.03,
+        'omega',
+        'OMEGA(2,1)',
+        new Map([
+          [1, -0.04],
+          [2, 0.09],
+        ]),
+        sqrt,
+      ),
+    ).toBeNull();
   });
 
   it('handles non-finite input by returning null', () => {

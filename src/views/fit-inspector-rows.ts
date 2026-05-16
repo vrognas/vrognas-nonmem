@@ -154,7 +154,15 @@ export function pairNumSigDig(
  * variance-form row and the client never reads it).
  */
 export function buildThetaRow(
-  t: { index: number; init: number; lower?: number | null; upper?: number | null; fix: boolean; line?: number; comment?: string },
+  t: {
+    index: number;
+    init: number;
+    lower?: number | null;
+    upper?: number | null;
+    fix: boolean;
+    line?: number;
+    comment?: string;
+  },
   fit: ExtEstimates | null,
   numSigDigByName: Map<string, number>,
   label: string | null,

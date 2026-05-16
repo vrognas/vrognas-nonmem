@@ -30,10 +30,7 @@ import { ActiveRunsTreeProvider } from './views/active-runs-tree-provider';
 import { discoverRuns } from './views/runs-discovery';
 import { RunsTreeProvider } from './views/runs-tree-provider';
 import { FitInspectorProvider } from './views/fit-inspector-provider';
-import {
-  buildInspectorPayload,
-  INSPECTOR_THRESHOLD_DEFAULTS,
-} from './views/fit-inspector-payload';
+import { buildInspectorPayload, INSPECTOR_THRESHOLD_DEFAULTS } from './views/fit-inspector-payload';
 import { LineagePanel } from './views/lineage-panel';
 import { LstFileDecorationProvider } from './views/lst-decoration-provider';
 
@@ -281,9 +278,7 @@ async function resolveNmVersions(channel: vscode.OutputChannel): Promise<NmVersi
         );
       }
     } catch {
-      channel.appendLine(
-        `[nonmem] dropped psn.conf entry '${entry.label}' (missing on disk).`,
-      );
+      channel.appendLine(`[nonmem] dropped psn.conf entry '${entry.label}' (missing on disk).`);
     }
   }
   return kept;
@@ -313,10 +308,9 @@ function registerLstDecorations(
   const provider = new LstFileDecorationProvider(runner, (msg) =>
     channel.appendLine(`[nonmem] ${msg}`),
   );
-  context.subscriptions.push(
-    vscode.window.registerFileDecorationProvider(provider),
-    { dispose: () => provider.dispose() },
-  );
+  context.subscriptions.push(vscode.window.registerFileDecorationProvider(provider), {
+    dispose: () => provider.dispose(),
+  });
   channel.appendLine('[nonmem] registered .lst file-decoration provider.');
 }
 
@@ -388,8 +382,9 @@ function runCurrentModel(): void {
       const exit = result.exitCode ?? 'unknown';
       const ofv = result.ofv !== null ? `, OFV=${result.ofv}` : '';
       log(`runModel: EXIT=${exit}${ofv} -> ${path.basename(result.lstPath)}`);
-      if (result.modelfitDir)
+      if (result.modelfitDir) {
         log(`runModel: aux files in ${path.basename(result.modelfitDir)}`);
+      }
       reconcileCompletion(activeRunsTracker, {
         modelPath,
         dispatchedAt,
@@ -600,7 +595,9 @@ async function sendSignalCommand(
           `use "End current EM mode" to advance through them instead.`;
       }
     } catch (e) {
-      log(`${signal}: read ${arg.modelPath} failed (${errMsg(e)}) — proceeding without multi-$EST warning`);
+      log(
+        `${signal}: read ${arg.modelPath} failed (${errMsg(e)}) — proceeding without multi-$EST warning`,
+      );
     }
   }
 

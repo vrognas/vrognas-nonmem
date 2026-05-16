@@ -35,11 +35,7 @@ function pathOf(runNumber: number): string {
 
 describe('buildLineageGraph', () => {
   it('builds a 3-node chain (1→2→3) with Keizer-2013 edge colors', () => {
-    const g = buildLineageGraph([
-      input(1, 4612.4, null),
-      input(2, 4598.7, 1),
-      input(3, 4596.0, 2),
-    ]);
+    const g = buildLineageGraph([input(1, 4612.4, null), input(2, 4598.7, 1), input(3, 4596.0, 2)]);
 
     expect(g.nodes.length).toBe(3);
     expect(g.edges.length).toBe(2);
@@ -83,22 +79,14 @@ describe('buildLineageGraph', () => {
   });
 
   it('multiple children of the same parent each get their own edge with own color', () => {
-    const g = buildLineageGraph([
-      input(1, 4612.4, null),
-      input(2, 4598.7, 1),
-      input(3, 4617.9, 1),
-    ]);
+    const g = buildLineageGraph([input(1, 4612.4, null), input(2, 4598.7, 1), input(3, 4617.9, 1)]);
     expect(g.edges.length).toBe(2);
     expect(new Set(g.edges.map((e) => e.color))).toEqual(new Set(['green', 'red']));
     expect(g.roots).toEqual([pathOf(1)]);
   });
 
   it('boundary: ΔOFV ≥ +3.84 → red, ≤ -3.84 → green; |Δ|<3.84 → yellow (Keizer 2013)', () => {
-    const g = buildLineageGraph([
-      input(1, 100, null),
-      input(2, 103.84, 1),
-      input(3, 103.83, 1),
-    ]);
+    const g = buildLineageGraph([input(1, 100, null), input(2, 103.84, 1), input(3, 103.83, 1)]);
     expect(g.edges.find((e) => e.childModelPath === pathOf(2))!.color).toBe('red');
     expect(g.edges.find((e) => e.childModelPath === pathOf(3))!.color).toBe('yellow');
   });

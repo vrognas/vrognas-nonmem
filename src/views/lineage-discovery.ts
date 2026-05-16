@@ -24,18 +24,13 @@ import { parseLst } from '../runtime/parse-lst';
 import { parseRunrecord } from '../runtime/parse-runrecord';
 import { extractRunNumber } from '../runtime/promote-estimates';
 import { fromSettingPath } from './lineage-paths';
-import {
-  buildLineageGraph,
-  type LineageGraph,
-  type LineageNodeInput,
-} from './lineage-graph';
+import { buildLineageGraph, type LineageGraph, type LineageNodeInput } from './lineage-graph';
 
 const LST_GLOB = '**/*.lst';
 // Skip PsN's internal working directories — `modelfit_dir<N>/NM_run<M>/psn.lst`
 // is NONMEM-internal scratch, not a user-facing run. Without this exclusion,
 // every fitted run produces a phantom `psn` node in the lineage view.
-const EXCLUDE_GLOB =
-  '{**/node_modules/**,**/.git/**,**/modelfit_dir*/NM_run*/**,**/NM_run*/**}';
+const EXCLUDE_GLOB = '{**/node_modules/**,**/.git/**,**/modelfit_dir*/NM_run*/**,**/NM_run*/**}';
 
 /** Defensive cap. Workspaces with thousands of fitted runs render
  *  poorly in cytoscape and the disk scans dominate. Truncate to the
@@ -94,7 +89,6 @@ export function findStaleOverrides(
   return stale;
 }
 
-
 /**
  * Workspace lineage walk. Scans for `.lst` files, resolves each to a
  * sibling `.mod`/`.ctl`, and loads its `LineageNodeInput`. Returns
@@ -116,9 +110,7 @@ export async function discoverLineage(
   // Cap before doing per-file work — pick the most-recent N by mtime.
   let candidates = lstUris.map((u) => u.fsPath);
   if (candidates.length > MAX_NODES) {
-    const stats = await Promise.all(
-      candidates.map(async (p) => ({ p, m: await safeMtimeMs(p) })),
-    );
+    const stats = await Promise.all(candidates.map(async (p) => ({ p, m: await safeMtimeMs(p) })));
     stats.sort((a, b) => b.m - a.m);
     candidates = stats.slice(0, MAX_NODES).map((s) => s.p);
     log(
@@ -169,8 +161,7 @@ export async function discoverLineage(
 export function readNamedLineages(): Map<string, string[]> {
   try {
     const raw =
-      vscode.workspace.getConfiguration('nonmem').get<Record<string, string[]>>('lineages') ??
-      {};
+      vscode.workspace.getConfiguration('nonmem').get<Record<string, string[]>>('lineages') ?? {};
     const out = new Map<string, string[]>();
     for (const [name, paths] of Object.entries(raw)) {
       out.set(name, paths.map(fromSettingPath));
@@ -188,9 +179,7 @@ export function readNamedLineages(): Map<string, string[]> {
  */
 export function readLineageOfvThreshold(): number {
   try {
-    const v = vscode.workspace
-      .getConfiguration('nonmem')
-      .get<number>('lineageOfvThreshold');
+    const v = vscode.workspace.getConfiguration('nonmem').get<number>('lineageOfvThreshold');
     if (typeof v === 'number' && v > 0) return v;
   } catch {
     // fall through

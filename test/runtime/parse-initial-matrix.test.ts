@@ -1,8 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  parseInitialOmega,
-  parseInitialSigma,
-} from '../../src/runtime/parse-initial-matrix';
+import { parseInitialOmega, parseInitialSigma } from '../../src/runtime/parse-initial-matrix';
 
 // Captured verbatim from probe-signals/baseline/run001.lst on NONMEM
 // 7.6.0 (a $OMEGA BLOCK(4) model). Confirms BLOCK off-diagonals are

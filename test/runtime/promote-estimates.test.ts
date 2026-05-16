@@ -42,7 +42,9 @@ describe('buildUpdateInitsCommand', () => {
     expect(cwd).toBe(path.dirname(modelPath));
     // Basename used as the positional arg (matches our `execute` invocation
     // pattern in run-model.ts) so PsN finds the sibling .lst.
-    expect(cmd).toBe(`${quote('update_inits')} ${quote('run001.mod')} -output_model=${quote('run002.mod')}`);
+    expect(cmd).toBe(
+      `${quote('update_inits')} ${quote('run001.mod')} -output_model=${quote('run002.mod')}`,
+    );
   });
 
   it('passes only the output basename to -output_model (PsN writes alongside the input)', () => {

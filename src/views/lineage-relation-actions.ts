@@ -269,10 +269,7 @@ export async function writeLineages(map: Map<string, string[]>): Promise<void> {
  * scrubbed before display because PsN stderr can carry hostnames /
  * user paths.
  */
-export async function promoteFromPath(
-  deps: RelationActionDeps,
-  modelPath: string,
-): Promise<void> {
+export async function promoteFromPath(deps: RelationActionDeps, modelPath: string): Promise<void> {
   const defaultPath = computeNextModelName(modelPath);
   const defaultBase = path.basename(defaultPath);
   const newName = await vscode.window.showInputBox({

@@ -28,8 +28,14 @@ const BARE_BASELINE = {
 };
 describe('resolveCovAttrToRuntime', () => {
   const noTrace = {
-    baseNrd: null, baseAnrd: null, estNrd: null, estAnrd: null,
-    covNrd: null, covAnrd: null, siglo: null, sigl: null,
+    baseNrd: null,
+    baseAnrd: null,
+    estNrd: null,
+    estAnrd: null,
+    covNrd: null,
+    covAnrd: null,
+    siglo: null,
+    sigl: null,
   };
 
   it('atol=-1: resolves via lstTolerances.covAnrd', async () => {
@@ -63,7 +69,9 @@ describe('resolveCovAttrToRuntime', () => {
   it('file=BLANK: resolves via $EST file (SIR-active case)', async () => {
     const { resolveCovAttrToRuntime } = await import('../../src/runtime/xml-cov-defaults');
     const lastEst = { file: 'run001.ext', estimation_method: '' };
-    expect(resolveCovAttrToRuntime('file', 'BLANK', lastEst, noTrace, 'classical')).toBe('run001.ext');
+    expect(resolveCovAttrToRuntime('file', 'BLANK', lastEst, noTrace, 'classical')).toBe(
+      'run001.ext',
+    );
   });
 
   it('ranmethod=BLANK: resolves to documented default "3"', async () => {
@@ -79,7 +87,9 @@ describe('resolveCovAttrToRuntime', () => {
 
   it('unknown sentinel-bearing key returns null', async () => {
     const { resolveCovAttrToRuntime } = await import('../../src/runtime/xml-cov-defaults');
-    expect(resolveCovAttrToRuntime('hypothetical_attr', '-1', null, noTrace, 'classical')).toBeNull();
+    expect(
+      resolveCovAttrToRuntime('hypothetical_attr', '-1', null, noTrace, 'classical'),
+    ).toBeNull();
   });
 });
 
@@ -124,8 +134,12 @@ describe('classifyCovStep (v0.0.185+ unified tier scheme)', () => {
 
   it('alias-aware: SLOW/NOSLOW/FAST tokens → explicit on cov_slow_gradient', async () => {
     const { classifyCovStep } = await import('../../src/runtime/xml-cov-defaults');
-    expect(classifyCovStep({ ...BARE, slow_gradient: 'slow' }, ['SLOW']).slow_gradient).toBe('explicit');
-    expect(classifyCovStep({ ...BARE, slow_gradient: 'fast' }, ['FAST']).slow_gradient).toBe('explicit');
+    expect(classifyCovStep({ ...BARE, slow_gradient: 'slow' }, ['SLOW']).slow_gradient).toBe(
+      'explicit',
+    );
+    expect(classifyCovStep({ ...BARE, slow_gradient: 'fast' }, ['FAST']).slow_gradient).toBe(
+      'explicit',
+    );
   });
 
   it('alias-aware: PRINT=E token → explicit on cov_eigen_print', async () => {

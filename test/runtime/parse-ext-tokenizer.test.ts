@@ -1,8 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  normalizeColumnName,
-  parseExtBlocks,
-} from '../../src/runtime/parse-ext-tokenizer';
+import { normalizeColumnName, parseExtBlocks } from '../../src/runtime/parse-ext-tokenizer';
 
 describe('normalizeColumnName', () => {
   it('rewrites THETA1 → THETA(1)', () => {

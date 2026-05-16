@@ -70,10 +70,7 @@ export function createCappedBuffer(maxChars: number): {
       }
     },
     finalize(): string {
-      return (
-        chunks.join('') +
-        (truncated ? `\n[output truncated at ${maxChars} chars]\n` : '')
-      );
+      return chunks.join('') + (truncated ? `\n[output truncated at ${maxChars} chars]\n` : '');
     },
   };
 }

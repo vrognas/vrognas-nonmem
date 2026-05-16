@@ -172,16 +172,20 @@ export class LineagePanel {
       const deps = this.actionDeps();
       if (m.action === 'promote') return promoteFromPath(deps, m.modelPath);
       if (m.action === 'setParent') return setParent(deps, m.modelPath, m.basename ?? '');
-      if (m.action === 'createRelation')
+      if (m.action === 'createRelation') {
         return createRelation(deps, m.modelPath, m.basename ?? '');
-      if (m.action === 'setParentDirect' && typeof m.parentModelPath === 'string')
+      }
+      if (m.action === 'setParentDirect' && typeof m.parentModelPath === 'string') {
         return writeOverride(deps, m.modelPath, m.parentModelPath, m.basename ?? '');
-      if (m.action === 'addToLineage')
+      }
+      if (m.action === 'addToLineage') {
         return addToLineage(deps, m.modelPath, m.basename ?? '', (name) => {
           this.currentLineage = name;
         });
-      if (m.action === 'removeFromLineage')
+      }
+      if (m.action === 'removeFromLineage') {
         return removeFromLineage(deps, m.modelPath, m.basename ?? '');
+      }
     } else if (m.type === 'refresh') {
       void this.refresh();
     } else if (m.type === 'ready') {
@@ -287,15 +291,14 @@ export class LineagePanel {
    * `vscode.window.showTextDocument` entirely. Falls back to opening
    * the `.mod` only when the run has no `.lst` to inspect.
    */
-  private async activateInspectorForRun(
-    modelPath: string,
-    lstPath: string | null,
-  ): Promise<void> {
+  private async activateInspectorForRun(modelPath: string, lstPath: string | null): Promise<void> {
     if (lstPath) {
       try {
         await this.showInInspector(lstPath);
       } catch (e) {
-        this.log(`lineage-panel: showInInspector failed for ${path.basename(lstPath)}: ${errMsg(e)}`);
+        this.log(
+          `lineage-panel: showInInspector failed for ${path.basename(lstPath)}: ${errMsg(e)}`,
+        );
       }
       return;
     }

@@ -224,11 +224,7 @@ export function buildLineageGraph(
         ? lookupParent(i, byPath, pathByRunNumber)
         : undefined;
     if (!parent) {
-      if (
-        hasParentRef &&
-        !onCycle.has(i.modelPath) &&
-        !isForceRootOverride
-      ) {
+      if (hasParentRef && !onCycle.has(i.modelPath) && !isForceRootOverride) {
         unresolvedParentCount++;
       }
       roots.push(i.modelPath);

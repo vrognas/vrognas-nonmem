@@ -22,12 +22,7 @@ $ESTIMATE METHOD=IMP
 $ESTM METHOD=ITS`;
     const records = parseLstEstRecords(stream);
     expect(records).toHaveLength(4);
-    expect(records.map((r) => r.keyword)).toEqual([
-      '$EST',
-      '$ESTIMATION',
-      '$ESTIMATE',
-      '$ESTM',
-    ]);
+    expect(records.map((r) => r.keyword)).toEqual(['$EST', '$ESTIMATION', '$ESTIMATE', '$ESTM']);
   });
 
   it('joins continuation lines into a single record body', () => {
@@ -41,7 +36,12 @@ $COVARIANCE`;
     const records = parseLstEstRecords(stream);
     expect(records).toHaveLength(1);
     expect(records[0].tokens).toEqual([
-      'METHOD=SAEM', 'AUTO=1', 'NITER=1000', 'NBURN=4000', 'ISAMPLE=2', 'CTYPE=3',
+      'METHOD=SAEM',
+      'AUTO=1',
+      'NITER=1000',
+      'NBURN=4000',
+      'ISAMPLE=2',
+      'CTYPE=3',
     ]);
   });
 

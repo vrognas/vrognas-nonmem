@@ -104,7 +104,7 @@ describe('buildEstAttrCell — NOABORT/NOHABORT disambiguation', () => {
     expect(r.tip).toContain('same as NOHABORT');
   });
 
-  it("abort=no without either user-token → ambiguity note appended", () => {
+  it('abort=no without either user-token → ambiguity note appended', () => {
     const r = buildEstAttrCell({ ...baseCtx, k: 'abort' });
     expect(r.tip).toContain('shared by NOABORT and NOHABORT');
   });

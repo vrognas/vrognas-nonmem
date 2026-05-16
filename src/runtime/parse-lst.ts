@@ -138,11 +138,7 @@ const NUM_TOKEN_RE = /^[-+]?\d*\.?\d+(?:[eEdD][-+]?\d+)?$/;
 export type TerminationState = 'SUCCESSFUL' | 'TERMINATED' | 'NOT_TESTED';
 
 import { parseFortranNumber } from './parse-fortran-number';
-import {
-  parseInitialOmega,
-  parseInitialSigma,
-  type InitialMatrix,
-} from './parse-initial-matrix';
+import { parseInitialOmega, parseInitialSigma, type InitialMatrix } from './parse-initial-matrix';
 
 export interface LstSummary {
   /** Verbatim method label from the LAST `#METH:` (back-compat field). */
@@ -534,7 +530,9 @@ export function shortMethodLabel(method: string | null): string | null {
   const base = isEval ? m.replace(/\(evaluation\)/g, '').trim() : m;
   const suffix = isEval ? '-eval' : '';
   // Order matters: more-specific patterns first.
-  if (base.includes('first order conditional') && base.includes('interaction')) return 'FOCE-INTER' + suffix;
+  if (base.includes('first order conditional') && base.includes('interaction')) {
+    return 'FOCE-INTER' + suffix;
+  }
   if (base.includes('first order conditional')) return 'FOCE' + suffix;
   if (base.includes('iterative two stage')) return 'ITS' + suffix;
   if (base.includes('stochastic approximation')) return 'SAEM' + suffix;
@@ -560,7 +558,10 @@ export function shortMethodLabel(method: string | null): string | null {
   // displaying e.g. `monte carlo em-eval` instead of `Monte Carlo EM-eval`
   // would be uglier than matching the non-eval pass-through's casing.
   return isEval
-    ? method.replace(/\(evaluation\)/gi, '').replace(/\s+/g, ' ').trim() + '-eval'
+    ? method
+        .replace(/\(evaluation\)/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim() + '-eval'
     : method;
 }
 
@@ -668,9 +669,11 @@ function readEtabarBlock(lines: string[]): {
   let winEnd = Math.min(lines.length, etabarIdx + 30);
   for (let i = etabarIdx + 1; i < winEnd; i++) {
     const l = lines[i];
-    if (/^\s*STANDARD\s+ERROR\s+OF\s+ESTIMATE/i.test(l)
-        || /^\s*EIGENVALUES\s+OF\s+COR\s+MATRIX/i.test(l)
-        || /^\s*(OMEGA|SIGMA)\s+-\s+(COV|CORR)\s+MATRIX/i.test(l)) {
+    if (
+      /^\s*STANDARD\s+ERROR\s+OF\s+ESTIMATE/i.test(l) ||
+      /^\s*EIGENVALUES\s+OF\s+COR\s+MATRIX/i.test(l) ||
+      /^\s*(OMEGA|SIGMA)\s+-\s+(COV|CORR)\s+MATRIX/i.test(l)
+    ) {
       winEnd = i;
       break;
     }

@@ -141,7 +141,11 @@ describe('ActiveRunsTracker', () => {
   // Bounded-history eviction (v0.0.200). The cap is private but
   // `TERMINAL_HISTORY_CAP = 100` per the source; we exceed it modestly.
   describe('evictOldestTerminals (terminal history cap)', () => {
-    function startAndComplete(tracker: ActiveRunsTracker, modelPath: string, finishedAt: number): string {
+    function startAndComplete(
+      tracker: ActiveRunsTracker,
+      modelPath: string,
+      finishedAt: number,
+    ): string {
       const id = tracker.start(modelPath);
       vi.useFakeTimers();
       vi.setSystemTime(finishedAt);

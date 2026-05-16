@@ -12,7 +12,9 @@ import * as vscode from 'vscode';
 import { COMMAND } from '../constants';
 import type { ActiveRun, ActiveRunsTracker } from '../runtime/active-runs-tracker';
 
-export class ActiveRunsTreeProvider implements vscode.TreeDataProvider<ActiveRun>, vscode.Disposable {
+export class ActiveRunsTreeProvider
+  implements vscode.TreeDataProvider<ActiveRun>, vscode.Disposable
+{
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
   /** Unsubscribe fn from `tracker.onDidChange` — vscode-free Listener pattern, not a vscode.Disposable. */

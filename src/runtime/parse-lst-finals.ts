@@ -104,21 +104,14 @@ export interface LstFinalEstimates {
 import type { ExtEstimates } from './parse-ext-fit';
 import { parseFortranNumber } from './parse-fortran-number';
 
-export function synthesizeFitFromLst(
-  lstText: string,
-  ofv: number | null,
-): ExtEstimates | null {
+export function synthesizeFitFromLst(lstText: string, ofv: number | null): ExtEstimates | null {
   const finals = parseLstFinals(lstText);
   if (!finals || ofv === null) return null;
   // Drop fixed-zero SE entries (NM emits `0.00E+00` for fixed params;
   // the `.ext` parser drops the all-zero SE row entirely with the same
   // rationale — display would mislead). Mirror that here.
   const ses = parseLstFinalsSe(lstText);
-  const allKeys = new Map<string, number>([
-    ...finals.thetas,
-    ...finals.omegas,
-    ...finals.sigmas,
-  ]);
+  const allKeys = new Map<string, number>([...finals.thetas, ...finals.omegas, ...finals.sigmas]);
   const seMerged = new Map<string, number>();
   if (ses) {
     for (const [k, v] of [...ses.thetas, ...ses.omegas, ...ses.sigmas]) {
@@ -178,7 +171,11 @@ function parseEstimateBlock(lstText: string, bannerRe: RegExp): LstFinalEstimate
       // Look ahead — if the next 2 lines contain a recognised banner
       // word, the block has ended.
       const ahead = lines.slice(i, Math.min(i + 4, lines.length)).join('\n');
-      if (/COVARIANCE MATRIX|EIGENVALUES|FINAL PARAMETER|STANDARD ERROR|CORRELATION MATRIX OF ESTIMATE/.test(ahead)) {
+      if (
+        /COVARIANCE MATRIX|EIGENVALUES|FINAL PARAMETER|STANDARD ERROR|CORRELATION MATRIX OF ESTIMATE/.test(
+          ahead,
+        )
+      ) {
         break;
       }
     }
@@ -221,10 +218,7 @@ function parseEstimateBlock(lstText: string, bannerRe: RegExp): LstFinalEstimate
  *
  * Returns the collected values + the cursor position past the section.
  */
-function consumeThetaSection(
-  lines: string[],
-  start: number,
-): { values: number[]; cursor: number } {
+function consumeThetaSection(lines: string[], start: number): { values: number[]; cursor: number } {
   const values: number[] = [];
   let sawHeader = false;
   let i = start;
@@ -361,7 +355,11 @@ function assignThetas(values: number[], target: Map<string, number>): void {
   }
 }
 
-function assignMatrix(prefix: 'OMEGA' | 'SIGMA', rows: MatrixRow[], target: Map<string, number>): void {
+function assignMatrix(
+  prefix: 'OMEGA' | 'SIGMA',
+  rows: MatrixRow[],
+  target: Map<string, number>,
+): void {
   for (const row of rows) {
     for (let col = 0; col < row.values.length; col++) {
       const v = row.values[col];

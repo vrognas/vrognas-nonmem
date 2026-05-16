@@ -108,7 +108,10 @@ export async function promoteEstimates(
     // paths, user@host markers, and license info. Surface the failure
     // without leaking private layout into the toast / Output channel.
     const detail = scrubPrivate(
-      [result.stdout, result.stderr].map((s) => s.trim()).filter(Boolean).join('\n'),
+      [result.stdout, result.stderr]
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .join('\n'),
     );
     throw new Error(`update_inits exited with code ${result.code}${detail ? `:\n${detail}` : ''}`);
   }

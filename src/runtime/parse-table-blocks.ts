@@ -48,10 +48,7 @@ export interface TableBlock {
  * contract as `parsePhi` / `parseCor` / `parseCnv` had before this
  * extraction).
  */
-export function parseTableBlocks(
-  text: string,
-  isHeader: (line: string) => boolean,
-): TableBlock[] {
+export function parseTableBlocks(text: string, isHeader: (line: string) => boolean): TableBlock[] {
   const blocks: TableBlock[] = [];
   let current: TableBlock | null = null;
 

@@ -15,15 +15,15 @@ describe('findDefaultsForStep', () => {
     const foceInter = findDefaultsForStep({ epseta_interaction: 'yes' });
     expect(focePlain).not.toBeNull();
     expect(foceInter).not.toBeNull();
-    expect(focePlain).toBe(foceInter);                          // same baseline reference
-    expect(focePlain!.epseta_interaction).toBe('no');           // FOCE default = no INTER
+    expect(focePlain).toBe(foceInter); // same baseline reference
+    expect(focePlain!.epseta_interaction).toBe('no'); // FOCE default = no INTER
   });
 
   it('routes IMP and IMP-EONLY to the same IMP baseline (eonly=1 is then a non-default diff)', () => {
     const imp = findDefaultsForStep({ estimation_method: 'imp', eonly: '0' });
     const eonly = findDefaultsForStep({ estimation_method: 'imp', eonly: '1' });
-    expect(imp).toBe(eonly);                                     // single baseline
-    expect(imp!.eonly).toBe('0');                                // canonical default
+    expect(imp).toBe(eonly); // single baseline
+    expect(imp!.eonly).toBe('0'); // canonical default
   });
 
   it('returns null for unknown methods (BAYES / NUTS / CHAIN not yet probed)', () => {
@@ -49,7 +49,7 @@ describe('findDefaultsForStep', () => {
     const fo = findDefaultsForStep({ epseta_interaction: 'no' });
     const foce = findDefaultsForStep({ cond_estim: 'yes', epseta_interaction: 'no' });
     const hybrid = findDefaultsForStep({ cond_estim: 'yes', etas_fixed_to_zero: '1' });
-    expect(fo!.cond_estim).toBeUndefined();          // FO doesn't have cond_estim
+    expect(fo!.cond_estim).toBeUndefined(); // FO doesn't have cond_estim
     expect(foce!.cond_estim).toBe('yes');
     expect(hybrid!.cond_estim).toBe('yes');
     // FOCE and HYBRID both cond_estim=yes; HYBRID is its own baseline.
@@ -79,11 +79,11 @@ describe('findNonDefaultKeys', () => {
       estimation_method: 'saem',
       analysis_type: 'pop',
       eonly: '0',
-      ctype: '3',                 // SAEM default is '0' -> flagged
-      iaccept: '0.5',              // SAEM default 0.4 -> flagged
-      isample_m1: '5',             // SAEM default '2' -> flagged
-      niter: '5000',               // user-driven (skipped)
-      seed: '12345',               // user-driven (skipped)
+      ctype: '3', // SAEM default is '0' -> flagged
+      iaccept: '0.5', // SAEM default 0.4 -> flagged
+      isample_m1: '5', // SAEM default '2' -> flagged
+      niter: '5000', // user-driven (skipped)
+      seed: '12345', // user-driven (skipped)
     };
     expect(findNonDefaultKeys(customised)).toEqual(['ctype', 'iaccept', 'isample_m1']);
   });
@@ -101,12 +101,12 @@ describe('findNonDefaultKeys', () => {
     expect(its!.calpha).toBe('5.000000000000000E-02');
   });
 
-  it('cinterval is in USER_DRIVEN_KEYS (defaults to PRINT, can\'t track via static baseline)', () => {
+  it("cinterval is in USER_DRIVEN_KEYS (defaults to PRINT, can't track via static baseline)", () => {
     // User dialing PRINT cascades to cinterval; we surface as green
     // rather than flag-blue based on a stale baseline.
     const customised: Record<string, string> = {
       estimation_method: 'saem',
-      cinterval: '10',  // would be wrong-flagged if treated as non-default
+      cinterval: '10', // would be wrong-flagged if treated as non-default
     };
     expect(findUserDrivenKeys(customised)).toContain('cinterval');
     expect(findNonDefaultKeys(customised)).not.toContain('cinterval');
@@ -183,7 +183,12 @@ describe('findUserDrivenKeys', () => {
       analysis_type: 'pop',
     };
     expect(findUserDrivenKeys(step)).toEqual([
-      'clockseed', 'estimation_method', 'isample', 'nburn', 'niter', 'seed',
+      'clockseed',
+      'estimation_method',
+      'isample',
+      'nburn',
+      'niter',
+      'seed',
     ]);
   });
 
@@ -254,7 +259,7 @@ describe('classifyEstStep (v0.0.181 tier scheme)', () => {
     expect(tiers.file).toBeUndefined();
   });
 
-  it('file: PsN-wrapped psn.ext flags as implicit (modeller didn\'t set, NM default would be run001.ext)', () => {
+  it("file: PsN-wrapped psn.ext flags as implicit (modeller didn't set, NM default would be run001.ext)", () => {
     const step = { estimation_method: 'saem', file: 'psn.ext' };
     const tiers = classifyEstStep(step, ['METHOD=SAEM'], 'run001.ext');
     expect(tiers.file).toBe('implicit');
@@ -266,7 +271,7 @@ describe('classifyEstStep (v0.0.181 tier scheme)', () => {
     expect(tiers.file).toBe('explicit');
   });
 
-  it('file: no expectedDefaultFile (mod-mode) → falls back to baseline; differs from \'run001.ext\' baseline → may flag implicit', () => {
+  it("file: no expectedDefaultFile (mod-mode) → falls back to baseline; differs from 'run001.ext' baseline → may flag implicit", () => {
     // Without lst path we can\'t derive the expected default; behaviour
     // degrades to: never matches the dynamic default, so flags implicit
     // when value differs from null. Document the degradation.
@@ -297,7 +302,18 @@ describe('deriveMethodKind', () => {
   // Imported alongside classifyEstStep above.
   it('em-method labels → "em"', async () => {
     const { deriveMethodKind } = await import('../../src/runtime/xml-est-defaults');
-    for (const m of ['imp', 'impmap', 'saem', 'its', 'direct', 'bayes', 'nuts', 'mcmc', 'chain', 'sir']) {
+    for (const m of [
+      'imp',
+      'impmap',
+      'saem',
+      'its',
+      'direct',
+      'bayes',
+      'nuts',
+      'mcmc',
+      'chain',
+      'sir',
+    ]) {
       expect(deriveMethodKind({ estimation_method: m })).toBe('em');
     }
   });

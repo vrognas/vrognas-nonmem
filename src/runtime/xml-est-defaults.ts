@@ -71,14 +71,40 @@ import type { EstimationOptionsStep } from './parse-xml-options';
 
 // Universal across all 8 methods (no method-specific values here).
 const COMMON: Readonly<Record<string, string>> = {
-  analysis_type: 'pop', atol: '0', ctype: '0', dercont: '0',
-  estim_omitted: 'no', etader: '0', etastype: '0', evalshrink: '0',
-  file: 'run001.ext', fnleta: '1', format: 's1pe12.5', knuthsumoff: '0',
-  lntwopi: '0', maxfn: '528', mceta: '0', msfo: 'no', nocov: '0',
-  nolabel: '0', noninfeta: '0', noprior: '0', notitle: '0', nsig: '3',
-  numder: '0', objsort: 'no', olntwopi: '0', optmap: '0', order: 'tsol',
-  predflag: '0', priorc: '0', saddle_hess: '0', saddle_reset: '0',
-  sigl: '100', siglo: '100', slow_gradient: 'noslow',
+  analysis_type: 'pop',
+  atol: '0',
+  ctype: '0',
+  dercont: '0',
+  estim_omitted: 'no',
+  etader: '0',
+  etastype: '0',
+  evalshrink: '0',
+  file: 'run001.ext',
+  fnleta: '1',
+  format: 's1pe12.5',
+  knuthsumoff: '0',
+  lntwopi: '0',
+  maxfn: '528',
+  mceta: '0',
+  msfo: 'no',
+  nocov: '0',
+  nolabel: '0',
+  noninfeta: '0',
+  noprior: '0',
+  notitle: '0',
+  nsig: '3',
+  numder: '0',
+  objsort: 'no',
+  olntwopi: '0',
+  optmap: '0',
+  order: 'tsol',
+  predflag: '0',
+  priorc: '0',
+  saddle_hess: '0',
+  saddle_reset: '0',
+  sigl: '100',
+  siglo: '100',
+  slow_gradient: 'noslow',
 };
 
 // Classical-conditional layer: METHOD=COND family (FOCE / FOCE-INTER /
@@ -285,7 +311,9 @@ export const USER_DRIVEN_KEYS: ReadonlySet<string> = new Set([
  * Returns null when the method isn't covered (BAYES, MAP-only modes,
  * NM 7.7+ additions). Caller then skips the diff highlighting.
  */
-export function findDefaultsForStep(step: EstimationOptionsStep): Readonly<Record<string, string>> | null {
+export function findDefaultsForStep(
+  step: EstimationOptionsStep,
+): Readonly<Record<string, string>> | null {
   const m = (step.estimation_method ?? '').toLowerCase();
   if (m === 'its') return ITS;
   if (m === 'imp') return IMP;
@@ -404,8 +432,16 @@ function userWroteAttr(attr: string, tokens: readonly string[]): boolean {
  * place the list lives.
  */
 export const EM_METHODS: ReadonlySet<string> = new Set([
-  'imp', 'impmap', 'saem', 'its', 'direct',
-  'bayes', 'nuts', 'mcmc', 'chain', 'sir',
+  'imp',
+  'impmap',
+  'saem',
+  'its',
+  'direct',
+  'bayes',
+  'nuts',
+  'mcmc',
+  'chain',
+  'sir',
 ]);
 
 /**

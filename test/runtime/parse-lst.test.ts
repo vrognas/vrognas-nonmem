@@ -438,8 +438,12 @@ $THETA 1
 
   it('shortMethodLabel handles `(Evaluation)` suffix from MAXEVAL=0 runs', () => {
     expect(shortMethodLabel('First Order (Evaluation)')).toBe('FO-eval');
-    expect(shortMethodLabel('First Order Conditional Estimation with Interaction (Evaluation)')).toBe('FOCE-INTER-eval');
-    expect(shortMethodLabel('Stochastic Approximation Expectation-Maximization (Evaluation)')).toBe('SAEM-eval');
+    expect(
+      shortMethodLabel('First Order Conditional Estimation with Interaction (Evaluation)'),
+    ).toBe('FOCE-INTER-eval');
+    expect(shortMethodLabel('Stochastic Approximation Expectation-Maximization (Evaluation)')).toBe(
+      'SAEM-eval',
+    );
     // No suffix when the (Evaluation) tag is absent:
     expect(shortMethodLabel('First Order')).toBe('FO');
     expect(shortMethodLabel('First Order Conditional Estimation')).toBe('FOCE');

@@ -175,8 +175,7 @@ export class ActiveRunsWatcher implements vscode.Disposable {
     // psn.mod handler matches the existing entry by id but doesn't update
     // it. Without this hoist, `perRunLst` would be null for those
     // entries, falling through to the overwritable top-level `.lst` path.
-    const modelfitDir =
-      run.modelfitDir ?? (await findLatestModelfitDir(path.dirname(lstPath)));
+    const modelfitDir = run.modelfitDir ?? (await findLatestModelfitDir(path.dirname(lstPath)));
     // Race: PsN copies the .lst back to the top-level dir BEFORE copying
     // it under modelfit_dir<N>/. If we mark completed on the top-level
     // event and store that path, a re-run overwrites this entry's

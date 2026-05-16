@@ -130,7 +130,9 @@ export function parseSumo(text: string): SumoSummary | null {
     // a field has its value.
     if (summary.ofv === null) summary.ofv = matchNumber(line, OFV_RE);
     if (summary.totalRuntime === null) summary.totalRuntime = matchString(line, RUNTIME_RE);
-    if (summary.estimationSeconds === null) summary.estimationSeconds = matchNumber(line, ESTTIME_RE);
+    if (summary.estimationSeconds === null) {
+      summary.estimationSeconds = matchNumber(line, ESTTIME_RE);
+    }
     if (summary.observations === null) summary.observations = matchInt(line, OBS_RE);
     if (summary.individuals === null) summary.individuals = matchInt(line, IND_RE);
     if (summary.conditionNumber === null) summary.conditionNumber = matchNumber(line, COND_RE);

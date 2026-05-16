@@ -225,8 +225,12 @@ function metaLineParts(lst: LstSummary, sumo: SumoSummary | null): string[] {
     }
     parts.push(s);
   }
-  if (typeof lst.sigDigits === 'number') parts.push(`sig-digits ${formatNumberCompact(lst.sigDigits)}`);
-  if (typeof lst.acceptanceRate === 'number') parts.push(`accept ${formatNumberCompact(lst.acceptanceRate)}`);
+  if (typeof lst.sigDigits === 'number') {
+    parts.push(`sig-digits ${formatNumberCompact(lst.sigDigits)}`);
+  }
+  if (typeof lst.acceptanceRate === 'number') {
+    parts.push(`accept ${formatNumberCompact(lst.acceptanceRate)}`);
+  }
   if (sumo && typeof sumo.conditionNumber === 'number') {
     parts.push(`cond ${formatNumberCompact(sumo.conditionNumber)}`);
   }

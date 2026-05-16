@@ -27,9 +27,7 @@ const MODELFIT_DIR_RE = /^modelfit_dir(\d+)$/;
  * `findExtFile` (cascades through all candidates) and
  * `findLatestModelfitDir` (just wants the top).
  */
-export async function listModelfitDirs(
-  dir: string,
-): Promise<{ n: number; path: string }[]> {
+export async function listModelfitDirs(dir: string): Promise<{ n: number; path: string }[]> {
   let entries: import('node:fs').Dirent[];
   try {
     entries = await fs.readdir(dir, { withFileTypes: true });
@@ -62,10 +60,7 @@ export async function findExtFile(lstPath: string): Promise<string | null> {
  * an arbitrary NONMEM artifact extension (`.phi`, `.cov`, `.shk`, …).
  * Returns null when neither layout has a `<basename><ext>` file.
  */
-export async function findArtifactFile(
-  lstPath: string,
-  ext: `.${string}`,
-): Promise<string | null> {
+export async function findArtifactFile(lstPath: string, ext: `.${string}`): Promise<string | null> {
   const dir = path.dirname(lstPath);
   const base = path.basename(lstPath, path.extname(lstPath));
   const fileName = `${base}${ext}`;

@@ -41,22 +41,13 @@ import {
   parseLstEstRecords,
   type RawEstRecord,
 } from '../runtime/parse-lst-est-records';
-import {
-  parseLstTolerances,
-  type LstTolerances,
-} from '../runtime/parse-lst-tolerances';
-import {
-  parseEstimationOptions,
-  type EstimationOptionsStep,
-} from '../runtime/parse-xml-options';
+import { parseLstTolerances, type LstTolerances } from '../runtime/parse-lst-tolerances';
+import { parseEstimationOptions, type EstimationOptionsStep } from '../runtime/parse-xml-options';
 import {
   parseCovarianceOptions,
   type CovarianceOptions,
 } from '../runtime/parse-xml-problem-options';
-import {
-  parseEstimationResults,
-  type EstimationStepResult,
-} from '../runtime/parse-xml-results';
+import { parseEstimationResults, type EstimationStepResult } from '../runtime/parse-xml-results';
 import type { ExtEstimates } from '../runtime/parse-ext-fit';
 import { parseLst, type LstSummary } from '../runtime/parse-lst';
 import { extractParameterLabels, type ParameterLabels } from '../runtime/parse-param-labels';
@@ -373,11 +364,7 @@ async function resolveLstMode(
   // file wasn't preserved — e.g. .lst-only export, file moved). Without
   // this fallback the Fit Inspector renders init-only columns even
   // though the .lst clearly has converged estimates.
-  const fit = extText
-    ? parseExtFit(extText)
-    : lst
-      ? synthesizeFitFromLst(lstText, lst.objv)
-      : null;
+  const fit = extText ? parseExtFit(extText) : lst ? synthesizeFitFromLst(lstText, lst.objv) : null;
   const trajectories = extText ? parseExtTrajectory(extText) : [];
   const xmlEstimationOptions = xmlText ? parseEstimationOptions(xmlText) : [];
   const xmlEstimationResults = xmlText ? parseEstimationResults(xmlText) : [];
@@ -585,7 +572,9 @@ async function loadRunrecordFromText(
     const ctrl = extractControlStream(lstText);
     if (!ctrl) return null;
     const rr = parseRunrecord(ctrl);
-    log(`runrecord (from .lst): basedOn=${rr.basedOn ?? '—'} tags=${[...rr.tags.keys()].join(',') || '—'}`);
+    log(
+      `runrecord (from .lst): basedOn=${rr.basedOn ?? '—'} tags=${[...rr.tags.keys()].join(',') || '—'}`,
+    );
     return rr;
   });
 }

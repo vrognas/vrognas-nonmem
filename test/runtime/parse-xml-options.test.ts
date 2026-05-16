@@ -55,7 +55,7 @@ describe('parseEstimationOptions', () => {
     expect(parseEstimationOptions('<nm:output></nm:output>')).toEqual([]);
   });
 
-  it("rejects rather than truncates when a value contains a > char (defensive)", () => {
+  it('rejects rather than truncates when a value contains a > char (defensive)', () => {
     // NM7 doesn't emit such values empirically, but the regex must
     // not silently produce a truncated attribute dictionary on
     // unexpected input. With `[^>]*?` the whole element is rejected;

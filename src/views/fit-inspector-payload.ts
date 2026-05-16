@@ -571,7 +571,11 @@ export function buildInspectorPayload(
 
   // Label fallback: our own extraction overrides vscode-nmtran's
   // unreliable `.comment`; if our map has no entry, fall back to it.
-  const pickLabel = (kind: 'thetas' | 'omegas' | 'sigmas', idx: number, fallback?: string): string | null => {
+  const pickLabel = (
+    kind: 'thetas' | 'omegas' | 'sigmas',
+    idx: number,
+    fallback?: string,
+  ): string | null => {
     return ctx.parameterLabels?.[kind].get(idx) ?? fallback ?? null;
   };
   // Prior-lookup maps: keyed by 1-based parameter index. Defined once
@@ -579,13 +583,7 @@ export function buildInspectorPayload(
   const priors = buildPriorMaps(model);
 
   const thetas: InspectorRow[] = filteredThetas.map((t) =>
-    buildThetaRow(
-      t,
-      fit,
-      numSigDigByName,
-      pickLabel('thetas', t.index, t.comment),
-      priors.theta,
-    ),
+    buildThetaRow(t, fit, numSigDigByName, pickLabel('thetas', t.index, t.comment), priors.theta),
   );
 
   // .lst-parsed initial-matrix maps (NONMEM-authoritative, includes
@@ -636,8 +634,14 @@ export function buildInspectorPayload(
           lstEstRecords: ctx.lstEstRecords ?? [],
           lstCovRecord: ctx.lstCovRecord ?? null,
           lstTolerances: ctx.lstTolerances ?? {
-            baseNrd: null, baseAnrd: null, estNrd: null, estAnrd: null,
-            covNrd: null, covAnrd: null, siglo: null, sigl: null,
+            baseNrd: null,
+            baseAnrd: null,
+            estNrd: null,
+            estAnrd: null,
+            covNrd: null,
+            covAnrd: null,
+            siglo: null,
+            sigl: null,
           },
           hasOde: ctx.hasOde ?? false,
           hasLevel: ctx.hasLevel ?? false,
@@ -701,5 +705,3 @@ function buildRunNotes(rr: RunrecordTags): InspectorRunNotes | null {
   }
   return { basedOn: rr.basedOn, description, label, extra };
 }
-
-

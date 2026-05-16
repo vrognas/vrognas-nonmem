@@ -75,4 +75,3 @@ export function lastCorTable(text: string): CorTable | null {
   const tables = parseCor(text);
   return tables.length > 0 ? tables[tables.length - 1] : null;
 }
-

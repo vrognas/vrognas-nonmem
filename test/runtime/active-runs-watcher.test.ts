@@ -108,4 +108,3 @@ describe('findCallingCwd', () => {
     expect(await findCallingCwd(modelfitDir, 'run001.mod', 10)).toBe(tmp);
   });
 });
-

@@ -284,10 +284,7 @@ describe('loadEdgeIOfvSummary (fs shell)', () => {
       );
       await fs.writeFile(
         childPath,
-        phiText(
-          [[1, 95]],
-          'First Order Conditional Estimation with Interaction (Evaluation)',
-        ),
+        phiText([[1, 95]], 'First Order Conditional Estimation with Interaction (Evaluation)'),
       );
       const r = await loadEdgeIOfvSummary(parentPath, childPath, 3.84);
       expect(r.incomparableReason).toBeNull();

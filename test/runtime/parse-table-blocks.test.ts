@@ -25,9 +25,7 @@ describe('parseTableBlocks', () => {
 
   it('returns a block with null headerTokens when no header line matches', () => {
     // Truncated file: TABLE header but no ITERATION column row arrived.
-    const text =
-      'TABLE NO.  1: SAEM: Problem=1\n' +
-      '          0   1.0000E+00   100.0\n';
+    const text = 'TABLE NO.  1: SAEM: Problem=1\n' + '          0   1.0000E+00   100.0\n';
 
     const blocks = parseTableBlocks(text, (l) => /^ITERATION\b/i.test(l));
 

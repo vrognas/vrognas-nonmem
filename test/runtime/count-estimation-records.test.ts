@@ -4,9 +4,7 @@ import { countEstimationRecords } from '../../src/runtime/count-estimation-recor
 describe('countEstimationRecords', () => {
   it('counts a single $EST record', () => {
     expect(
-      countEstimationRecords(
-        '$PROBLEM foo\n$EST METHOD=COND INTER MAXEVAL=99999 NSIG=3\n$COV\n',
-      ),
+      countEstimationRecords('$PROBLEM foo\n$EST METHOD=COND INTER MAXEVAL=99999 NSIG=3\n$COV\n'),
     ).toBe(1);
   });
 

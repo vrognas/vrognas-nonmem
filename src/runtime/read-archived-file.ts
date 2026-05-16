@@ -48,16 +48,12 @@ export async function extract7zMember(opts: {
   try {
     const result = await opts.runner.run(cmd, opts.cwd);
     if (result.code !== 0) {
-      opts.log?.(
-        `7z extraction returned ${result.code} for ${path.basename(opts.archivePath)}`,
-      );
+      opts.log?.(`7z extraction returned ${result.code} for ${path.basename(opts.archivePath)}`);
       return null;
     }
     return result.stdout;
   } catch (e) {
-    opts.log?.(
-      `7z extraction threw for ${path.basename(opts.archivePath)}: ${errMsg(e)}`,
-    );
+    opts.log?.(`7z extraction threw for ${path.basename(opts.archivePath)}: ${errMsg(e)}`);
     return null;
   }
 }

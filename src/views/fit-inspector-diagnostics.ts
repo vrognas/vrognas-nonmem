@@ -13,11 +13,7 @@
 import type { CorTable } from '../runtime/parse-cor';
 import type { ExtEstimates } from '../runtime/parse-ext-fit';
 import type { EstimationOptionsStep } from '../runtime/parse-xml-options';
-import {
-  classifyEstStep,
-  deriveMethodKind,
-  type MethodKind,
-} from '../runtime/xml-est-defaults';
+import { classifyEstStep, deriveMethodKind, type MethodKind } from '../runtime/xml-est-defaults';
 import type { CovarianceOptions } from '../runtime/parse-xml-problem-options';
 import {
   classifyCovStep,
@@ -135,9 +131,8 @@ export function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnosti
   // Unified $COV tier-map (explicit/explicitDefault/implicit) — same
   // scheme as $EST. Drives the inspector's $COV coloring via .lst $COV
   // tokens (user-typed vs. not).
-  const lastEst = xmlEstimationOptions.length > 0
-    ? xmlEstimationOptions[xmlEstimationOptions.length - 1]
-    : null;
+  const lastEst =
+    xmlEstimationOptions.length > 0 ? xmlEstimationOptions[xmlEstimationOptions.length - 1] : null;
   const covTokens = lstCovRecord?.tokens ?? [];
   const xmlCovarianceTiers: Record<string, CovTier> = xmlCovarianceOptions
     ? classifyCovStep(xmlCovarianceOptions, covTokens)
@@ -145,12 +140,12 @@ export function buildDiagnostics(args: BuildDiagnosticsArgs): InspectorDiagnosti
   // Per-key wire→runtime resolution for $COV sentinels. The posdef
   // sentinel ('-1') resolves to 0 (classical) / 3 (EM) — collapse
   // the 4-way methodKind to binary for that lookup.
-  const lastEstMethodKind = xmlEstimationMethodKinds.length > 0
-    ? xmlEstimationMethodKinds[xmlEstimationMethodKinds.length - 1]
-    : null;
-  const methodKind: 'em' | 'classical' | null = lastEstMethodKind === null
-    ? null
-    : lastEstMethodKind === 'em' ? 'em' : 'classical';
+  const lastEstMethodKind =
+    xmlEstimationMethodKinds.length > 0
+      ? xmlEstimationMethodKinds[xmlEstimationMethodKinds.length - 1]
+      : null;
+  const methodKind: 'em' | 'classical' | null =
+    lastEstMethodKind === null ? null : lastEstMethodKind === 'em' ? 'em' : 'classical';
   const xmlCovarianceResolved: Record<string, string> = {};
   if (xmlCovarianceOptions) {
     for (const k of Object.keys(xmlCovarianceOptions)) {
