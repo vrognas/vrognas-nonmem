@@ -30,3 +30,8 @@ empirical-models/
 # editor cruft
 *.log
 .tsbuildinfo
+
+# bundled webview assets — regenerated at package time via vscode:prepublish
+# (esbuild builds webview-src/<panel>/client.ts -> media/<panel>/client.js)
+media/lineage/client.js
+media/lineage/client.js.map
