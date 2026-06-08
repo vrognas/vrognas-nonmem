@@ -2,10 +2,18 @@
   "name": "nonmem",
   "displayName": "NONMEM",
   "description": "NONMEM as a first-class Positron language runtime: local nmfe76 execution (or via Positron Remote SSH), run history tree, and pharmacometric workbench features. Companion to the vscode-nmtran language extension.",
-  "version": "0.0.239",
+  "version": "0.0.240",
   "publisher": "vrognas",
   "license": "MIT",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vrognas/vrognas-nonmem.git"
+  },
+  "bugs": {
+    "url": "https://github.com/vrognas/vrognas-nonmem/issues"
+  },
+  "homepage": "https://github.com/vrognas/vrognas-nonmem#readme",
   "engines": {
     "vscode": "^1.108.0",
     "positron": "^2025.11.0",

@@ -15,6 +15,20 @@ via `engines.positron`. Production deployments run Positron in
 against the NONMEM host so the extension host (and the NONMEM run) execute
 on the same machine; no in-extension SSH layer.
 
+## Install
+
+Positron-only. Install from inside Positron's **Extensions** pane (search
+"NONMEM"), or from the command line:
+
+```
+positron --install-extension vrognas.nonmem
+```
+
+Published to both the
+[Open VSX Registry](https://open-vsx.org/extension/vrognas/nonmem) — Positron's
+default gallery — and the
+[VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=vrognas.nonmem).
+
 ## Configure
 
 The extension reads `[nm_versions]` entries from PsN's own `psn.conf` via a

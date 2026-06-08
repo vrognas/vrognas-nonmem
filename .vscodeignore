@@ -7,6 +7,7 @@ webview-src/**
 .vscode-test/**
 
 # build / lint / format config
+.github/**
 esbuild.cjs
 eslint.config.*
 .prettierrc*
@@ -23,8 +24,23 @@ docs/**
 empirical-models/**
 .remember/**
 
+# local state / scratch / secrets — never ship (vsce ignores .gitignore once a
+# .vscodeignore exists, so these must be repeated here)
+.claude/**
+.tmp-*.mod
+.env
+.env.*
+.DS_Store
+coverage/**
+*.log
+.vrognas-nonmem/**
+.positron-nonmem/**
+
 # build artefacts and lockfiles
 *.vsix
 package-lock.json
 **/*.test.ts
 **/*.tsbuildinfo
+# source maps: production esbuild emits none, but stale dev-build maps linger
+# on disk — never ship them
+**/*.map
